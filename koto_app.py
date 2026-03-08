@@ -30,8 +30,8 @@ if getattr(sys, 'frozen', False):
     APP_ROOT = Path(sys.executable).parent
     BUNDLE_DIR = Path(sys._MEIPASS)
 else:
-    # 开发环境：两者相同
-    APP_ROOT = Path(__file__).parent
+    here = Path(__file__).resolve().parent
+    APP_ROOT = here.parent if here.name == 'src' else here
     BUNDLE_DIR = APP_ROOT
 
 os.chdir(str(APP_ROOT))
@@ -41,24 +41,40 @@ LOG_FILE = APP_ROOT / "logs" / "startup.log"
 RUNTIME_LOG_FILE = APP_ROOT / "logs" / f"runtime_{datetime.now().strftime('%Y%m%d')}.log"
 
 class DualOutput:
-    """同时输出到文件和控制台"""
+    """同时输出到文件和控制台 - 使用持久文件句柄，避免每次 write 都 open/close"""
     def __init__(self, original_stream, log_file):
         self.original_stream = original_stream
         self.log_file = log_file
+        self._file = None
+        self._lock = threading.Lock()
+        try:
+            self._file = open(log_file, "a", encoding="utf-8", errors="ignore", buffering=1)
+        except Exception:
+            pass
     
     def write(self, message):
         try:
             self.original_stream.write(message)
-            self.original_stream.flush() # 确保控制台及时输出
-            with open(self.log_file, "a", encoding="utf-8", errors="ignore") as f:
-                f.write(message)
+            if self._file:
+                with self._lock:
+                    self._file.write(message)
         except Exception:
             pass
-            
+    
     def flush(self):
         try:
             self.original_stream.flush()
-        except:
+            if self._file:
+                self._file.flush()
+        except Exception:
+            pass
+    
+    def close(self):
+        try:
+            if self._file:
+                self._file.close()
+                self._file = None
+        except Exception:
             pass
 
 def _redirect_output():
@@ -77,33 +93,64 @@ def _redirect_output():
 
 _redirect_output()
 
+# 持久化启动日志文件句柄，避免每次 _write_log 都 open/close（性能优化）
+_startup_log_file = None
+_startup_log_lock = threading.Lock()
+
+
+def _get_startup_log():
+    """懒加载并缓存启动日志文件句柄"""
+    global _startup_log_file
+    if _startup_log_file is None:
+        try:
+            LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _startup_log_file = LOG_FILE.open("a", encoding="utf-8", buffering=1)
+        except Exception:
+            pass
+    return _startup_log_file
+
+
 def _write_log(message: str):
-    """写入启动日志并同步打印，便于定位“未响应”原因"""
+    """写入启动日志并同步打印，便于定位"未响应"原因"""
     try:
-        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"[{ts}] {message}\n"
-        with LOG_FILE.open("a", encoding="utf-8") as f:
-            f.write(line)
+        f = _get_startup_log()
+        if f:
+            with _startup_log_lock:
+                f.write(line)
         print(message)
     except Exception:
         # 日志失败不应阻塞启动
         pass
 
+
 def _dump_threads(label: str = "thread-dump"):
     """将当前进程的线程栈写入日志，方便定位卡死位置"""
     try:
-        with LOG_FILE.open("a", encoding="utf-8") as f:
-            f.write(f"\n===== {label} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====\n")
-            faulthandler.dump_traceback(file=f, all_threads=True)
+        f = _get_startup_log()
+        if f:
+            ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            with _startup_log_lock:
+                f.write(f"\n===== {label} {ts} =====\n")
+                faulthandler.dump_traceback(file=f, all_threads=True)
     except Exception:
         traceback.print_exc()
 
 
 def _terminate_stale_process_on_port(port: int, reason: str = "") -> bool:
-    """如果端口被本机 pythonw 占用且无健康响应，尝试终止并释放端口"""
+    """如果端口被本机 pythonw 占用且无健康响应，尝试终止并释放端口
+    优化：仅在端口确实被占用时才扫描网络连接，避免不必要的全量扫描"""
     killed = False
     try:
+        # 快速预检：通过 socket 确认端口已被占用，否则直接跳过全量扫描
+        _pre = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _pre.settimeout(0.1)
+        _port_in_use = (_pre.connect_ex(("127.0.0.1", port)) == 0)
+        _pre.close()
+        if not _port_in_use:
+            return False
+
         for conn in psutil.net_connections(kind="inet"):
             if conn.laddr and conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
                 pid = conn.pid
@@ -114,10 +161,10 @@ def _terminate_stale_process_on_port(port: int, reason: str = "") -> bool:
                     cmdline = " ".join(proc.cmdline()).lower()
                     if "koto_app.py" in cmdline or "pythonw" in proc.name().lower():
                         _write_log(f"⚠️ 终止占用 {port} 的进程 {pid}（{reason}）")
-                        proc.kill() # Force kill
-                        time.sleep(1)
+                        proc.kill()
+                        time.sleep(0.5)  # 0.5s 通常足够进程退出
                         killed = True
-                except Exception as e:
+                except Exception:
                     pass
     except Exception as e:
         _write_log(f"⚠️ 检查端口占用失败: {e}")
@@ -774,10 +821,36 @@ def create_system_tray(window_ref=None):
         print(f"⚠️ 系统托盘创建失败: {e}")
         return None
 
+def _bootstrap_api_setup():
+    """从 _internal/koto_setup.py 加载并执行 API 密钥向导。
+    兼容旧版编译入口：写入 model_setup_done.json 防止 model_downloader 重复弹出。
+    """
+    import json as _json
+    # 抑制旧版编译入口下次弹出 model_downloader
+    _flag = APP_ROOT / 'config' / 'model_setup_done.json'
+    if not _flag.exists():
+        try:
+            _flag.write_text(_json.dumps({"done": True, "version": 1}), encoding="utf-8")
+        except Exception:
+            pass
+    # 调用 koto_setup.py 中的 API 密钥向导
+    try:
+        import runpy as _runpy
+        _bundle = Path(sys._MEIPASS) if getattr(sys, 'frozen', False) else Path(__file__).parent
+        _setup_py = _bundle / 'koto_setup.py'
+        if _setup_py.exists():
+            _ns = _runpy.run_path(str(_setup_py))  # run_name 默认非 __main__，不触发 main()
+            if '_run_setup_if_needed' in _ns:
+                _ns['_run_setup_if_needed']()
+    except Exception:
+        pass
+
+
 def main():
     """主入口 - 桌面应用模式"""
     # 初始化
     ensure_directories()
+    _bootstrap_api_setup()   # API 密钥向导（便携版 / 首次启动 / 密钥失效时触发）
     check_config()
     if not ensure_dependencies():
         return
@@ -862,6 +935,16 @@ def main():
     # === 快速启动模式：跳过预热检查 ===
     # pywebview 内部会处理加载超时，无需提前检查
     _write_log("⚡ 快速启动：跳过预热检查，直接创建窗口")
+
+    # === 启动后台系统监控（守护线程，桌面模式专用）===
+    try:
+        from app.core.monitoring.system_event_monitor import get_system_event_monitor
+        _sem = get_system_event_monitor(check_interval=60)  # 每 60 秒检查一次
+        if not _sem.is_running():
+            _sem.start()
+            _write_log("✔ 系统资源监控已启动（CPU/内存/磁盘告警）")
+    except Exception as _sem_err:
+        _write_log(f"⚠️ 系统监控启动失败（非致命）: {_sem_err}")
 
     # 选择窗口图标（如存在）
     icon_path = None

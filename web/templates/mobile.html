@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Koto (言)</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='assets/koto_icon.svg') }}">
+<meta name="theme-color" content="#0b111d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
+<link rel="preload" as="style" href="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css" onload="this.rel='stylesheet'">
+<link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<noscript><link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css"></noscript>
+<script defer src="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script defer src="https://cdn.bootcdn.net/ajax/libs/marked/12.0.0/marked.min.js"></script>
+<script defer src="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+<style>
+/* ──────────────────────────────────────────────────────────
+   KOTO MOBILE — CSS
+   ────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html{height:100%;-webkit-text-size-adjust:100%;}
+body{
+  height:100%;overflow:hidden;
+  font-family:-apple-system,'SF Pro Text','Noto Sans SC','Microsoft YaHei','Segoe UI',system-ui,sans-serif;
+  background:var(--bg);color:var(--fg);
+  overscroll-behavior:none;
+}
+button{cursor:pointer;font-family:inherit;-webkit-tap-highlight-color:transparent;}
+input,textarea{font-family:inherit;outline:none;}
+a{color:var(--accent);}
+
+/* ── Tokens ── */
+:root{
+  --bg:        #05080f;
+  --bg2:       #0b111d;
+  --bg3:       #111a2a;
+  --bg-hover:  rgba(255,255,255,.07);
+  --fg:        #e8eefc;
+  --fg2:       #9fb3d1;
+  --fg3:       #6c7a91;
+  --accent:    #63c6ff;
+  --accent2:   #76f7d4;
+  --grad:      linear-gradient(135deg,#63c6ff,#76f7d4);
+  --danger:    #ef6b6b;
+  --border:    rgba(255,255,255,.08);
+  --radius:    16px;
+  --hh:        54px;  /* header height */
+  --ib:        env(safe-area-inset-bottom,0px);
+}
+[data-theme=light]{
+  --bg:#f5f7fb;--bg2:#ffffff;--bg3:#eef1f7;
+  --bg-hover:rgba(0,0,0,.05);
+  --fg:#0c1526;--fg2:#4b5565;--fg3:#7a889c;
+  --accent:#338bff;--accent2:#17c3b2;
+  --grad:linear-gradient(135deg,#338bff,#17c3b2);
+  --danger:#dc2626;--border:rgba(0,0,0,.08);
+}
+[data-theme=ocean]{--bg:#081019;--bg2:#0e1825;--bg3:#122034;--fg:#dfe8ff;--fg2:#8dabd3;--fg3:#6780a6;--accent:#4ca6ff;--accent2:#4cd6ff;--grad:linear-gradient(135deg,#4ca6ff,#4cd6ff);--border:rgba(76,166,255,.18);}
+[data-theme=forest]{--bg:#07130f;--bg2:#0d1c16;--bg3:#13271d;--fg:#e6fff3;--fg2:#a2c7b4;--fg3:#7ba28e;--accent:#2ad489;--accent2:#7df7c3;--grad:linear-gradient(135deg,#2ad489,#7df7c3);--border:rgba(42,212,137,.16);}
+[data-theme=sunset]{--bg:#130c10;--bg2:#1c131a;--bg3:#241823;--fg:#ffeef4;--fg2:#d7b8c7;--fg3:#a58591;--accent:#ff8a65;--accent2:#f45baa;--grad:linear-gradient(135deg,#ff8a65,#f45baa);--border:rgba(255,138,101,.16);}
+[data-theme=lavender]{--bg:#f5f0ff;--bg2:#ffffff;--bg3:#efe9ff;--fg:#231742;--fg2:#5c4b86;--fg3:#8a7ab1;--accent:#8b5cf6;--accent2:#c084fc;--grad:linear-gradient(135deg,#8b5cf6,#c084fc);--border:rgba(139,92,246,.2);}
+
+/* ── Layout ── */
+#app{display:flex;flex-direction:column;height:100%;position:relative;overflow:hidden;}
+
+/* ── Header ── */
+#hdr{
+  flex-shrink:0;height:var(--hh);
+  display:flex;align-items:center;gap:10px;padding:0 12px;
+  background:var(--bg2);border-bottom:1px solid var(--border);
+  position:relative;z-index:100;
+  -webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);
+}
+.hbtn{
+  width:40px;height:40px;border-radius:11px;border:none;
+  background:var(--bg-hover);color:var(--fg2);font-size:18px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  transition:background .15s;
+}
+.hbtn:hover{background:var(--bg3);}
+#hdrTitle{
+  flex:1;font-size:15px;font-weight:600;color:var(--fg);
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+  min-width:0;
+}
+#hdrBadge{
+  font-size:10px;color:var(--fg3);background:var(--bg3);
+  padding:2px 8px;border-radius:6px;border:1px solid var(--border);
+  white-space:nowrap;flex-shrink:0;max-width:100px;
+  overflow:hidden;text-overflow:ellipsis;
+}
+
+/* ── Sidebar ── */
+#sbOverlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);
+  z-index:200;opacity:0;pointer-events:none;transition:opacity .22s ease;
+}
+#sbOverlay.on{opacity:1;pointer-events:all;}
+#sb{
+  position:fixed;top:0;left:0;bottom:0;width:280px;
+  background:var(--bg2);border-right:1px solid var(--border);
+  z-index:210;transform:translateX(-100%);
+  transition:transform .24s cubic-bezier(.4,0,.2,1);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+#sb.on{transform:translateX(0);}
+#sbHead{
+  padding:16px 14px 10px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;flex-shrink:0;
+}
+.sbLogo{
+  width:36px;height:36px;border-radius:10px;background:var(--grad);
+  display:flex;align-items:center;justify-content:center;
+  font-size:16px;font-weight:700;color:#fff;flex-shrink:0;
+}
+#newSessBtnSb{
+  margin:10px 12px;padding:10px;
+  border:1.5px dashed var(--border);border-radius:10px;
+  background:transparent;color:var(--accent);font-size:13px;font-weight:500;
+  width:calc(100% - 24px);transition:background .15s;
+}
+#newSessBtnSb:hover{background:var(--bg-hover);}
+#sessLabel{padding:2px 14px 6px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3);}
+#sessList{flex:1;overflow-y:auto;padding:0 8px 8px;-webkit-overflow-scrolling:touch;}
+#sessList::-webkit-scrollbar{width:3px;}
+#sessList::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+.si{
+  padding:9px 10px;border-radius:10px;margin-bottom:2px;
+  cursor:pointer;display:flex;align-items:center;gap:8px;transition:background .12s;
+}
+.si:hover{background:var(--bg-hover);}
+.si.active{background:rgba(99,198,255,.12);}
+.si.active .siN{color:var(--accent);}
+.siN{flex:1;font-size:13px;color:var(--fg2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.siD{
+  width:26px;height:26px;border-radius:7px;border:none;background:transparent;
+  color:var(--fg3);font-size:13px;opacity:0;transition:opacity .15s,color .15s;
+  display:flex;align-items:center;justify-content:center;
+}
+.si:hover .siD{opacity:1;}
+.siD:hover{color:var(--danger);}
+#sbFoot{
+  padding:10px 12px calc(10px + var(--ib));border-top:1px solid var(--border);
+  display:flex;flex-direction:column;gap:4px;flex-shrink:0;
+}
+.sfr{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  border-radius:10px;color:var(--fg3);font-size:12.5px;
+  cursor:pointer;transition:background .12s;
+}
+.sfr:hover{background:var(--bg-hover);color:var(--fg2);}
+
+/* ── Chat area ── */
+#chat{
+  flex:1;overflow-y:auto;overflow-x:hidden;
+  padding:12px 12px 8px;display:flex;flex-direction:column;gap:8px;
+  -webkit-overflow-scrolling:touch;
+}
+#chat::-webkit-scrollbar{width:3px;}
+#chat::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+
+/* ── Welcome ── */
+#welcome{
+  flex:1;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:20px;text-align:center;gap:14px;min-height:300px;
+}
+.wcCircle{
+  width:72px;height:72px;border-radius:20px;background:var(--grad);
+  display:flex;align-items:center;justify-content:center;
+  font-size:32px;font-weight:700;color:#fff;
+  box-shadow:0 8px 32px rgba(99,198,255,.28);
+}
+#welcome h2{font-size:20px;font-weight:600;color:var(--fg);}
+#welcome p{font-size:13px;color:var(--fg3);line-height:1.6;max-width:280px;}
+.wcHints{display:flex;flex-direction:column;gap:8px;width:100%;max-width:340px;}
+.wcH{
+  padding:10px 14px;border-radius:12px;background:var(--bg3);
+  border:1px solid var(--border);text-align:left;
+  font-size:12.5px;color:var(--fg2);line-height:1.5;
+  cursor:pointer;transition:all .15s;
+}
+.wcH:hover{border-color:var(--accent);background:var(--bg-hover);}
+.wcHT{font-weight:600;color:var(--fg);display:block;margin-bottom:2px;}
+
+/* ── Messages ── */
+.row{display:flex;align-items:flex-end;gap:7px;animation:mIn .18s ease;}
+.row.u{flex-direction:row-reverse;}
+@keyframes mIn{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}
+.av{
+  width:30px;height:30px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;color:#fff;
+}
+.av.ai{background:var(--grad);}
+.av.usr{background:linear-gradient(135deg,#667eea,#764ba2);}
+.bbl{
+  max-width:min(76vw,420px);
+  padding:10px 13px;border-radius:18px;
+  font-size:14px;line-height:1.55;word-break:break-word;
+  position:relative;
+}
+.bbl.ai{
+  background:var(--bg3);color:var(--fg);
+  border:1px solid var(--border);border-bottom-left-radius:5px;
+}
+.bbl.usr{
+  background:linear-gradient(135deg,rgba(99,198,255,.25),rgba(118,247,212,.25));
+  color:var(--fg);border:1px solid rgba(99,198,255,.22);
+  border-bottom-right-radius:5px;
+}
+/* markdown */
+.bbl p{margin:0 0 6px;}.bbl p:last-child{margin:0;}
+.bbl h1,.bbl h2,.bbl h3,.bbl h4{margin:10px 0 4px;line-height:1.3;}
+.bbl ul,.bbl ol{margin:0 0 6px 18px;}
+.bbl li{margin-bottom:2px;}
+.bbl pre{
+  background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+  padding:10px;overflow-x:auto;margin:8px 0;font-size:12px;position:relative;
+}
+.bbl code{font-family:'JetBrains Mono','Consolas',monospace;}
+.bbl :not(pre)>code{
+  background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px;font-size:12.5px;
+}
+.bbl table{border-collapse:collapse;margin:8px 0;font-size:12px;width:100%;overflow-x:auto;display:block;}
+.bbl th,.bbl td{border:1px solid var(--border);padding:4px 8px;}
+.bbl th{background:var(--bg2);}
+.bbl blockquote{border-left:3px solid var(--accent);padding-left:10px;margin:6px 0;color:var(--fg2);}
+.bbl a{color:var(--accent);}
+.bbl hr{border:none;border-top:1px solid var(--border);margin:8px 0;}
+/* copy code btn */
+.cpBtn{
+  position:absolute;top:6px;right:6px;padding:3px 8px;
+  border-radius:6px;border:1px solid var(--border);background:var(--bg);
+  color:var(--fg3);font-size:10px;opacity:0;transition:opacity .15s;
+}
+.bbl pre:hover .cpBtn,.bbl pre .cpBtn:hover{opacity:1;}
+.cpBtn:hover{color:var(--accent);border-color:var(--accent);}
+/* thinking block */
+.thBlk{
+  background:var(--bg2);border:1px solid var(--border);border-radius:9px;
+  padding:8px 10px;margin-bottom:8px;font-size:12px;color:var(--fg3);
+}
+.thBlk .thLbl{font-size:11px;color:var(--accent);font-weight:600;margin-bottom:4px;}
+/* status/progress line inside AI bubble */
+.stLine{font-size:12px;color:var(--fg3);display:flex;align-items:center;gap:6px;margin:2px 0;}
+.stLine .stSpin{width:12px;height:12px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:spin .7s linear infinite;flex-shrink:0;}
+@keyframes spin{to{transform:rotate(360deg);}}
+/* typing dots */
+.dots{display:flex;gap:4px;padding:3px 0;}
+.dots span{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:db 1.2s infinite;}
+.dots span:nth-child(2){animation-delay:.15s;}
+.dots span:nth-child(3){animation-delay:.3s;}
+@keyframes db{0%,80%,100%{transform:scale(.7);}40%{transform:scale(1);}}
+
+/* ── Progress bar (long tasks) ── */
+.progWrap{padding:4px 0;}
+.progBar{height:4px;border-radius:3px;background:var(--border);margin:6px 0;}
+.progFill{height:100%;border-radius:3px;background:var(--grad);transition:width .4s ease;width:0%;}
+.progTxt{font-size:11px;color:var(--fg3);}
+
+/* ── File chips above input ── */
+#filePrev{
+  display:none;flex-wrap:wrap;gap:6px;
+  padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:4px;
+}
+#filePrev.on{display:flex;}
+.fChip{
+  display:flex;align-items:center;gap:4px;
+  padding:3px 8px;background:var(--bg3);border:1px solid var(--border);
+  border-radius:6px;font-size:11px;color:var(--fg2);
+}
+.fChipRm{
+  width:16px;height:16px;border:none;background:transparent;
+  color:var(--fg3);font-size:11px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+.fChipRm:hover{color:var(--danger);}
+
+/* ── Input area ── */
+#inputArea{
+  flex-shrink:0;background:var(--bg2);border-top:1px solid var(--border);
+  padding:8px 10px calc(8px + var(--ib));
+}
+#inputRow{display:flex;align-items:flex-end;gap:6px;}
+.iBtn{
+  width:40px;height:40px;border-radius:12px;border:none;
+  background:var(--bg3);color:var(--fg2);font-size:18px;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  transition:background .15s;
+}
+.iBtn:hover{background:var(--bg-hover);}
+#txWrap{
+  flex:1;display:flex;align-items:flex-end;
+  background:var(--bg3);border:1.5px solid var(--border);
+  border-radius:20px;overflow:hidden;transition:border-color .15s;
+}
+#txWrap:focus-within{border-color:var(--accent);}
+#txIn{
+  flex:1;resize:none;border:none;background:transparent;
+  color:var(--fg);font-size:15px;line-height:1.4;
+  padding:10px 12px;min-height:40px;max-height:120px;overflow-y:auto;
+}
+#txIn::placeholder{color:var(--fg3);}
+#sendBtn{
+  width:40px;height:40px;border-radius:12px;border:none;
+  background:var(--grad);color:#fff;font-size:16px;
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;transition:all .15s;
+  box-shadow:0 4px 12px rgba(99,198,255,.22);
+}
+#sendBtn:hover{transform:scale(1.05);}
+#sendBtn:disabled{opacity:.4;transform:none;pointer-events:none;}
+#sendBtn.stop{background:linear-gradient(135deg,#ef6b6b,#ff9a9a);}
+#fileLabel{cursor:pointer;}
+#fileIn{display:none;}
+
+/* ── Generating bar ── */
+#genBar{
+  display:none;align-items:center;gap:8px;
+  margin:0 12px 6px;padding:8px 12px;
+  background:var(--bg3);border:1px solid var(--border);border-radius:12px;
+  font-size:12.5px;color:var(--fg3);
+}
+#genBar.on{display:flex;}
+.gSpin{width:14px;height:14px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:spin .7s linear infinite;flex-shrink:0;}
+#stopBtn{
+  margin-left:auto;padding:3px 10px;border-radius:8px;
+  border:1px solid var(--border);background:transparent;
+  color:var(--danger);font-size:11px;transition:all .15s;
+}
+#stopBtn:hover{background:rgba(239,107,107,.1);}
+
+/* ── Scroll-to-bottom ── */
+#scrollDown{
+  position:fixed;right:14px;
+  bottom:calc(70px + var(--ib));
+  width:36px;height:36px;border-radius:50%;
+  background:var(--bg2);border:1px solid var(--border);
+  color:var(--fg3);font-size:16px;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 14px rgba(0,0,0,.3);
+  z-index:50;opacity:0;pointer-events:none;transition:opacity .2s;
+}
+#scrollDown.on{opacity:1;pointer-events:all;}
+
+/* ── Toast ── */
+#toast{
+  position:fixed;top:calc(var(--hh) + 8px);left:50%;transform:translateX(-50%);
+  background:var(--bg3);color:var(--fg);border:1px solid var(--border);
+  border-radius:20px;padding:7px 16px;font-size:12.5px;
+  box-shadow:0 4px 20px rgba(0,0,0,.3);
+  z-index:400;opacity:0;pointer-events:none;transition:opacity .2s;white-space:nowrap;
+}
+#toast.on{opacity:1;}
+
+/* ── Voice overlay ── */
+#voiceOv{
+  position:fixed;inset:0;z-index:500;
+  background:rgba(4,12,26,.93);
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:20px;
+  opacity:0;pointer-events:none;transition:opacity .2s ease;
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+}
+#voiceOv.on{opacity:1;pointer-events:all;}
+.voEng{font-size:11.5px;color:#7fb8e8;background:rgba(74,184,255,.08);border:1px solid rgba(74,184,255,.25);padding:4px 12px;border-radius:20px;}
+.voWave{display:flex;align-items:center;gap:4px;height:52px;}
+.voBar{width:4px;border-radius:3px;background:linear-gradient(to top,#4ab8ff,#a8e8ff);height:12px;animation:wi 1.4s ease-in-out infinite;}
+.voBar:nth-child(2){animation-delay:.1s;}.voBar:nth-child(3){animation-delay:.2s;}
+.voBar:nth-child(4){animation-delay:.3s;}.voBar:nth-child(5){animation-delay:.2s;}
+.voBar:nth-child(6){animation-delay:.1s;}.voBar:nth-child(7){animation-delay:0s;}
+@keyframes wi{0%,100%{height:12px;opacity:.45;}50%{height:38px;opacity:1;}}
+.voBigBtn{
+  width:80px;height:80px;border-radius:50%;border:none;
+  background:linear-gradient(135deg,#3aadff,#72d8ff);
+  color:#fff;font-size:28px;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 0 rgba(74,184,255,.45);
+  animation:mp 1.8s ease-in-out infinite;
+}
+@keyframes mp{0%{box-shadow:0 0 0 0 rgba(74,184,255,.45);}70%{box-shadow:0 0 0 22px rgba(74,184,255,0);}100%{box-shadow:0 0 0 0 rgba(74,184,255,0);}}
+#micBtn.rec{color:#4ab8ff;background:rgba(74,184,255,.15);}
+.voLbl{font-size:15px;color:#a8d8f8;font-weight:500;}
+.voPrev{max-width:280px;text-align:center;font-size:14px;color:#cce8ff;min-height:36px;line-height:1.5;}
+.voCan{font-size:13px;color:#7fb8e8;background:none;border:1px solid rgba(74,184,255,.3);padding:8px 20px;border-radius:20px;transition:all .15s;}
+.voCan:hover{color:#cce8ff;border-color:rgba(74,184,255,.6);}
+
+/* ── New-session sheet ── */
+#shOverlay{
+  position:fixed;inset:0;z-index:600;background:rgba(0,0,0,.6);
+  display:flex;align-items:flex-end;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .2s;
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+}
+#shOverlay.on{opacity:1;pointer-events:all;}
+#sheet{
+  background:var(--bg2);border-top-left-radius:22px;border-top-right-radius:22px;
+  border:1px solid var(--border);border-bottom:none;
+  padding:18px 18px calc(18px + var(--ib));
+  width:100%;max-width:600px;
+  transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1);
+}
+#shOverlay.on #sheet{transform:translateY(0);}
+.shDrag{width:36px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 14px;}
+.shTitle{font-size:15px;font-weight:600;color:var(--fg);margin-bottom:10px;}
+.shIn{
+  width:100%;padding:12px 14px;border-radius:12px;
+  border:1.5px solid var(--border);background:var(--bg3);
+  color:var(--fg);font-size:15px;margin-bottom:10px;transition:border-color .15s;
+}
+.shIn:focus{border-color:var(--accent);}
+.shBtns{display:flex;gap:10px;}
+.shBtn{flex:1;padding:12px;border-radius:12px;border:none;font-size:14px;font-weight:500;transition:all .15s;}
+.shBtn.cancel{background:var(--bg3);color:var(--fg2);}
+.shBtn.ok{background:var(--grad);color:#fff;}
+
+/* ── Settings sheet ── */
+#spOverlay{
+  position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.5);
+  opacity:0;pointer-events:none;transition:opacity .2s;
+}
+#spOverlay.on{opacity:1;pointer-events:all;}
+#sp{
+  position:fixed;bottom:0;left:0;right:0;
+  background:var(--bg2);border-top:1px solid var(--border);
+  border-top-left-radius:22px;border-top-right-radius:22px;
+  padding:18px 18px calc(18px + var(--ib));
+  max-height:80vh;overflow-y:auto;z-index:310;
+  transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1);
+  -webkit-overflow-scrolling:touch;
+}
+#spOverlay.on #sp{transform:translateY(0);}
+.spSec{margin-bottom:14px;}
+.spLbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3);margin-bottom:7px;font-weight:600;}
+.spRow{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--border);
+  font-size:13.5px;color:var(--fg2);
+}
+.spRow:last-child{border-bottom:none;}
+.spRow select{
+  flex-shrink:0;font-size:12.5px;background:var(--bg3);
+  border:1px solid var(--border);color:var(--fg);
+  padding:4px 8px;border-radius:7px;max-width:150px;
+}
+.sw{position:relative;width:42px;height:24px;}
+.sw input{opacity:0;width:0;height:0;}
+.sws{position:absolute;inset:0;background:var(--border);border-radius:12px;transition:background .2s;cursor:pointer;}
+.sws::before{content:'';position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:transform .2s;}
+.sw input:checked+.sws{background:var(--accent);}
+.sw input:checked+.sws::before{transform:translateX(18px);}
+/* theme dots */
+.tDots{display:flex;gap:7px;flex-wrap:wrap;}
+.tDot{
+  width:26px;height:26px;border-radius:50%;cursor:pointer;
+  border:2.5px solid transparent;transition:border-color .15s;flex-shrink:0;
+}
+.tDot.on{border-color:var(--accent);}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header ── -->
+  <header id="hdr">
+    <button class="hbtn" onclick="sbOpen()" aria-label="菜单">☰</button>
+    <div id="hdrTitle">Koto</div>
+    <span id="hdrBadge">…</span>
+    <button class="hbtn" style="color:var(--accent)" onclick="shShow()" aria-label="新对话" title="新对话">＋</button>
+  </header>
+
+  <!-- ── Chat area ── -->
+  <div id="chat">
+    <div id="welcome">
+      <div class="wcCircle">言</div>
+      <h2>欢迎使用 Koto</h2>
+      <p>AI 助手 · 对话、写作、编程、语音一体化</p>
+      <div class="wcHints">
+        <div class="wcH" onclick="quickSend('帮我写一份今天的工作总结')">
+          <span class="wcHT">✍️ 写作助手</span>帮我写今天的工作总结
+        </div>
+        <div class="wcH" onclick="quickSend('解释一下量子计算是什么')">
+          <span class="wcHT">🔍 知识问答</span>解释量子计算是什么
+        </div>
+        <div class="wcH" onclick="quickSend('用 Python 写一个斐波那契数列函数')">
+          <span class="wcHT">💻 编程助手</span>用 Python 写斐波那契函数
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Generating bar ── -->
+  <div id="genBar">
+    <div class="gSpin"></div>
+    <span id="genTxt">Koto 正在思考...</span>
+    <button id="stopBtn" onclick="stopGen()">⏹ 停止</button>
+  </div>
+
+  <!-- ── Input area ── -->
+  <div id="inputArea">
+    <div id="filePrev"></div>
+    <div id="inputRow">
+      <label class="iBtn" id="fileLabel" title="附加文件">
+        📎<input type="file" id="fileIn" multiple
+          accept=".docx,.doc,.pdf,.txt,.md,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.json"
+          onchange="onFileChg(event)">
+      </label>
+      <div id="txWrap">
+        <textarea id="txIn" placeholder="输入消息..." rows="1"
+          oninput="txResize(this)" onkeydown="txKey(event)"></textarea>
+      </div>
+      <button class="iBtn" id="micBtn" onclick="voiceToggle()" title="语音输入">🎙️</button>
+      <button id="sendBtn" onclick="sendMsg()" title="发送" aria-label="发送">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Scroll-to-bottom ── -->
+<button id="scrollDown" onclick="chatBottom()" aria-label="滚动到底部">↓</button>
+
+<!-- ── Sidebar ── -->
+<div id="sbOverlay" onclick="sbClose()"></div>
+<nav id="sb">
+  <div id="sbHead">
+    <div class="sbLogo">言</div>
+    <div>
+      <div style="font-size:15px;font-weight:600;color:var(--fg)">Koto</div>
+      <div style="font-size:11px;color:var(--fg3)">AI Assistant</div>
+    </div>
+  </div>
+  <button id="newSessBtnSb" onclick="shShow();sbClose()">＋ 新对话</button>
+  <div id="sessLabel">对话历史</div>
+  <div id="sessList"><div style="padding:12px 10px;color:var(--fg3);font-size:13px">加载中…</div></div>
+  <div id="sbFoot">
+    <div class="sfr" onclick="spOpen();sbClose()">⚙️ 设置</div>
+    <div class="sfr" onclick="window.location.href='/'">🖥️ 切换桌面版</div>
+  </div>
+</nav>
+
+<!-- ── New-session sheet ── -->
+<div id="shOverlay" onclick="if(event.target===this)shHide()">
+  <div id="sheet">
+    <div class="shDrag"></div>
+    <div class="shTitle">新对话</div>
+    <input class="shIn" id="shIn" placeholder="输入名称（可选）…"
+      onkeydown="if(event.key==='Enter'){shConfirm();event.preventDefault();}">
+    <div class="shBtns">
+      <button class="shBtn cancel" onclick="shHide()">取消</button>
+      <button class="shBtn ok" onclick="shConfirm()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Voice overlay ── -->
+<div id="voiceOv">
+  <div class="voEng" id="voEngLbl">检测引擎…</div>
+  <div class="voWave">
+    <div class="voBar" id="vb0"></div><div class="voBar" id="vb1"></div>
+    <div class="voBar" id="vb2"></div><div class="voBar" id="vb3"></div>
+    <div class="voBar" id="vb4"></div><div class="voBar" id="vb5"></div>
+    <div class="voBar" id="vb6"></div>
+  </div>
+  <button class="voBigBtn" onclick="voiceStop()">⏹</button>
+  <div class="voLbl" id="voLbl">正在聆听…</div>
+  <div class="voPrev" id="voPrev"></div>
+  <button class="voCan" onclick="voiceCancel()">取消</button>
+</div>
+
+<!-- ── Settings sheet ── -->
+<div id="spOverlay" onclick="if(event.target===this)spClose()">
+  <div id="sp">
+    <div class="shDrag"></div>
+    <div style="font-size:15px;font-weight:600;color:var(--fg);margin-bottom:14px">⚙️ 设置</div>
+    <div class="spSec">
+      <div class="spLbl">外观主题</div>
+      <div class="tDots" id="tDots">
+        <div class="tDot on" data-t="dark"     style="background:#0b111d;"   onclick="setTheme('dark')"     title="深色"></div>
+        <div class="tDot"    data-t="light"    style="background:#f5f7fb;border-color:#ddd;" onclick="setTheme('light')"    title="浅色"></div>
+        <div class="tDot"    data-t="ocean"    style="background:#0e1825;"   onclick="setTheme('ocean')"    title="海洋"></div>
+        <div class="tDot"    data-t="forest"   style="background:#0d1c16;"   onclick="setTheme('forest')"   title="森林"></div>
+        <div class="tDot"    data-t="sunset"   style="background:#1c131a;"   onclick="setTheme('sunset')"   title="日落"></div>
+        <div class="tDot"    data-t="lavender" style="background:#efe9ff;border-color:#c4b5fd;" onclick="setTheme('lavender')" title="薰衣草"></div>
+      </div>
+    </div>
+    <div class="spSec">
+      <div class="spLbl">AI 模型</div>
+      <div class="spRow">
+        <span>默认模型</span>
+        <select id="spModel" onchange="saveSp('ai','default_model',this.value)">
+          <option value="auto">🤖 Auto</option>
+          <option value="gemini-3-flash-preview">⚡ Gemini 3 Flash</option>
+          <option value="gemini-3-pro-preview">🚀 Gemini 3 Pro</option>
+          <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash</option>
+          <option value="gemini-2.5-pro">🚀 Gemini 2.5 Pro</option>
+        </select>
+      </div>
+      <div class="spRow">
+        <span>仅本地模型</span>
+        <label class="sw"><input type="checkbox" id="spLocal" onchange="saveSp('ai','local_only',this.checked)"><span class="sws"></span></label>
+      </div>
+    </div>
+    <div class="spSec">
+      <div class="spLbl">语音</div>
+      <div class="spRow">
+        <span>识别引擎</span>
+        <span id="spVoiceEng" style="font-size:12px;color:var(--fg3)">检测中…</span>
+      </div>
+      <div class="spRow">
+        <span>说完自动发送</span>
+        <label class="sw"><input type="checkbox" id="spVoiceAuto" checked onchange="saveSp('ai','voice_auto_send',this.checked)"><span class="sws"></span></label>
+      </div>
+    </div>
+    <button style="width:100%;padding:12px;border-radius:12px;border:none;background:var(--grad);color:#fff;font-size:14px;font-weight:500;margin-top:4px" onclick="spClose()">完成</button>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div id="toast"></div>
+
+<!-- ────────────────────────────────────────────
+     JAVASCRIPT
+     ──────────────────────────────────────────── -->
+<script>
+/* ====================================================
+   API CONTRACT (verified against app.py 2026-03-05)
+   ====================================================
+   GET  /api/sessions          → {sessions: [name, ...]}
+   POST /api/sessions          body: {name}      → {success, session}
+   GET  /api/sessions/:name    → {session, history:[{role,parts:[text],...}]}
+   DEL  /api/sessions/:name    → {success}
+   POST /api/chat/stream       body: {session, message, locked_task?, locked_model?}
+        SSE events: type = token|thinking|progress|status|classification|info|error|done
+        – token:    {content}
+        – thinking: {message, phase?, elapsed?}
+        – progress: {message, detail, progress?}
+        – classification: {task_type, model?}
+        – done:     {images, saved_files, total_time?}
+        – error:    {message}
+   POST /api/chat/file         form: session+message+file(s)
+        → SSE (same as above) OR JSON {response,...}
+   POST /api/chat/interrupt    body: {session}   → {success}
+   GET  /api/voice/stt_status  → {local:{available,engine}, gemini:{available}, active}
+   POST /api/voice/stt         body: {audio:base64, mime:string}
+        → {success, text, engine?, message}
+   GET  /api/settings          → full settings object (categories: storage,appearance,ai,proxy,skills)
+   POST /api/settings          body: {category, key, value}  → {success}
+   ==================================================== */
+
+'use strict';
+
+/* ── State ── */
+let curSess    = null;   // current session name (plain string)
+let sessList   = [];     // [{name}] from API
+let pendFiles  = [];     // File[] pending attachment
+let generating = false;
+let abortCtrl  = null;
+let voiceAuto  = true;   // voice_auto_send setting
+let voiceRec   = false;
+let vSR        = null;   // SpeechRecognition (Web Speech API, primary)
+let vSRTimer   = null;   // waveform animation timer
+let vSRAbort   = null;   // AbortController for server-side recording path
+let toastTimer = null;
+
+/* ────────────────── Boot ────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  applyTheme(ls('koto_m_theme') || 'dark');
+  loadSettings();
+  loadSessions();
+  initVoice();
+  watchScroll();
+  document.getElementById('txIn').focus();
+});
+
+/* ────────────────── localStorage helpers ── */
+function ls(k, v) {
+  if (v === undefined) return localStorage.getItem(k);
+  localStorage.setItem(k, v);
+}
+
+/* ────────────────── Theme ── */
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.querySelectorAll('.tDot').forEach(d => d.classList.toggle('on', d.dataset.t === t));
+  // update iOS theme-color
+  const style = getComputedStyle(document.documentElement);
+  const c = style.getPropertyValue('--bg2').trim() || '#0b111d';
+  document.querySelector('meta[name=theme-color]').content = c;
+}
+function setTheme(t) { ls('koto_m_theme', t); applyTheme(t); }
+
+/* ────────────────── Settings ── */
+async function loadSettings() {
+  try {
+    const r = await fetch('/api/settings');
+    if (!r.ok) return;
+    const s = await r.json();
+    const ai = s.ai || {};
+    voiceAuto = ai.voice_auto_send !== false;
+    document.getElementById('spVoiceAuto').checked = voiceAuto;
+    document.getElementById('spLocal').checked = !!ai.local_only;
+    const model = ai.default_model || 'auto';
+    const sel = document.getElementById('spModel');
+    for (const o of sel.options) if (o.value === model) { o.selected = true; break; }
+  } catch(e) { /* settings load failure is non-fatal */ }
+}
+
+async function saveSp(cat, key, val) {
+  // /api/settings POST expects {category, key, value}
+  if (cat === 'ai' && key === 'voice_auto_send') voiceAuto = val;
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ category: cat, key: key, value: val })
+    });
+    toast('设置已保存');
+  } catch(e) {}
+}
+
+/* ────────────────── Sidebar ── */
+function sbOpen() { document.getElementById('sb').classList.add('on'); document.getElementById('sbOverlay').classList.add('on'); }
+function sbClose() { document.getElementById('sb').classList.remove('on'); document.getElementById('sbOverlay').classList.remove('on'); }
+
+/* ────────────────── Settings Panel ── */
+function spOpen() { document.getElementById('spOverlay').classList.add('on'); }
+function spClose() { document.getElementById('spOverlay').classList.remove('on'); }
+
+/* ────────────────── Sessions ── */
+async function loadSessions() {
+  try {
+    const r = await fetch('/api/sessions');
+    if (!r.ok) return;
+    const d = await r.json();
+    // API returns {sessions: [name, name, ...]}
+    sessList = (d.sessions || []).map(n => ({ name: n }));
+    renderSessions();
+  } catch(e) {}
+}
+
+function renderSessions() {
+  const el = document.getElementById('sessList');
+  if (!sessList.length) {
+    el.innerHTML = '<div style="padding:12px 10px;color:var(--fg3);font-size:13px">暂无对话，点击 ＋ 新对话开始</div>';
+    return;
+  }
+  el.innerHTML = sessList.map(s => `
+    <div class="si${s.name === curSess ? ' active' : ''}" onclick="openSess(${JSON.stringify(s.name)});sbClose()">
+      <span>💬</span>
+      <span class="siN">${esc(s.name)}</span>
+      <button class="siD" onclick="delSess(${JSON.stringify(s.name)},event)" title="删除">🗑</button>
+    </div>`).join('');
+}
+
+async function openSess(name) {
+  curSess = name;
+  document.getElementById('hdrTitle').textContent = name;
+  document.getElementById('welcome').style.display = 'none';
+  clearMsgs();
+  renderSessions();
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(name)}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    // history items: {role:'user'|'model', parts:[text], task?, model_name?, timestamp?}
+    for (const m of (d.history || [])) {
+      const role = m.role === 'user' ? 'user' : 'ai';
+      const text = (m.parts || [''])[0] || '';
+      if (text) appendMsg(role, text);
+    }
+    chatBottom();
+  } catch(e) {}
+}
+
+async function delSess(name, ev) {
+  ev.stopPropagation();
+  if (!confirm(`删除对话「${name}」？`)) return;
+  try {
+    await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    if (curSess === name) { curSess = null; document.getElementById('hdrTitle').textContent = 'Koto'; clearMsgs(); document.getElementById('welcome').style.display = ''; }
+    await loadSessions();
+    toast('对话已删除');
+  } catch(e) { toast('删除失败'); }
+}
+
+/* ────────────────── New-session sheet ── */
+function shShow() {
+  document.getElementById('shIn').value = '';
+  document.getElementById('shOverlay').classList.add('on');
+  setTimeout(() => document.getElementById('shIn').focus(), 300);
+}
+function shHide() { document.getElementById('shOverlay').classList.remove('on'); }
+async function shConfirm() {
+  let name = document.getElementById('shIn').value.trim();
+  if (!name) {
+    const d = new Date();
+    name = `对话 ${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  }
+  shHide();
+  try {
+    const r = await fetch('/api/sessions', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name })
+    });
+    if (!r.ok) { toast('创建失败'); return; }
+    await loadSessions();
+    openSess(name);
+  } catch(e) { toast('创建失败'); }
+}
+
+/* ────────────────── Messages ── */
+function clearMsgs() {
+  document.querySelectorAll('#chat .row').forEach(e => e.remove());
+}
+
+function appendMsg(role, html_or_text, rawMd = false) {
+  const chat = document.getElementById('chat');
+  const row = document.createElement('div');
+  row.className = `row ${role === 'user' ? 'u' : ''}`;
+
+  const av = document.createElement('div');
+  av.className = `av ${role === 'user' ? 'usr' : 'ai'}`;
+  av.textContent = role === 'user' ? '我' : '言';
+
+  const bbl = document.createElement('div');
+  bbl.className = `bbl ${role === 'user' ? 'usr' : 'ai'}`;
+
+  if (role === 'user') {
+    bbl.innerHTML = esc(html_or_text).replace(/\n/g, '<br>');
+  } else if (rawMd) {
+    bbl.innerHTML = html_or_text; // pre-rendered
+    addCopyBtns(bbl);
+    hlCode(bbl);
+    katexRender(bbl);
+  } else {
+    bbl.innerHTML = md(html_or_text);
+    addCopyBtns(bbl);
+    hlCode(bbl);
+    katexRender(bbl);
+  }
+
+  row.appendChild(av);
+  row.appendChild(bbl);
+  chat.appendChild(row);
+  return { row, bbl };
+}
+
+function appendTyping() {
+  const chat = document.getElementById('chat');
+  const row = document.createElement('div');
+  row.className = 'row'; row.id = '_typing';
+  row.innerHTML = `<div class="av ai">言</div><div class="bbl ai"><div class="dots"><span></span><span></span><span></span></div></div>`;
+  chat.appendChild(row);
+  chatBottom();
+}
+function removeTyping() { const t = document.getElementById('_typing'); if (t) t.remove(); }
+
+function addCopyBtns(bbl) {
+  bbl.querySelectorAll('pre').forEach(pre => {
+    if (pre.querySelector('.cpBtn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'cpBtn'; btn.textContent = '复制';
+    btn.onclick = () => { navigator.clipboard.writeText(pre.textContent).then(() => { btn.textContent = '✓'; setTimeout(() => btn.textContent = '复制', 1500); }); };
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
+}
+function hlCode(el) { if (window.hljs) el.querySelectorAll('pre code:not(.hljs)').forEach(c => hljs.highlightElement(c)); }
+function katexRender(el) {
+  if (!window.renderMathInElement) return;
+  try { renderMathInElement(el, { delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}], throwOnError:false }); } catch(e) {}
+}
+function md(text) {
+  if (!window.marked) return esc(text).replace(/\n/g,'<br>');
+  try { marked.setOptions({breaks:true,gfm:true}); return marked.parse(text); }
+  catch(e) { return esc(text).replace(/\n/g,'<br>'); }
+}
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/* ────────────────── Send message ── */
+async function sendMsg() {
+  if (generating) return;
+  const inp = document.getElementById('txIn');
+  const text = inp.value.trim();
+  if (!text && !pendFiles.length) return;
+
+  // Auto-create session if none exists
+  if (!curSess) {
+    const d = new Date();
+    const name = `对话 ${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    try {
+      await fetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+      curSess = name;
+      document.getElementById('hdrTitle').textContent = name;
+      document.getElementById('welcome').style.display = 'none';
+      sessList.unshift({name});
+      renderSessions();
+    } catch(e) {}
+  }
+
+  inp.value = ''; txResize(inp);
+  appendMsg('user', text || '[文件]');
+  chatBottom();
+
+  // File upload path
+  if (pendFiles.length) {
+    await sendWithFiles(text);
+    return;
+  }
+
+  // Text stream path
+  await streamChat(text);
+}
+
+async function streamChat(text) {
+  const payload = { session: curSess, message: text };
+
+  startGen();
+  appendTyping();
+  abortCtrl = new AbortController();
+
+  let fullText = '';
+  let thinkText = '';
+  let aiRow = null; let aiBbl = null;
+  let started = false;
+
+  try {
+    const resp = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+      signal: abortCtrl.signal
+    });
+
+    if (!resp.ok) {
+      removeTyping();
+      const raw = await resp.text().catch(() => '');
+      appendMsg('ai', `⚠️ 请求失败 (${resp.status})。请重启 Koto 后重试。`, false);
+      stopGen(); return;
+    }
+
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    removeTyping();
+    const r = appendMsg('ai', '');
+    aiRow = r.row; aiBbl = r.bbl;
+    // Create mutable status line inside bubble
+    const stLine = document.createElement('div'); stLine.className = 'stLine'; stLine.style.display = 'none';
+    aiBbl.appendChild(stLine);
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (!raw || raw === '[DONE]') continue;
+        let ev;
+        try { ev = JSON.parse(raw); } catch { continue; }
+        handleSSE(ev, aiBbl, stLine, () => fullText, (t) => { fullText = t; }, () => thinkText, (t) => { thinkText = t; });
+      }
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      removeTyping();
+      if (!aiRow) appendMsg('ai', `⚠️ 连接失败: ${e.message}`);
+      else { fullText += '\n\n⚠️ 连接中断'; updateBbl(aiBbl, fullText, thinkText); }
+    }
+  } finally {
+    abortCtrl = null;
+    stopGen();
+    chatBottom();
+    loadSessions();
+  }
+}
+
+/* Handle each SSE event and update the AI bubble.
+   getters/setters passed as closures so we can mutate the caller's vars. */
+function handleSSE(ev, bbl, stLine, getFullText, setFullText, getThink, setThink) {
+  const t = ev.type;
+
+  if (t === 'token') {
+    stLine.style.display = 'none';
+    setFullText(getFullText() + (ev.content || ''));
+    updateBbl(bbl, getFullText(), getThink());
+    scrollIfNear();
+  } else if (t === 'thinking') {
+    setThink(getThink() + (ev.message || ev.text || ''));
+    updateBbl(bbl, getFullText(), getThink());
+    scrollIfNear();
+  } else if (t === 'progress' || t === 'status') {
+    const msg = ev.message || ev.text || '';
+    if (msg) {
+      stLine.style.display = 'flex';
+      stLine.innerHTML = `<div class="stSpin"></div><span>${esc(msg)}</span>`;
+      // If there's a progress %, show a mini bar
+      if (typeof ev.progress === 'number' && ev.progress > 0) {
+        stLine.innerHTML += `<span style="margin-left:auto;font-size:11px;color:var(--fg3)">${ev.progress}%</span>`;
+      }
+    }
+    scrollIfNear();
+  } else if (t === 'classification') {
+    // Update model badge with detected model
+    if (ev.model) setBadge(ev.model);
+    if (ev.task_type) document.getElementById('genTxt').textContent = `Koto · ${ev.task_type}…`;
+  } else if (t === 'info') {
+    setFullText(getFullText() + `*${ev.message || ''}*\n\n`);
+    updateBbl(bbl, getFullText(), getThink());
+  } else if (t === 'error') {
+    stLine.style.display = 'none';
+    setFullText(getFullText() + `\n\n❌ ${ev.message || '未知错误'}`);
+    updateBbl(bbl, getFullText(), getThink());
+  } else if (t === 'done') {
+    stLine.style.display = 'none';
+    if (ev.saved_files && ev.saved_files.length) {
+      let extra = '\n\n**✅ 已生成文件：**\n';
+      ev.saved_files.forEach(f => { extra += `- \`${f}\`\n`; });
+      setFullText(getFullText() + extra);
+    }
+    updateBbl(bbl, getFullText(), getThink());
+    if (ev.model) setBadge(ev.model);
+  }
+}
+
+function updateBbl(bbl, text, think) {
+  let html = '';
+  if (think) {
+    html += `<div class="thBlk"><div class="thLbl">🧠 思考过程</div>${esc(think).replace(/\n/g,'<br>')}</div>`;
+  }
+  html += md(text);
+  // Preserve the status line dom node if present
+  const stLine = bbl.querySelector('.stLine');
+  bbl.innerHTML = html;
+  if (stLine) bbl.appendChild(stLine);
+  addCopyBtns(bbl);
+  hlCode(bbl);
+  katexRender(bbl);
+}
+
+async function quickSend(text) {
+  document.getElementById('txIn').value = text;
+  await sendMsg();
+}
+
+/* ────────────────── File upload ── */
+async function sendWithFiles(text) {
+  startGen();
+  appendTyping();
+
+  const form = new FormData();
+  form.append('session', curSess);
+  form.append('message', text || '请分析这个文件');
+  pendFiles.forEach(f => form.append('file', f));
+  clearFiles();
+
+  abortCtrl = new AbortController();
+  let fullText = ''; let thinkText = '';
+  let aiRow = null; let aiBbl = null;
+
+  try {
+    const resp = await fetch('/api/chat/file', { method:'POST', body:form, signal:abortCtrl.signal });
+
+    if (!resp.ok) {
+      removeTyping();
+      appendMsg('ai', `⚠️ 文件上传失败 (${resp.status})`);
+      stopGen(); return;
+    }
+
+    const ct = resp.headers.get('Content-Type') || '';
+
+    // File API may return SSE or plain JSON
+    if (ct.includes('text/event-stream')) {
+      // SSE path (same as chat stream)
+      removeTyping();
+      const r = appendMsg('ai', '');
+      aiRow = r.row; aiBbl = r.bbl;
+      const stLine = document.createElement('div'); stLine.className = 'stLine'; stLine.style.display = 'none';
+      aiBbl.appendChild(stLine);
+
+      const reader = resp.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, {stream:true});
+        const lines = buf.split('\n'); buf = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (!raw) continue;
+          let ev; try { ev = JSON.parse(raw); } catch { continue; }
+          handleSSE(ev, aiBbl, stLine, () => fullText, t => { fullText = t; }, () => thinkText, t => { thinkText = t; });
+        }
+      }
+    } else {
+      // JSON path
+      const d = await resp.json();
+      removeTyping();
+      appendMsg('ai', d.response || d.message || JSON.stringify(d));
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      removeTyping();
+      appendMsg('ai', `⚠️ 文件处理失败: ${e.message}`);
+    }
+  } finally {
+    abortCtrl = null;
+    stopGen();
+    chatBottom();
+    loadSessions();
+  }
+}
+
+/* ────────────────── Generating state ── */
+function startGen() {
+  generating = true;
+  document.getElementById('genBar').classList.add('on');
+  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('sendBtn').classList.add('stop');
+  document.getElementById('sendBtn').onclick = stopGen;
+  document.getElementById('sendBtn').innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
+}
+function stopGen() {
+  generating = false;
+  document.getElementById('genBar').classList.remove('on');
+  document.getElementById('genTxt').textContent = 'Koto 正在思考…';
+  document.getElementById('sendBtn').disabled = false;
+  document.getElementById('sendBtn').classList.remove('stop');
+  document.getElementById('sendBtn').onclick = sendMsg;
+  document.getElementById('sendBtn').innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
+}
+async function stopGen_withInterrupt() {
+  if (abortCtrl) { abortCtrl.abort(); abortCtrl = null; }
+  try {
+    if (curSess) await fetch('/api/chat/interrupt', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ session: curSess })  // API expects 'session' key
+    });
+  } catch(e) {}
+  stopGen();
+  removeTyping();
+}
+// Wire stop button to full interrupt
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('stopBtn').onclick = stopGen_withInterrupt;
+});
+
+/* ────────────────── Input helpers ── */
+function txResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+function txKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault(); sendMsg();
+  }
+}
+
+/* ────────────────── Files ── */
+function onFileChg(ev) {
+  pendFiles = [...pendFiles, ...Array.from(ev.target.files)];
+  renderFilePrev();
+  ev.target.value = '';
+}
+function renderFilePrev() {
+  const el = document.getElementById('filePrev');
+  if (!pendFiles.length) { el.classList.remove('on'); el.innerHTML = ''; return; }
+  el.classList.add('on');
+  el.innerHTML = pendFiles.map((f,i) => `
+    <div class="fChip"><span>${fileIcon(f.name)} ${esc(f.name)}</span>
+    <button class="fChipRm" onclick="rmFile(${i})">×</button></div>`).join('');
+}
+function rmFile(i) { pendFiles.splice(i,1); renderFilePrev(); }
+function clearFiles() { pendFiles = []; renderFilePrev(); }
+function fileIcon(n) { const ext=(n.split('.').pop()||'').toLowerCase(); return {pdf:'📄',doc:'📝',docx:'📝',png:'🖼️',jpg:'🖼️',jpeg:'🖼️',gif:'🖼️',webp:'🖼️',csv:'📊',xlsx:'📊',xls:'📊',json:'📋',txt:'📃',md:'📃'}[ext]||'📎'; }
+
+/* ────────────────── Scroll ── */
+function chatBottom() { const c=document.getElementById('chat'); c.scrollTop=c.scrollHeight; }
+function scrollIfNear() { const c=document.getElementById('chat'); if (c.scrollHeight-c.scrollTop-c.clientHeight<140) c.scrollTop=c.scrollHeight; }
+function watchScroll() {
+  const c=document.getElementById('chat'),b=document.getElementById('scrollDown');
+  c.addEventListener('scroll', () => { b.classList.toggle('on', c.scrollHeight-c.scrollTop-c.clientHeight>160); }, {passive:true});
+}
+
+/* ────────────────── Toast ── */
+function toast(msg, ms=2500) {
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('on');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer=setTimeout(() => t.classList.remove('on'), ms);
+}
+
+/* ────────────────── Model badge ── */
+function setBadge(m) {
+  if (!m) return;
+  const short = m.replace('gemini-','G').replace('-preview','').replace('flash','F').replace('pro','Pro').replace('--','-');
+  document.getElementById('hdrBadge').textContent = short;
+}
+
+/* ────────────────── Voice ── */
+async function initVoice() {
+  let lbl = '🖥️ 本地语音识别';
+  try {
+    const r = await fetch('/api/voice/stt_status');
+    const d = await r.json();
+    const fast = d.fast || {};
+    if (fast.engine === 'vosk' || fast.engine === 'vosk_sr') {
+      lbl = '🖥️ 本地离线 (Vosk)';
+    } else if (fast.engine === 'win32_sapi') {
+      lbl = '🖥️ 本地离线 (Windows SAPI)';
+    } else if (fast.available) {
+      lbl = `🖥️ 本地 (${fast.label || fast.engine})`;
+    } else {
+      lbl = '⏳ 正在准备离线模型…';
+    }
+  } catch(e) {}
+  document.getElementById('voEngLbl').textContent = lbl;
+  document.getElementById('spVoiceEng').textContent = lbl;
+}
+
+function waveStartSR() {
+  waveStopSR();
+  const bars = [0,1,2,3,4,5,6].map(i => document.getElementById(`vb${i}`));
+  let t = 0;
+  vSRTimer = setInterval(() => {
+    t++;
+    bars.forEach((b, i) => {
+      if (!b) return;
+      const h = Math.round(8 + 28 * Math.abs(Math.sin((t * 0.18) + i * 0.65)));
+      b.style.height = h + 'px';
+    });
+  }, 50);
+}
+
+function waveStopSR() {
+  if (vSRTimer) { clearInterval(vSRTimer); vSRTimer = null; }
+  [0,1,2,3,4,5,6].forEach(i => { const b = document.getElementById(`vb${i}`); if (b) b.style.height = ''; });
+}
+
+// ──────────── Local Vosk SSE (本地离线，无云端) ────────────
+function _voiceClose() {
+  waveStopSR();
+  voiceRec = false;
+  vSR = null;
+  vSRAbort = null;
+  document.getElementById('micBtn').classList.remove('rec');
+  document.getElementById('voiceOv').classList.remove('on');
+}
+
+async function _startServerListen() {
+  if (voiceRec) return;
+  voiceRec = true;
+  document.getElementById('micBtn').classList.add('rec');
+  const ovEl   = document.getElementById('voiceOv');
+  const lblEl  = document.getElementById('voLbl');
+  const prevEl = document.getElementById('voPrev');
+  ovEl.classList.add('on');
+  lblEl.textContent  = '🎤 正在聆听…';
+  prevEl.textContent = '';
+  waveStartSR();
+
+  let finalText = '';
+  let es = null;
+  vSRAbort = { abort() { if (es) { es.close(); es = null; } } };
+
+  es = new EventSource('/api/voice/stream');
+
+  es.onmessage = async (evt) => {
+    let d;
+    try { d = JSON.parse(evt.data); } catch { return; }
+
+    if (d.type === 'ping') {
+      if (!finalText)
+        lblEl.textContent = d.elapsed !== undefined ? `⏱️ 请开始说话… ${d.elapsed}s` : '🎤 正在聆听…';
+
+    } else if (d.type === 'partial') {
+      prevEl.textContent = d.text || '';
+      lblEl.textContent  = '✨ 识别中…';
+
+    } else if (d.type === 'final') {
+      finalText = (d.text || '').trim();
+      es.close(); es = null;
+      _voiceClose();
+      if (!finalText) { toast('⚠️ 未检测到语音'); return; }
+      const inp = document.getElementById('txIn');
+      inp.value = finalText; txResize(inp);
+      if (voiceAuto) await sendMsg(); else { inp.focus(); toast('✅ 识别完成'); }
+
+    } else if (d.type === 'error') {
+      es.close(); es = null;
+      _voiceClose();
+      toast(d.message || '❌ 识别失败，请重试');
+    }
+  };
+
+  es.onerror = () => {
+    if (!voiceRec) return;
+    if (es) { es.close(); es = null; }
+    _voiceClose();
+    if (!finalText) toast('❌ 连接中断，请重试');
+  };
+}
+
+// ──────────── Public API ────────────
+function voiceToggle() {
+  if (voiceRec || vSR) { voiceStop(); return; }
+  _startServerListen();
+}
+
+function voiceStop() {
+  // 只更新提示文字，让 Vosk 在说话结束时自然停止并返回结果
+  document.getElementById('voLbl').textContent = '✨ 正在处理…';
+}
+
+function voiceCancel() {
+  if (vSRAbort) vSRAbort.abort();
+  _voiceClose();
+}
+</script>
+</body>
+</html>

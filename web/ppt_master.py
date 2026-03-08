@@ -155,7 +155,7 @@ class PPTContentPlanner:
         self.ai_client = ai_client
         # 使用 gemini-2.5-flash 为默认，但优先使用能用的模型
         self.model_name = model_name
-        self._fallback_models = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-2.0-flash"]
+        self._fallback_models = ["gemini-2.5-flash", "gemini-3-flash-preview"]
     
     async def plan_content_structure(
         self,
@@ -365,7 +365,7 @@ class PPTContentPlanner:
                 )
             except Exception:
                  response = self.ai_client.models.generate_content(
-                    model="gemini-2.0-flash", # Faster fallback
+                    model="gemini-2.5-flash", # Faster fallback
                     contents=prompt,
                     config={"response_mime_type": "application/json"}
                 )

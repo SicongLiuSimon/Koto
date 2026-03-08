@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koto Skill 库 — 风格市场</title>
+  <link rel="stylesheet" href="/static/css/skill_marketplace.css">
+</head>
+<body>
+<div class="sm-app">
+
+  <!-- ════════════ Top Navigation ════════════ -->
+  <nav class="sm-nav">
+    <div class="sm-nav-title">
+      <span class="logo">言</span>
+      <span>Koto Skill 库</span>
+    </div>
+
+    <div class="sm-search-bar">
+      <span class="search-icon">🔍</span>
+      <input
+        id="sm-search-input"
+        type="text"
+        placeholder="搜索技能名称、描述、标签…"
+        autocomplete="off"
+        spellcheck="false"
+      >
+    </div>
+
+    <div class="sm-nav-actions">
+      <a href="/" class="btn btn-secondary btn-sm">← 返回主界面</a>
+    </div>
+  </nav>
+
+  <!-- ════════════ Tab Bar ════════════ -->
+  <div class="sm-tabs">
+    <button class="sm-tab active" data-tab="catalog">
+      🏪 技能市场
+      <span class="tab-count" id="catalog-count">—</span>
+    </button>
+    <button class="sm-tab" data-tab="library">
+      📦 我的技能库
+      <span class="tab-count" id="library-count">—</span>
+    </button>
+    <button class="sm-tab" data-tab="studio">
+      ✨ 创作工坊
+    </button>
+    <button class="sm-tab" data-tab="import-export">
+      ⬆️⬇️ 导入/导出
+    </button>
+    <button class="sm-tab" data-tab="stats">
+      📊 统计
+    </button>
+  </div>
+
+  <!-- ════════════ Main Body ════════════ -->
+  <div class="sm-main">
+
+    <!-- ── Sidebar ── -->
+    <aside class="sm-sidebar">
+      <div class="sm-sidebar-section">分类</div>
+      <div class="sm-sidebar-item active" data-cat="all">
+        <span>🔷 全部</span>
+        <span class="item-count" data-cat="all">—</span>
+      </div>
+      <div class="sm-sidebar-item" data-cat="behavior">
+        <span>⚙️ 行为</span>
+        <span class="item-count" data-cat="behavior">—</span>
+      </div>
+      <div class="sm-sidebar-item" data-cat="style">
+        <span>🎨 风格</span>
+        <span class="item-count" data-cat="style">—</span>
+      </div>
+      <div class="sm-sidebar-item" data-cat="domain">
+        <span>🔬 领域</span>
+        <span class="item-count" data-cat="domain">—</span>
+      </div>
+      <div class="sm-sidebar-item" data-cat="custom">
+        <span>✨ 自定义</span>
+        <span class="item-count" data-cat="custom">—</span>
+      </div>
+
+      <div class="sm-sidebar-section" style="margin-top:16px">快捷操作</div>
+      <div class="sm-sidebar-item" onclick="switchTab('studio')">
+        <span>🪄 新建技能</span>
+      </div>
+      <div class="sm-sidebar-item" onclick="switchTab('import-export')">
+        <span>📥 导入 .kotosk</span>
+      </div>
+    </aside>
+
+    <!-- ════════ Panel: Catalog ════════ -->
+    <div id="panel-catalog" class="sm-content sm-panel">
+
+      <!-- Active Skills Bar -->
+      <div class="active-count-bar" id="active-count-bar">
+        <div class="active-dot"></div>
+        <span class="bar-label">当前激活：</span>
+        <div class="active-pills" id="active-pills">
+          <span class="bar-text">加载中…</span>
+        </div>
+        <a href="/" style="margin-left:auto;font-size:11px;color:var(--text-muted);text-decoration:none" title="去对话中感受效果">
+          ↗ 激活的 Skill 已自动注入所有对话
+        </a>
+      </div>
+
+      <div class="sm-results-header">
+        <span class="sm-results-count" id="results-count">加载中…</span>
+        <select id="sort-select" class="sm-sort-select">
+          <option value="name">按名称排序</option>
+          <option value="enabled">已启用优先</option>
+          <option value="rating">按评分排序</option>
+        </select>
+      </div>
+
+      <div class="sm-grid" id="catalog-grid">
+        <!-- Filled by JS -->
+      </div>
+    </div>
+
+    <!-- ════════ Panel: Library ════════ -->
+    <div id="panel-library" class="sm-content sm-panel hidden">
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <h2 style="font-size:18px;margin-bottom:4px">我的技能库</h2>
+          <p style="color:var(--text-muted);font-size:13px">你创建或安装的自定义技能</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary btn-sm" onclick="switchTab('studio')">✨ 新建技能</button>
+          <button class="btn btn-secondary btn-sm" onclick="switchTab('import-export')">📥 从文件导入</button>
+        </div>
+      </div>
+
+      <div class="sm-grid" id="library-grid">
+        <!-- Filled by JS -->
+      </div>
+    </div>
+
+    <!-- ════════ Panel: Studio ════════ -->
+    <div id="panel-studio" class="sm-content sm-panel hidden">
+      <div class="sm-studio">
+        <h2>✨ Skill 创作工坊</h2>
+        <p class="studio-desc">将你的交流风格、个性想法转化为可复用的 Skill 模块。无需编程，AI 自动合成高质量 Prompt。</p>
+
+        <!-- Source Mode Toggle -->
+        <div class="source-tabs">
+          <button class="source-tab active" data-mode="description">📝 描述风格</button>
+          <button class="source-tab" data-mode="session">💬 从对话提取</button>
+        </div>
+
+        <!-- ── Mode: Description ── -->
+        <div id="source-description">
+          <div class="form-section">
+            <div class="form-section-title">🏷️ 基本信息</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="studio-name">技能名称 *</label>
+                <input class="form-control" id="studio-name" type="text"
+                       placeholder="如：暖心闺蜜、极简主义、代码侦探…">
+              </div>
+              <div class="form-group">
+                <label for="studio-icon">图标 Emoji</label>
+                <input class="form-control" id="studio-icon" type="text"
+                       placeholder="🎭" value="🎭" maxlength="4">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="studio-description">风格描述 * <span style="color:var(--text-muted);font-weight:400">（用自然语言描述你想要的交流风格）</span></label>
+              <textarea class="form-control" id="studio-description"
+                        placeholder="例如：像老朋友一样聊天，温柔、有耐心、会说俏皮话，遇到问题会提供鼓励。擅长帮助整理思路，回答不会太长不会太短…"
+                        rows="4"></textarea>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="studio-category">分类</label>
+                <select class="form-control" id="studio-category">
+                  <option value="style">🎨 风格</option>
+                  <option value="behavior">⚙️ 行为</option>
+                  <option value="domain">🔬 领域</option>
+                  <option value="custom">✨ 自定义</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="studio-domain">专业领域（可选）</label>
+                <select class="form-control" id="studio-domain">
+                  <option value="general">通用</option>
+                  <option value="coding">💻 编程开发</option>
+                  <option value="writing">✍️ 写作创意</option>
+                  <option value="research">🔍 研究分析</option>
+                  <option value="finance">💹 金融财务</option>
+                  <option value="legal">⚖️ 法律</option>
+                  <option value="medical">🏥 医疗健康</option>
+                  <option value="education">🎓 教育学习</option>
+                  <option value="marketing">📣 营销推广</option>
+                  <option value="productivity">⚡ 效率工具</option>
+                  <option value="lifestyle">🌿 生活方式</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Style Sliders -->
+          <div class="form-section">
+            <div class="form-section-title">🎛️ 风格微调 <span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">（可选，AI 会根据描述自动推断）</span></div>
+            <div class="slider-grid">
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>语气正式度</span>
+                  <span class="slider-val" id="val-slider-formality">0.5</span>
+                </div>
+                <input type="range" id="slider-formality" class="style-slider" min="0" max="1" step="0.1" value="0.5">
+                <div class="slider-ends"><span>随意口语</span><span>正式书面</span></div>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>回答详细度</span>
+                  <span class="slider-val" id="val-slider-verbosity">0.5</span>
+                </div>
+                <input type="range" id="slider-verbosity" class="style-slider" min="0" max="1" step="0.1" value="0.5">
+                <div class="slider-ends"><span>极简精炼</span><span>非常详细</span></div>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>共情程度</span>
+                  <span class="slider-val" id="val-slider-empathy">0.5</span>
+                </div>
+                <input type="range" id="slider-empathy" class="style-slider" min="0" max="1" step="0.1" value="0.5">
+                <div class="slider-ends"><span>客观理性</span><span>温暖关怀</span></div>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>结构化程度</span>
+                  <span class="slider-val" id="val-slider-structure">0.5</span>
+                </div>
+                <input type="range" id="slider-structure" class="style-slider" min="0" max="1" step="0.1" value="0.5">
+                <div class="slider-ends"><span>自由散文</span><span>高度结构化</span></div>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>创意发散度</span>
+                  <span class="slider-val" id="val-slider-creativity">0.3</span>
+                </div>
+                <input type="range" id="slider-creativity" class="style-slider" min="0" max="1" step="0.1" value="0.3">
+                <div class="slider-ends"><span>保守务实</span><span>创意发散</span></div>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>积极鼓励度</span>
+                  <span class="slider-val" id="val-slider-positivity">0.6</span>
+                </div>
+                <input type="range" id="slider-positivity" class="style-slider" min="0" max="1" step="0.1" value="0.6">
+                <div class="slider-ends"><span>客观批判</span><span>积极鼓励</span></div>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>主动建议度</span>
+                  <span class="slider-val" id="val-slider-proactivity">0.4</span>
+                </div>
+                <input type="range" id="slider-proactivity" class="style-slider" min="0" max="1" step="0.1" value="0.4">
+                <div class="slider-ends"><span>只答问题</span><span>主动延伸</span></div>
+              </div>
+
+              <div class="slider-group">
+                <div class="slider-label">
+                  <span>幽默风趣度</span>
+                  <span class="slider-val" id="val-slider-humor">0.2</span>
+                </div>
+                <input type="range" id="slider-humor" class="style-slider" min="0" max="1" step="0.1" value="0.2">
+                <div class="slider-ends"><span>严肃认真</span><span>幽默风趣</span></div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Prompt Preview -->
+          <div class="form-section">
+            <div class="form-section-title">
+              👁️ 生成预览
+              <span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);margin-left:8px">
+                实时生成的 System Prompt
+              </span>
+              <span id="studio-suggested-id" style="margin-left:auto;font-size:11px;color:var(--text-muted);font-family:monospace;text-transform:none;letter-spacing:0"></span>
+            </div>
+            <div
+              class="prompt-preview-block prompt-preview-placeholder"
+              id="prompt-preview"
+            >在上方填写技能名称和风格描述后，这里将实时预览生成的系统 Prompt…</div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+              <input type="checkbox" id="studio-enabled" style="accent-color:var(--accent-green);width:15px;height:15px">
+              创建后立即启用
+            </label>
+            <button class="btn btn-primary" id="studio-build-btn" style="margin-left:auto;padding:9px 24px">
+              ✨ 生成 Skill
+            </button>
+          </div>
+        </div>
+
+        <!-- ── Mode: Session ── -->
+        <div id="source-session" class="hidden">
+
+          <!-- Step indicators -->
+          <div class="session-wizard-steps">
+            <div class="wizard-step active" id="wstep-1">
+              <div class="step-num">1</div>
+              <div class="step-label">选择对话</div>
+            </div>
+            <div class="step-connector"></div>
+            <div class="wizard-step" id="wstep-2">
+              <div class="step-num">2</div>
+              <div class="step-label">命名技能</div>
+            </div>
+            <div class="step-connector"></div>
+            <div class="wizard-step" id="wstep-3">
+              <div class="step-num">3</div>
+              <div class="step-label">提取并预览</div>
+            </div>
+          </div>
+
+          <!-- Step 1: Pick a session -->
+          <div class="form-section" id="session-step-1">
+            <div class="form-section-title">💬 第一步：选择一段对话</div>
+            <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">
+              系统会分析该对话中 AI 的回复风格（语气、格式偏好、表达方式），并自动生成与之匹配的 Skill Prompt。
+            </p>
+
+            <div class="session-picker-row">
+              <div class="session-picker-label">从历史对话中选择</div>
+              <button class="btn btn-secondary btn-sm" id="session-refresh-btn" onclick="loadSessionList()" style="margin-left:auto">
+                ↻ 刷新列表
+              </button>
+            </div>
+
+            <div class="session-list" id="session-picker-list">
+              <div class="session-loading">🔄 正在加载对话列表…</div>
+            </div>
+
+            <div style="margin-top:10px">
+              <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">或直接输入 Session ID</label>
+              <input class="form-control" id="studio-session-id" type="text"
+                     placeholder="chats/ 目录中的文件名（去掉 .json 后缀）">
+            </div>
+          </div>
+
+          <!-- Step 2: Name your skill -->
+          <div class="form-section" id="session-step-2" style="margin-top:0">
+            <div class="form-section-title">🏷️ 第二步：命名你的新技能</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="studio-session-name">技能名称 *</label>
+                <input class="form-control" id="studio-session-name" type="text"
+                       placeholder="如：我的日常对话风格、工作汇报模式…">
+              </div>
+              <div class="form-group">
+                <label for="studio-session-icon">图标</label>
+                <input class="form-control" id="studio-session-icon" type="text"
+                       placeholder="💬" value="💬" maxlength="4">
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="studio-session-desc">补充说明（可选）</label>
+              <input class="form-control" id="studio-session-desc" type="text"
+                     placeholder="在分析基础上额外强调的风格要求，如"更幽默"">
+            </div>
+          </div>
+
+          <!-- Step 3: Extract and preview -->
+          <div class="form-section" id="session-step-3" style="margin-top:0">
+            <div class="form-section-title">👁️ 第三步：提取 &amp; 预览</div>
+            <div id="session-extract-result" class="session-extract-placeholder">
+              填写完以上信息后点击「提取技能」按钮，系统将自动分析对话风格并在此预览生成的 Prompt…
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+              <input type="checkbox" id="studio-session-enabled" style="accent-color:var(--accent-green);width:15px;height:15px" checked>
+              创建后立即启用
+            </label>
+            <button class="btn btn-primary" id="studio-session-btn" style="margin-left:auto;padding:9px 24px">
+              💬 提取技能
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ Panel: Import/Export ════════ -->
+    <div id="panel-import-export" class="sm-content sm-panel hidden">
+      <div class="ie-section">
+
+        <!-- Import -->
+        <div class="ie-card">
+          <h3>📥 导入 Skill 包</h3>
+          <p>从 <code style="background:var(--bg-elevated);padding:2px 6px;border-radius:4px;font-size:12px">.kotosk</code> 文件导入，支持批量安装 Skill 包</p>
+
+          <div class="drop-zone" id="drop-zone">
+            <div class="drop-icon">📦</div>
+            <p>拖入 .kotosk 文件，或点击选择文件</p>
+            <p style="margin-top:8px;font-size:12px;color:var(--text-muted)">支持批量 Skill 包导入</p>
+          </div>
+          <input type="file" id="import-file-input" accept=".kotosk" style="display:none">
+
+          <label style="display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;cursor:pointer">
+            <input type="checkbox" id="import-overwrite" style="accent-color:var(--accent-blue)">
+            遇到同名 Skill 时覆盖（谨慎启用）
+          </label>
+        </div>
+
+        <!-- Export -->
+        <div class="ie-card">
+          <h3>⬇️ 导出 Skill 包</h3>
+          <p>选择要导出的 Skill，打包成 .kotosk 文件分享给他人</p>
+
+          <div style="margin-bottom:12px">
+            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">包名称</label>
+            <input class="form-control" id="export-pack-name" type="text"
+                   value="my-skill-pack" placeholder="包名称（用于文件命名）">
+          </div>
+
+          <div class="export-checklist" id="export-checklist">
+            <!-- Filled by JS -->
+          </div>
+
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-secondary btn-sm" onclick="$$('#export-checklist input').forEach(cb=>{cb.checked=true;toggleExportSelect(cb.value,true)})">全选</button>
+            <button class="btn btn-secondary btn-sm" onclick="$$('#export-checklist input').forEach(cb=>{cb.checked=false;state.selectedSkills.clear()});document.getElementById('export-pack-btn').textContent='⬇️ 打包导出 (0)'">清空</button>
+            <button class="btn btn-primary" id="export-pack-btn" style="margin-left:auto">⬇️ 打包导出 (0)</button>
+          </div>
+        </div>
+
+        <!-- Single Export Note -->
+        <div class="ie-card" style="background:rgba(31,111,235,0.05);border-color:rgba(31,111,235,0.2)">
+          <h3 style="color:var(--text-link)">💡 单个 Skill 导出</h3>
+          <p>在「技能市场」或「我的技能库」中打开任意 Skill 的详情面板，点击「⬇️ 导出」按钮可单独导出该 Skill。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════ Panel: Stats ════════ -->
+    <div id="panel-stats" class="sm-content sm-panel hidden">
+      <h2 style="font-size:18px;margin-bottom:4px">📊 技能使用统计</h2>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:20px">Skill 库整体概况</p>
+      <div id="stats-content">
+        <div class="sm-empty">
+          <div class="empty-icon">⏳</div>
+          <p>加载中…</p>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end sm-main -->
+</div><!-- end sm-app -->
+
+<!-- ════════════ Skill Detail Drawer ════════════ -->
+<div class="sm-drawer-overlay" id="sm-drawer-overlay"></div>
+<div class="sm-drawer" id="sm-drawer">
+  <div class="sm-drawer-header">
+    <div class="sm-drawer-icon" id="drawer-icon">🔧</div>
+    <div class="sm-drawer-title-block">
+      <div class="sm-drawer-name" id="drawer-name">技能名称</div>
+      <div class="sm-drawer-sub" id="drawer-sub"></div>
+    </div>
+    <button class="sm-drawer-close" id="drawer-close-btn">✕</button>
+  </div>
+
+  <div class="sm-drawer-body">
+
+    <div class="sm-drawer-section">
+      <h3>描述</h3>
+      <p class="sm-drawer-desc" id="drawer-desc"></p>
+    </div>
+
+    <div class="sm-drawer-section">
+      <h3>激活意图</h3>
+      <p class="sm-drawer-desc" id="drawer-intent" style="font-style:italic"></p>
+    </div>
+
+    <div class="sm-drawer-section">
+      <h3>系统 Prompt 预览</h3>
+      <pre class="sm-prompt-block" id="drawer-prompt"></pre>
+    </div>
+
+    <div class="sm-drawer-section">
+      <h3>输入变量</h3>
+      <div id="drawer-variables"></div>
+    </div>
+
+    <div class="sm-drawer-section">
+      <h3>标签</h3>
+      <div id="drawer-tags" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+    </div>
+
+    <div class="sm-drawer-section">
+      <h3>元信息</h3>
+      <div class="sm-meta-grid" id="drawer-meta"></div>
+    </div>
+
+  </div>
+
+  <div class="sm-drawer-footer" id="drawer-footer">
+    <!-- Filled by JS -->
+  </div>
+</div>
+
+<!-- ════════════ Toast Container ════════════ -->
+<div id="sm-toast-container"></div>
+
+<script src="/static/js/skill_marketplace.js"></script>
+</body>
+</html>

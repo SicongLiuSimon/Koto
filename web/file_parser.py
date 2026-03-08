@@ -80,33 +80,38 @@ class FileParser:
     
     @staticmethod
     def _parse_pdf(file_path: str) -> str:
-        """PDF 文本提取"""
-        try:
-            import PyPDF2
-        except ImportError:
-            raise ImportError("需要安装 PyPDF2: pip install PyPDF2")
-        
+        """PDF 文本提取（尝试 pypdf → PyPDF2 → pdfplumber）"""
         content = []
-        try:
-            with open(file_path, 'rb') as f:
-                pdf_reader = PyPDF2.PdfReader(f)
-                for page_num, page in enumerate(pdf_reader.pages):
-                    text = page.extract_text()
-                    if text.strip():
-                        content.append(f"[第 {page_num + 1} 页]\n{text}")
-        except Exception as e:
-            # 回退：尝试用 pdfplumber
+
+        # 优先: pypdf（PyPDF2 的继任者，纯Python，已作为 pypdf 包发布）
+        for pkg_name, mod_name in [("pypdf", "pypdf"), ("PyPDF2", "PyPDF2")]:
             try:
-                import pdfplumber
-                with pdfplumber.open(file_path) as pdf:
-                    for page_num, page in enumerate(pdf.pages):
-                        text = page.extract_text()
+                mod = __import__(mod_name)
+                PdfReader = getattr(mod, "PdfReader")
+                with open(file_path, 'rb') as f:
+                    reader = PdfReader(f)
+                    for page_num, page in enumerate(reader.pages):
+                        text = page.extract_text() or ""
                         if text.strip():
                             content.append(f"[第 {page_num + 1} 页]\n{text}")
+                if content:
+                    return "\n\n".join(content)
             except ImportError:
-                raise ImportError(f"PDF 解析失败，需要 PyPDF2 或 pdfplumber: {e}")
-        
-        return "\n\n".join(content)
+                continue
+            except Exception:
+                break  # 库可用但解析失败，尝试 pdfplumber
+
+        # 回退: pdfplumber
+        try:
+            import pdfplumber
+            with pdfplumber.open(file_path) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    text = page.extract_text() or ""
+                    if text.strip():
+                        content.append(f"[第 {page_num + 1} 页]\n{text}")
+            return "\n\n".join(content)
+        except ImportError:
+            raise ImportError("需要安装 pypdf 或 pdfplumber: pip install pypdf")
     
     @staticmethod
     def _parse_docx(file_path: str) -> str:

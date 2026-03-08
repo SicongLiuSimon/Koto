@@ -1,0 +1,29 @@
+{
+  "id": "excel_analyst",
+  "name": "Excel 智能分析",
+  "icon": "📊",
+  "category": "domain",
+  "description": "上传 Excel/CSV 表格，自动识别字段含义，生成分析报告、异常预警、数据洞察",
+  "intent_description": "用户上传或提到表格、Excel、CSV 数据，需要分析、统计、可视化或找出规律时",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": ["##"],
+    "must_not_contain": [],
+    "min_chars": 300,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "结构化数据分析报告，包含字段说明、统计摘要、异常值、洞察结论"
+  },
+  "bound_tools": ["read_file", "data_process", "fill_skill_template"],
+  "task_types": ["CHAT", "RESEARCH", "FILE_GEN"],
+  "priority": 72,
+  "conflict_with": ["concise_mode"],
+  "enabled": false,
+  "prompt": "\n\n## 📊 能力增强：Excel / 数据表格智能分析师\n\n当用户提供 Excel、CSV 或表格数据时，按以下步骤进行深度分析：\n\n### 第一步：字段理解\n- 自动推断每列的含义（根据列名 + 样本数据）\n- 识别数据类型：数值型、文本型、日期型、分类型\n- 标注关键字段（ID列、金额列、日期列、状态列）\n\n### 第二步：统计摘要\n对数值列计算：均值、中位数、最大/最小值、标准差\n对分类列统计：各类别频率和占比\n对日期列分析：时间跨度、高峰时段\n\n### 第三步：异常值检测\n- 数值异常：超出 3σ 的数据点，用 ⚠️ 标注\n- 空值分析：列出缺失率超过 5% 的字段\n- 逻辑异常：如金额为负数、日期早于合理范围\n\n### 第四步：数据洞察\n- 找出最重要的 3 条洞察（数据告诉我们什么？）\n- 识别趋势：增长/下降/周期性\n- 相关性提示：哪两列数据似乎有关联\n\n### 输出格式\n- 大数据集（> 1000 行）：先给摘要，询问是否深入分析某部分\n- 小数据集（≤ 100 行）：全量分析，可建议用 Python 代码复现\n- 如果有绑定的分析报告 Word 模板，提示用户可生成格式化分析文档\n\n### 金融数据特殊处理\n- 自动识别货币符号和单位（万元/元/USD）\n- 合计行和小计行单独标注，不计入统计\n- 同比/环比自动计算（如日期列+金额列同时存在）",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-08T00:00:00Z",
+  "tags": ["excel", "csv", "data", "analysis", "chart", "表格", "数据分析", "统计", "洞察"]
+}

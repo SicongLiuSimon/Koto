@@ -15,36 +15,41 @@ class MemoryIntegration:
     @staticmethod
     def create_extraction_prompt(user_msg: str, ai_msg: str, history: Optional[List] = None) -> str:
         """
-        创建用于LLM提取记忆的prompt
+        创建用于LLM提取记忆的prompt（增强版）
         """
-        prompt = f"""分析以下对话，提取用户的特征和偏好信息。
+        prompt = f"""分析以下对话，提取用户的特征、偏好和值得长期记住的信息。
 
 **对话内容：**
-用户：{user_msg}
-AI：{ai_msg[:200]}...
+用户：{user_msg[:600]}
+AI：{ai_msg[:400]}
 
 **提取任务：**
 请以JSON格式返回以下信息（只返回JSON，不要其他文字）：
 
 {{
-  "programming_languages": [],  // 提及的编程语言
-  "tools": [],  // 提及的工具（如VSCode、Git等）
-  "domains": [],  // 涉及的领域（如Web开发、AI等）
-  "likes": [],  // 用户明确喜欢的东西
-  "dislikes": [],  // 用户明确不喜欢的东西
-  "communication_style": {{  // 沟通风格偏好
-    "preferred_detail_level": "moderate"  // brief/moderate/detailed
-  }},
-  "memories_to_save": [  // 值得永久记住的信息
+  "programming_languages": [],   // 提及的编程语言
+  "tools": [],                   // 提及的工具、框架、库
+  "domains": [],                 // 涉及的领域
+  "likes": [],                   // 用户明确喜欢的东西
+  "dislikes": [],                // 用户明确不喜欢的东西
+  "communication_style": {{}},   // 沟通风格偏好（preferred_detail_level: brief/moderate/detailed）
+  "memories_to_save": [          // 值得永久记住的信息
     {{"content": "...", "category": "user_preference"}}
   ]
 }}
 
+**category 可选候选：**
+- user_preference: 用户的习惯、偏好、工作方式
+- project_info: 用户正在做的项目、任务、目标
+- fact: 用户的个人信息、背景
+- correction: 用户明确纠正了AI的误差和误解
+
 **提取规则：**
-1. 只提取明确的、重要的信息
-2. 如果某项没有相关信息，留空数组
-3. 偏好信号词：喜欢、不喜欢、倾向、避免、更好、优先等
-4. 仅返回JSON，不要解释文字
+1. 只提取明确、重要、可复用的信息（能跨会话起作用）
+2. 忽略：临时性问题、闲聊、单次性指令
+3. memories_to_save 每条 content 必须是完整短句，可独立理解
+4. 如无内容可记，所有列表返回空
+5. 只返回JSON，不要解释文字
 """
         return prompt
     
@@ -147,36 +152,37 @@ AI：{ai_msg[:200]}...
         避免对每条消息都提取，节省API调用
         """
         # 消息太短，跳过
-        if len(user_msg) < 10:
+        if len(user_msg) < 8:
             return False
-        
-        # 简单的问候语，跳过
-        greetings = ["你好", "hi", "hello", "嗨", "在吗"]
+
+        # 纯闲聊 / 打招呼，跳过
+        greetings = ["你好", "hi", "hello", "嗨", "在吗", "hey", "ok", "okay", "好的", "好"]
         if user_msg.strip().lower() in greetings:
             return False
-        
-        # 包含偏好信号词，提取
-        preference_signals = [
+
+        # 包含偏好 / 纠正信号词，必要提取
+        strong_signals = [
             "喜欢", "不喜欢", "prefer", "倾向", "避免", "不要",
-            "更好", "优先", "希望", "想要"
+            "更好", "优先", "希望", "想要", "编程风格",
+            "记得", "记住", "下次", "以后", "不要再"
         ]
-        
-        if any(signal in user_msg for signal in preference_signals):
+        if any(signal in user_msg for signal in strong_signals):
             return True
-        
-        # 包含技术内容，提取
+
+        # 包含技术内容，需要提取
         tech_keywords = [
             "python", "javascript", "java", "代码", "项目",
-            "开发", "编程", "算法", "数据", "AI"
+            "开发", "编程", "算法", "数据", "AI",
+            "react", "vue", "flask", "django", "fastapi", "docker",
+            "框架", "库", "工具", "数据库"
         ]
-        
         if any(kw in user_msg.lower() for kw in tech_keywords):
             return True
-        
-        # 较长的对话（可能包含有价值信息）
-        if len(user_msg) > 50:
+
+        # 较长的对话（可能包含有价值信息），降低阈值
+        if len(user_msg) > 40:
             return True
-        
+
         return False
     
     @staticmethod

@@ -1,11 +1,191 @@
-// ================= State =================
+﻿// ================= State =================
 // 🔥 VERSION: 2026-02-14-03 - 多文件累加上传修复版
 let currentSession = null;
 let selectedFiles = [];
 let setupComplete = false;
 let lockedTaskType = null;  // 用户手动选择的任务类型
 let selectedModel = 'auto'; // 用户选择的模型 (auto = 自动选择)
+let enableMiniGame = true; // 是否启用等待小游戏
 const MAX_UPLOAD_FILES = 10;
+
+
+// ================= Mini Game (Dino Runner) =================
+let miniGame = {
+    initialized: false,
+    running: false,
+    visible: false,
+    canvas: null,
+    ctx: null,
+    rafId: null,
+    lastFrame: 0,
+    groundY: 90,
+    speed: 160,
+    spawnTimer: 0,
+    score: 0,
+    dino: { x: 20, y: 70, w: 18, h: 18, vy: 0, onGround: true },
+    obstacles: []
+};
+
+function initMiniGame() {
+    if (miniGame.initialized) return;
+    miniGame.canvas = document.getElementById('miniGameCanvas');
+    if (!miniGame.canvas) return;
+    miniGame.ctx = miniGame.canvas.getContext('2d');
+    miniGame.dino.y = miniGame.groundY - miniGame.dino.h;
+    miniGame.initialized = true;
+
+    window.addEventListener('keydown', (e) => {
+        if (!miniGame.visible) return;
+        if (e.code === 'Space') {
+            e.preventDefault();
+            if (!miniGame.running) {
+                startMiniGame();
+            } else {
+                miniGameJump();
+            }
+        }
+    });
+
+    miniGame.canvas.addEventListener('click', () => {
+        if (!miniGame.visible) return;
+        if (!miniGame.running) {
+            startMiniGame();
+        } else {
+            miniGameJump();
+        }
+    });
+}
+
+function showMiniGame() {
+    if (!enableMiniGame) return; // Setting disabled
+
+    const panel = document.getElementById('miniGamePanel');
+
+    if (!panel) return;
+    panel.classList.remove('hidden');
+    miniGame.visible = true;
+    initMiniGame();
+    startMiniGame();
+}
+
+function hideMiniGame() {
+    const panel = document.getElementById('miniGamePanel');
+    if (!panel) return;
+    panel.classList.add('hidden');
+    miniGame.visible = false;
+    stopMiniGame();
+}
+
+function startMiniGame() {
+    if (!miniGame.initialized || miniGame.running) return;
+    resetMiniGame();
+    miniGame.running = true;
+    miniGame.lastFrame = performance.now();
+    miniGame.rafId = requestAnimationFrame(miniGameLoop);
+}
+
+function stopMiniGame() {
+    miniGame.running = false;
+    if (miniGame.rafId) {
+        cancelAnimationFrame(miniGame.rafId);
+        miniGame.rafId = null;
+    }
+}
+
+function resetMiniGame() {
+    miniGame.dino.y = miniGame.groundY - miniGame.dino.h;
+    miniGame.dino.vy = 0;
+    miniGame.dino.onGround = true;
+    miniGame.obstacles = [];
+    miniGame.spawnTimer = 0;
+    miniGame.score = 0;
+}
+
+function miniGameJump() {
+    if (!miniGame.running) return;
+    if (miniGame.dino.onGround) {
+        miniGame.dino.vy = -320;
+        miniGame.dino.onGround = false;
+    }
+}
+
+function miniGameLoop(ts) {
+    if (!miniGame.running) return;
+    const dt = Math.min((ts - miniGame.lastFrame) / 1000, 0.05);
+    miniGame.lastFrame = ts;
+
+    // Update dino physics
+    miniGame.dino.vy += 900 * dt;
+    miniGame.dino.y += miniGame.dino.vy * dt;
+    if (miniGame.dino.y >= miniGame.groundY - miniGame.dino.h) {
+        miniGame.dino.y = miniGame.groundY - miniGame.dino.h;
+        miniGame.dino.vy = 0;
+        miniGame.dino.onGround = true;
+    }
+
+    // Spawn obstacles
+    miniGame.spawnTimer -= dt;
+    if (miniGame.spawnTimer <= 0) {
+        miniGame.spawnTimer = 0.8 + Math.random() * 0.9;
+        miniGame.obstacles.push({ x: 260, y: miniGame.groundY - 12, w: 10 + Math.random() * 6, h: 12 });
+    }
+
+    // Move obstacles
+    const speed = miniGame.speed + Math.min(miniGame.score, 200) * 0.2;
+    miniGame.obstacles.forEach(o => { o.x -= speed * dt; });
+    miniGame.obstacles = miniGame.obstacles.filter(o => o.x + o.w > -10);
+
+    // Collision
+    for (const o of miniGame.obstacles) {
+        if (rectHit(miniGame.dino, o)) {
+            miniGame.running = false;
+            break;
+        }
+    }
+
+    if (miniGame.running) {
+        miniGame.score += dt * 10;
+        drawMiniGame();
+        miniGame.rafId = requestAnimationFrame(miniGameLoop);
+    } else {
+        drawMiniGame(true);
+    }
+}
+
+function rectHit(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function drawMiniGame(gameOver = false) {
+    const ctx = miniGame.ctx;
+    if (!ctx) return;
+    ctx.clearRect(0, 0, miniGame.canvas.width, miniGame.canvas.height);
+
+    // Ground
+    ctx.strokeStyle = '#6c7a91';
+    ctx.beginPath();
+    ctx.moveTo(0, miniGame.groundY + 4);
+    ctx.lineTo(miniGame.canvas.width, miniGame.groundY + 4);
+    ctx.stroke();
+
+    // Dino
+    ctx.fillStyle = '#63c6ff';
+    ctx.fillRect(miniGame.dino.x, miniGame.dino.y, miniGame.dino.w, miniGame.dino.h);
+
+    // Obstacles
+    ctx.fillStyle = '#ef6b6b';
+    miniGame.obstacles.forEach(o => ctx.fillRect(o.x, o.y, o.w, o.h));
+
+    // Score
+    ctx.fillStyle = '#9fb3d1';
+    ctx.font = '11px Segoe UI, sans-serif';
+    ctx.fillText(`Score: ${Math.floor(miniGame.score)}`, 170, 16);
+
+    if (gameOver) {
+        ctx.fillStyle = '#f3b45c';
+        ctx.fillText('Game Over - press Space', 50, 60);
+    }
+}
 
 console.log('🔥 Koto App.js 已加载 - VERSION: 2026-02-14-03');
 
@@ -178,6 +358,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(initVoice, 500);
     initVoicePanel();
     initProactiveUI();
+
+    // 8. 影子追踪：启动时拉取一次待消息，之后每 5 分钟轮询
+    setTimeout(() => {
+        shadowPollPending();
+        setInterval(shadowPollPending, 5 * 60 * 1000);
+    }, 3000);
 });
 
 function hideStartupSplash() {
@@ -1074,6 +1260,7 @@ async function sendMessage(event) {
                 // 累积进度步骤追踪
                 let completedSteps = [];  // [{message, detail}]
                 let currentStage = null;
+                let progressTickTimer = null;  // 1s 计秒器
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -1105,70 +1292,137 @@ async function sendMessage(event) {
                                             scrollToBottom();
                                             lastUpdateTime = Date.now();
                                         }
+                                    } else if (data.type === 'thinking') {
+                                        // thinking events: treat as completed info steps
+                                        const phase = data.phase || 'thinking';
+                                        const phaseIcons = { routing:'🎯', planning:'📋', searching:'🔍', analyzing:'🔬', generating:'✍️', validating:'✅', model:'🤖', context:'🔗', thinking:'💭' };
+                                        const icon = phaseIcons[phase] || '💭';
+                                        completedSteps.push({ message: `${icon} ${data.message}`, detail: data.elapsed ? `${data.elapsed}s` : '' });
+                                        // re-render progress panel (thinking steps shown as ✓)
+                                        let _html = `<div class="doc-progress" style="padding:16px;">`;
+                                        for (const step of completedSteps) {
+                                            _html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;opacity:0.85;"><span style="color:#22c55e;font-size:16px;">✓</span><span style="color:#666;">${step.message}</span>${step.detail ? `<span style="color:#999;font-size:12px;margin-left:4px;">${step.detail}</span>` : ''}</div>`;
+                                        }
+                                        _html += `</div>`;
+                                        bodyEl.innerHTML = _html;
+                                        scrollToBottom();
                                     } else if (data.type === 'progress') {
-                                        // 显示进度（累积已完成步骤）
-                                        const progressPct = data.progress || 0;
+                                        // 显示进度（增量更新，不重绘 bodyEl）
+                                        let progressPct = (typeof data.progress === 'number') ? data.progress : 0;
                                         const progressMsg = data.message || '';
                                         const progressDetail = data.detail || '';
                                         const stage = data.stage || '';
-                                        
-                                        // 检测阶段完成：当 stage 以 _complete 结尾或为 complete 时记录为已完成步骤
+
+                                        if (!progressPct && progressMsg) {
+                                            const match = progressMsg.match(/^\[(\d+)\/(\d+)\]/);
+                                            if (match) {
+                                                const cur = parseInt(match[1], 10);
+                                                const total = parseInt(match[2], 10);
+                                                if (total > 0) progressPct = Math.min(100, Math.round((cur / total) * 100));
+                                            }
+                                        }
+
+                                        showMiniGame();
+
                                         if (stage && (stage.endsWith('_complete') || stage === 'complete')) {
                                             completedSteps.push({ message: progressMsg, detail: progressDetail });
                                             currentStage = null;
                                         } else if (stage && stage !== currentStage) {
-                                            // 阶段切换（非完成），更新当前阶段
                                             currentStage = stage;
                                         }
-                                        
-                                        // 构建累积进度显示
-                                        let progressHtml = `<div class="doc-progress" style="padding:16px;">`;
-                                        
-                                        // 1. 已完成的步骤（带 ✓）
-                                        for (const step of completedSteps) {
-                                            progressHtml += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;opacity:0.85;">`;
-                                            progressHtml += `<span style="color:#22c55e;font-size:16px;">✓</span>`;
-                                            progressHtml += `<span style="color:#666;">${step.message}</span>`;
-                                            if (step.detail) {
-                                                progressHtml += `<span style="color:#999;font-size:12px;margin-left:4px;">${step.detail}</span>`;
-                                            }
-                                            progressHtml += `</div>`;
+
+                                        // 首次创建进度面板（后续增量更新，避免闪烁）
+                                        let progEl = bodyEl.querySelector('.doc-progress');
+                                        if (!progEl) {
+                                            progEl = document.createElement('div');
+                                            progEl.className = 'doc-progress';
+                                            progEl.style.padding = '16px';
+                                            progEl.innerHTML = `
+                                                <div class="prog-steps"></div>
+                                                <div class="prog-current" style="display:flex;align-items:center;gap:8px;margin-top:4px;"></div>
+                                                <div class="prog-detail" style="color:#888;font-size:13px;margin-top:2px;margin-bottom:4px;"></div>
+                                                <div style="background:rgba(0,0,0,0.06);border-radius:8px;height:6px;overflow:hidden;margin-top:8px;">
+                                                    <div class="prog-bar-fill" style="background:linear-gradient(90deg,#4361ee,#3a86ff);height:100%;width:0%;transition:width .4s ease;border-radius:8px;"></div>
+                                                </div>
+                                                <div style="display:flex;justify-content:space-between;font-size:12px;color:#666;margin-top:4px;">
+                                                    <span class="prog-elapsed">0s</span>
+                                                    <span class="prog-pct"></span>
+                                                </div>`;
+                                            bodyEl.innerHTML = '';
+                                            bodyEl.appendChild(progEl);
+                                            if (progressTickTimer) clearInterval(progressTickTimer);
+                                            progressTickTimer = setInterval(() => {
+                                                if (streamComplete) { clearInterval(progressTickTimer); progressTickTimer = null; return; }
+                                                const elapsedEl = bodyEl.querySelector('.prog-elapsed');
+                                                if (elapsedEl) elapsedEl.textContent = `${Math.floor((Date.now() - startTime) / 1000)}s`;
+                                            }, 1000);
                                         }
-                                        
-                                        // 2. 当前活跃步骤（仅在非 complete 阶段显示）
-                                        if (stage !== 'complete') {
-                                            progressHtml += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;margin-top:${completedSteps.length > 0 ? '8' : '0'}px;">`;
-                                            progressHtml += `<span class="typing-cursor" style="animation:blink 1s infinite;">▊</span>`;
-                                            progressHtml += `<strong>${progressMsg}</strong>`;
-                                            progressHtml += `</div>`;
-                                            if (progressDetail) {
-                                                progressHtml += `<div style="color:#888;font-size:13px;margin-bottom:8px;">${progressDetail}</div>`;
+
+                                        // 增量更新各子元素
+                                        const stepsEl2 = progEl.querySelector('.prog-steps');
+                                        if (stepsEl2) {
+                                            stepsEl2.innerHTML = completedSteps.map(s =>
+                                                `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;opacity:0.85;">` +
+                                                `<span style="color:#22c55e;font-size:16px;">✓</span>` +
+                                                `<span style="color:#666;">${s.message}</span>` +
+                                                (s.detail ? `<span style="color:#999;font-size:12px;margin-left:4px;">${s.detail}</span>` : '') +
+                                                `</div>`
+                                            ).join('');
+                                        }
+                                        const currentEl2 = progEl.querySelector('.prog-current');
+                                        if (currentEl2) {
+                                            if (stage !== 'complete') {
+                                                const spinnerHtml2 = stage === 'api_calling'
+                                                    ? `<span style="display:inline-block;width:16px;height:16px;border:2px solid #4361ee;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>`
+                                                    : `<span class="typing-cursor" style="animation:blink 1s infinite;">▊</span>`;
+                                                currentEl2.innerHTML = spinnerHtml2 + `<strong>${progressMsg}</strong>`;
+                                                currentEl2.style.marginTop = completedSteps.length > 0 ? '8px' : '0';
+                                            } else {
+                                                currentEl2.innerHTML = '';
                                             }
                                         }
-                                        
-                                        // 3. 进度条
-                                        progressHtml += `<div style="background:rgba(0,0,0,0.06);border-radius:8px;height:6px;overflow:hidden;margin-top:8px;">`;
-                                        progressHtml += `<div style="background:linear-gradient(90deg,#4361ee,#3a86ff);height:100%;width:${progressPct}%;transition:width 0.5s ease;border-radius:8px;"></div>`;
-                                        progressHtml += `</div>`;
-                                        progressHtml += `<div style="text-align:right;font-size:12px;color:#666;margin-top:4px;">${progressPct}%</div>`;
-                                        progressHtml += `</div>`;
-                                        
-                                        bodyEl.innerHTML = progressHtml;
+                                        const detailEl2 = progEl.querySelector('.prog-detail');
+                                        if (detailEl2) detailEl2.textContent = progressDetail;
+                                        const barFill2 = progEl.querySelector('.prog-bar-fill');
+                                        if (barFill2) barFill2.style.width = `${progressPct}%`;
+                                        const pctEl2 = progEl.querySelector('.prog-pct');
+                                        if (pctEl2) pctEl2.textContent = progressPct > 0 ? `${progressPct}%` : '';
                                         scrollToBottom();
+
                                     } else if (data.type === 'classification') {
                                         console.log('[FILE STREAM] 任务分类:', data.task_type);
                                         if (data.task_id) {
                                             setSessionTaskId(currentSession, data.task_id);
+                                        }
+                                        // 更新任务徽章（初始占位是 CHAT，收到分类后替换为真实任务名）
+                                        const _msgContainer = document.getElementById(msgId);
+                                        if (_msgContainer && data.task_type) {
+                                            const _badgeEl = _msgContainer.querySelector('.task-badge');
+                                            if (_badgeEl) {
+                                                _badgeEl.textContent = data.task_type;
+                                                _badgeEl.className = `task-badge ${data.task_type.toLowerCase()}`;
+                                            }
+                                        }
+                                        if (data.model) {
+                                            const _msgContainer2 = document.getElementById(msgId);
+                                            if (_msgContainer2) {
+                                                const _modelEl = _msgContainer2.querySelector('.model-info');
+                                                if (_modelEl) _modelEl.textContent = `📦 ${data.model}`;
+                                            }
                                         }
                                     } else if (data.type === 'info') {
                                         fullText += `*${data.message}*\n\n`;
                                         bodyEl.innerHTML = parseMarkdown(fullText);
                                         scrollToBottom();
                                     } else if (data.type === 'error') {
+                                        hideMiniGame();
+                                        if (progressTickTimer) { clearInterval(progressTickTimer); progressTickTimer = null; }
                                         fullText += `\n\n❌ ${data.message}\n`;
                                         bodyEl.innerHTML = parseMarkdown(fullText);
                                         scrollToBottom();
                                     } else if (data.type === 'done') {
+                                        hideMiniGame();
+                                        if (progressTickTimer) { clearInterval(progressTickTimer); progressTickTimer = null; }
                                         streamComplete = true;
                                         const elapsedTime = data.total_time ? data.total_time.toFixed(2) : ((Date.now() - startTime) / 1000).toFixed(2);
                                         
@@ -1216,6 +1470,9 @@ async function sendMessage(event) {
                                         completeDiv.style.cssText = 'margin-top:12px;padding:10px;border-radius:6px;background:rgba(42,212,137,0.1);font-size:13px;color:#2ad489;';
                                         completeDiv.textContent = `✅ 任务完成  耗时 ${elapsedTime}s`;
                                         bodyEl.appendChild(completeDiv);
+
+                                        // 评分条（文件流路径）
+                                        appendRatingBar(msgId, data.msg_id || '', message, fullText, taskType);
                                     }
                                 } catch (parseErr) {
                                     console.warn('[FILE STREAM] Parse error:', parseErr);
@@ -1237,7 +1494,12 @@ async function sendMessage(event) {
                 const timeEl = document.getElementById(`${msgId}-time`);
                 bodyEl.innerHTML = parseMarkdown(data.response);
                 timeEl.textContent = `⏱️ ${elapsedTime}s`;
-                
+                appendRatingBar(msgId, data.msg_id || '', message, data.response || '', taskType || 'CHAT');
+                // 宏录制检查
+                if (typeof window.checkMacroSuggestions === 'function') {
+                    setTimeout(window.checkMacroSuggestions, 800);
+                }
+
                 if (data.open_suggestion_panel && data.file_path) {
                     console.log('[FILE UPLOAD] 打开建议面板:', data.file_path);
                     openSuggestionPanel(data.file_path, data.requirement || '');
@@ -1317,6 +1579,55 @@ async function sendMessage(event) {
             let streamComplete = false;
             let hasReceivedData = false; // 追踪是否收到过数据
             let agentStepCounter = 0;
+
+            // ── 实时进度面板状态（新方案）──
+            let progressCompletedSteps = [];   // {message, detail}[]
+            let progressCurrentStage = null;
+            let progressPanelActive = false;   // 是否正在显示进度面板
+            let lastStreamEventTime = Date.now();
+            let stuckWatchdogTimer = null;
+            let progressTickTimer = null;  // 1s 计秒器（不重绘面板）
+
+            // 卡住检测 watchdog：连续 25s 无事件则展示重试/放弃按钮
+            const STUCK_THRESHOLD_MS = 25000;
+            stuckWatchdogTimer = setInterval(() => {
+                if (streamComplete) { clearInterval(stuckWatchdogTimer); stuckWatchdogTimer = null; return; }
+                const elapsed = Date.now() - lastStreamEventTime;
+                if (elapsed < STUCK_THRESHOLD_MS) return;
+                clearInterval(stuckWatchdogTimer);
+                stuckWatchdogTimer = null;
+                if (bodyEl && !bodyEl.querySelector('.stream-stuck-notice')) {
+                    const elapsedSec = Math.round(elapsed / 1000);
+                    const noticeDiv = document.createElement('div');
+                    noticeDiv.className = 'stream-stuck-notice';
+                    noticeDiv.style.cssText = 'margin-top:12px;padding:12px 16px;border-radius:8px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);';
+                    noticeDiv.innerHTML = `
+                        <div style="font-size:13px;color:#b45309;margin-bottom:10px;">⏳ 已等待 <strong>${elapsedSec}s</strong>，任务可能卡住了。是否继续等待或重新发送？</div>
+                        <div style="display:flex;gap:8px;">
+                            <button id="stuck-retry-btn" style="padding:6px 14px;border:none;border-radius:6px;background:#4361ee;color:#fff;cursor:pointer;font-size:13px;">🔄 重新发送</button>
+                            <button id="stuck-abort-btn" style="padding:6px 14px;border:none;border-radius:6px;background:rgba(0,0,0,.1);color:#555;cursor:pointer;font-size:13px;">✖ 放弃</button>
+                        </div>`;
+                    noticeDiv.querySelector('#stuck-retry-btn').addEventListener('click', () => {
+                        noticeDiv.remove();
+                        streamComplete = true;
+                        hideMiniGame();
+                        // 将原始消息重新填入输入框并发送
+                        const inputEl = document.getElementById('user-input') || document.querySelector('.chat-input') || document.querySelector('textarea[data-input]');
+                        if (inputEl) { inputEl.value = message; inputEl.dispatchEvent(new Event('input')); }
+                        setTimeout(() => {
+                            const sendBtn = document.getElementById('send-btn') || document.querySelector('[data-send]');
+                            if (sendBtn) sendBtn.click();
+                        }, 100);
+                    });
+                    noticeDiv.querySelector('#stuck-abort-btn').addEventListener('click', () => {
+                        noticeDiv.remove();
+                        streamComplete = true;
+                        hideMiniGame();
+                    });
+                    bodyEl.appendChild(noticeDiv);
+                    scrollToBottom();
+                }
+            }, 3000);
 
             const tryParseObservationJson = (raw) => {
                 if (!raw || typeof raw !== 'string') return null;
@@ -1495,6 +1806,15 @@ async function sendMessage(event) {
                                 const data = normalizeEvent(JSON.parse(line.slice(6)));
                                 
                                 if (data.type === 'token') {
+                                    lastStreamEventTime = Date.now();
+                                    // 首个 token 到达：清除进度面板，切换到文本渲染模式
+                                    if (progressPanelActive) {
+                                        progressPanelActive = false;
+                                        progressCompletedSteps = [];
+                                        const savedThinking = bodyEl.querySelector('.thinking-panel');
+                                        bodyEl.innerHTML = '';
+                                        if (savedThinking) bodyEl.insertBefore(savedThinking, bodyEl.firstChild);
+                                    }
                                     // ⭐ 去重: 如果token内容与之前的agent_thought高度重叠，
                                     // 先移除thought部分，只保留token(最终回复)
                                     if (agentThoughtText && data.content.length > 50) {
@@ -1520,34 +1840,100 @@ async function sendMessage(event) {
                                         lastUpdateTime = Date.now();
                                     }
                                 } else if (data.type === 'progress') {
-                                    // 显示进度信息
+                                    // ── 实时进度面板（增量更新，不重绘整个 bodyEl）──
+                                    lastStreamEventTime = Date.now();
+                                    showMiniGame();
                                     showLoading(data.message, data.detail || '');
-                                } else if (data.type === 'classification') {
-                                    // 显示任务分类信息（兼容后端未返回 message 的情况）
-                                    console.log('[STREAM] 任务分类:', data.task_type, data.pattern);
-                                    const classificationText = data.message
-                                        || `🎯 任务分类: ${data.task_display || data.task_type || '未知任务'}`
-                                        || '';
-                                    if (classificationText) {
-                                        fullText += `**${classificationText}**\n\n`;
-                                        bodyEl.innerHTML = parseMarkdown(fullText);
+                                    if (!fullText) {
+                                        const pMsg    = data.message  || '';
+                                        const pDetail = data.detail   || '';
+                                        const pPct    = typeof data.progress === 'number' ? data.progress : 0;
+                                        const pStage  = data.stage    || '';
+                                        progressPanelActive = true;
+                                        if (pStage && (pStage.endsWith('_complete') || pStage === 'complete')) {
+                                            progressCompletedSteps.push({ message: pMsg, detail: pDetail });
+                                            progressCurrentStage = null;
+                                        } else if (pStage) {
+                                            progressCurrentStage = pStage;
+                                        }
+                                        // 首次创建进度面板（后续只做增量更新，避免闪烁）
+                                        let progEl = bodyEl.querySelector('.doc-progress');
+                                        if (!progEl) {
+                                            const savedThinking = bodyEl.querySelector('.thinking-panel');
+                                            bodyEl.innerHTML = '';
+                                            if (savedThinking) bodyEl.appendChild(savedThinking);
+                                            progEl = document.createElement('div');
+                                            progEl.className = 'doc-progress';
+                                            progEl.style.padding = '16px';
+                                            progEl.innerHTML = `
+                                                <div class="prog-steps"></div>
+                                                <div class="prog-current" style="display:flex;align-items:center;gap:8px;margin-top:4px;"></div>
+                                                <div class="prog-detail" style="color:#888;font-size:13px;margin-top:2px;margin-bottom:4px;"></div>
+                                                <div style="background:rgba(0,0,0,.06);border-radius:8px;height:6px;overflow:hidden;margin-top:8px;">
+                                                    <div class="prog-bar-fill" style="background:linear-gradient(90deg,#4361ee,#3a86ff);height:100%;width:0%;transition:width .4s ease;border-radius:8px;"></div>
+                                                </div>
+                                                <div style="display:flex;justify-content:space-between;font-size:12px;color:#666;margin-top:4px;">
+                                                    <span class="prog-elapsed">0s</span>
+                                                    <span class="prog-pct"></span>
+                                                </div>`;
+                                            bodyEl.appendChild(progEl);
+                                            // 每秒更新计秒显示，不触发面板重绘
+                                            if (progressTickTimer) clearInterval(progressTickTimer);
+                                            progressTickTimer = setInterval(() => {
+                                                if (streamComplete) { clearInterval(progressTickTimer); progressTickTimer = null; return; }
+                                                const elapsedEl = bodyEl.querySelector('.prog-elapsed');
+                                                if (elapsedEl) elapsedEl.textContent = `${Math.floor((Date.now() - startTime) / 1000)}s`;
+                                            }, 1000);
+                                        }
+                                        // 增量更新各子元素
+                                        const stepsEl = progEl.querySelector('.prog-steps');
+                                        if (stepsEl) {
+                                            stepsEl.innerHTML = progressCompletedSteps.map(s =>
+                                                `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;opacity:.85;">` +
+                                                `<span style="color:#22c55e;font-size:16px;flex-shrink:0;">✓</span>` +
+                                                `<span style="color:#666;">${escapeHtml(s.message)}</span>` +
+                                                (s.detail ? `<span style="color:#999;font-size:12px;margin-left:4px;">${escapeHtml(s.detail)}</span>` : '') +
+                                                `</div>`
+                                            ).join('');
+                                        }
+                                        const currentEl = progEl.querySelector('.prog-current');
+                                        if (currentEl) {
+                                            if (pStage !== 'complete') {
+                                                const spinnerHtml = pStage === 'api_calling'
+                                                    ? `<span style="display:inline-block;width:16px;height:16px;border:2px solid #4361ee;border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;"></span>`
+                                                    : `<span class="typing-cursor" style="flex-shrink:0;">▊</span>`;
+                                                currentEl.innerHTML = spinnerHtml + `<strong>${escapeHtml(pMsg)}</strong>`;
+                                                currentEl.style.marginTop = progressCompletedSteps.length > 0 ? '8px' : '0';
+                                            } else {
+                                                currentEl.innerHTML = '';
+                                            }
+                                        }
+                                        const detailEl = progEl.querySelector('.prog-detail');
+                                        if (detailEl) detailEl.textContent = pDetail;
+                                        const barFill = progEl.querySelector('.prog-bar-fill');
+                                        if (barFill) barFill.style.width = `${pPct}%`;
+                                        const pctEl = progEl.querySelector('.prog-pct');
+                                        if (pctEl) pctEl.textContent = pPct > 0 ? `${pPct}%` : '';
                                         scrollToBottom();
                                     }
+                                } else if (data.type === 'classification') {
+                                    // 任务分类已通过 header badge 展示，不再注入消息正文（旧方案清除）
+                                    console.log('[STREAM] 任务分类:', data.task_type, '方法:', data.route_method);
+                                    lastStreamEventTime = Date.now();
                                 } else if (data.type === 'status') {
-                                    // 显示状态信息（多步任务进度）
+                                    // 多步任务状态更新 — 保留注入正文（status 是实质性输出）
                                     console.log('[STREAM] 状态更新:', data.message);
+                                    lastStreamEventTime = Date.now();
                                     fullText += (data.message || '') + '\n';
                                     bodyEl.innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
                                     scrollToBottom();
                                 } else if (data.type === 'info') {
-                                    // 显示额外信息
-                                    if (data.message) {
-                                        fullText += `*${data.message}*\n\n`;
-                                        bodyEl.innerHTML = parseMarkdown(fullText);
-                                        scrollToBottom();
-                                    }
+                                    // info 事件：调试用，不污染消息正文（旧方案清除）
+                                    console.log('[STREAM] info:', data.message);
+                                    lastStreamEventTime = Date.now();
                                 } else if (data.type === 'thinking') {
                                     // 思考过程事件 — 仅在用户开启时显示
+                                    lastStreamEventTime = Date.now();
                                     const showThinking = currentSettings?.ai?.show_thinking === true;
                                     if (showThinking) {
                                         // 创建或获取思考面板
@@ -1718,7 +2104,72 @@ async function sendMessage(event) {
                                     fullText += `📝 正在分析文档并生成修改建议...\n\n`;
                                     bodyEl.innerHTML = parseMarkdown(fullText);
                                     openSuggestionPanel(data.file_path, data.requirement || '');
+                                } else if (data.type === 'file_picker') {
+                                    // 全盘文件搜索结果 → 渲染选择卡片
+                                    console.log('[STREAM] file_picker:', data.count, '个结果，query:', data.query);
+                                    let pickerDiv = bodyEl.querySelector('.file-picker-panel');
+                                    if (!pickerDiv) {
+                                        pickerDiv = document.createElement('div');
+                                        pickerDiv.className = 'file-picker-panel';
+                                        bodyEl.appendChild(pickerDiv);
+                                    }
+                                    const catIcons = {'文档':'📄','图片':'🖼️','视频':'🎬','音频':'🎵','代码':'💻','压缩包':'📦','其他':'📎'};
+                                    let html = `<div class="file-picker-header">🔍 找到 <strong>${data.count}</strong> 个匹配 <em>${escapeHtml(data.query)}</em> 的文件</div>`;
+                                    html += `<div class="file-picker-list">`;
+                                    for (const f of (data.files || [])) {
+                                        const icon = catIcons[f.category] || '📎';
+                                        const scoreBar = Math.round((f.score || 0) * 100);
+                                        html += `
+                                        <div class="file-picker-item" data-path="${escapeAttr(f.path)}" title="${escapeAttr(f.path)}">
+                                            <span class="fpi-icon">${icon}</span>
+                                            <div class="fpi-info">
+                                                <div class="fpi-name">${escapeHtml(f.name)}</div>
+                                                <div class="fpi-meta">${escapeHtml(f.size_str || '')} · ${escapeHtml(f.mtime_str || '')} · <span class="fpi-path" title="${escapeAttr(f.path)}">${escapeHtml(f.path.length > 55 ? '...' + f.path.slice(-52) : f.path)}</span></div>
+                                            </div>
+                                            <div class="fpi-score-bar" style="width:${scoreBar}%" title="匹配度 ${scoreBar}%"></div>
+                                            <button class="fpi-open-btn">打开</button>
+                                        </div>`;
+                                    }
+                                    html += `</div>`;
+                                    pickerDiv.innerHTML = html;
+                                    // 绑定点击事件
+                                    pickerDiv.querySelectorAll('.file-picker-item').forEach(item => {
+                                        const openBtn = item.querySelector('.fpi-open-btn');
+                                        const doOpen = async () => {
+                                            const path = item.dataset.path;
+                                            openBtn.disabled = true;
+                                            openBtn.textContent = '打开中...';
+                                            try {
+                                                const res = await fetch('/api/scan/open', {
+                                                    method: 'POST',
+                                                    headers: {'Content-Type': 'application/json'},
+                                                    body: JSON.stringify({path})
+                                                });
+                                                const r = await res.json();
+                                                if (r.success) {
+                                                    openBtn.textContent = '✅ 已打开';
+                                                    item.classList.add('fpi-opened');
+                                                } else {
+                                                    openBtn.textContent = '❌ 失败';
+                                                    openBtn.title = r.error || '';
+                                                }
+                                            } catch(e) {
+                                                openBtn.textContent = '❌ 错误';
+                                                console.error('[FilePicker] open error:', e);
+                                            }
+                                        };
+                                        openBtn.addEventListener('click', e => { e.stopPropagation(); doOpen(); });
+                                        item.addEventListener('dblclick', doOpen);
+                                    });
+                                    scrollToBottom();
                                 } else if (data.type === 'done') {
+                                    hideMiniGame();
+                                    // 清除 watchdog 和进度面板
+                                    if (stuckWatchdogTimer) { clearInterval(stuckWatchdogTimer); stuckWatchdogTimer = null; }
+                                    if (progressTickTimer) { clearInterval(progressTickTimer); progressTickTimer = null; }
+                                    progressPanelActive = false;
+                                    const stuckNotice = bodyEl.querySelector('.stream-stuck-notice');
+                                    if (stuckNotice) stuckNotice.remove();
                                     // 完成事件处理 - 使用真实DOM元素而不是HTML字符串
                                     console.log('[STREAM] ========== DONE EVENT ==========');
                                     console.log('[STREAM] Images:', data.images);
@@ -1757,9 +2208,13 @@ async function sendMessage(event) {
                                         timeEl.textContent = `⏱️ ${backendTime}s`;
                                     } else {
                                         // 非 Agent 模式：原逻辑
+                                        // 若已有 file_picker 面板，先摘出来，渲染完再放回
+                                        const existingPicker = bodyEl.querySelector('.file-picker-panel');
+                                        if (existingPicker) existingPicker.remove();
                                         bodyEl.innerHTML = parseMarkdown(fullText);
                                         renderMermaidBlocks();
                                         timeEl.textContent = `⏱️ ${elapsedTime}s`;
+                                        if (existingPicker) bodyEl.appendChild(existingPicker);
                                     }
                                     
                                     // 折叠思考过程面板（如有）
@@ -1884,11 +2339,23 @@ async function sendMessage(event) {
                                     
                                     bodyEl.appendChild(completeDiv);
                                     
+                                    // 评分条（主 SSE 流路径）
+                                    appendRatingBar(msgId, data.msg_id || '', message, fullText, taskType);
+
+                                    // 宏录制：检查是否有待提示的重复工作流
+                                    if (typeof window.checkMacroSuggestions === 'function') {
+                                        setTimeout(window.checkMacroSuggestions, 800);
+                                    }
+
                                     console.log('[STREAM] ========== ALL ELEMENTS ADDED ==========');
                                     scrollToBottom();
                                     hideLoading();
                                     break;  // 立即退出 for 循环
                                 } else if (data.type === 'error') {
+                                    hideMiniGame();
+                                    if (stuckWatchdogTimer) { clearInterval(stuckWatchdogTimer); stuckWatchdogTimer = null; }
+                                    if (progressTickTimer) { clearInterval(progressTickTimer); progressTickTimer = null; }
+                                    progressPanelActive = false;
                                     bodyEl.innerHTML = `<span class="error-text">❌ ${data.message}</span>`;
                                     streamComplete = true;
                                     break;
@@ -1900,6 +2367,7 @@ async function sendMessage(event) {
                     }
                 } catch (e) {
                     // ⭐ 捕获 abort 错误 - 用户点击了中断
+                    if (stuckWatchdogTimer) { clearInterval(stuckWatchdogTimer); stuckWatchdogTimer = null; }
                     if (e.name === 'AbortError') {
                         console.log('[INTERRUPT] Stream aborted by user');
                         bodyEl.innerHTML = '<span class="interrupt-msg">⏹️ 已中断</span>';
@@ -1932,6 +2400,11 @@ async function sendMessage(event) {
                         <span class="task-time">耗时 ${elapsedTime}s</span>
                     </div>
                 `;
+                appendRatingBar(msgId, '', message, fullText, taskType || 'CHAT');
+                // 宏录制检查
+                if (typeof window.checkMacroSuggestions === 'function') {
+                    setTimeout(window.checkMacroSuggestions, 800);
+                }
             }
         }
         
@@ -2293,32 +2766,65 @@ function openPath(path) {
 
 // ================= Status =================
 async function checkStatus() {
+    const dot = document.querySelector('.status-dot');
+    const text = document.querySelector('.status-text');
     try {
+        const t0 = Date.now();
         const response = await fetch('/api/ping');
+        const latency = Date.now() - t0;
         const data = await response.json();
-        
-        const dot = document.querySelector('.status-dot');
-        const text = document.querySelector('.status-text');
-        
+
         if (data.status === 'ok') {
             dot.classList.add('online');
             dot.classList.remove('offline');
-            text.textContent = `${data.latency.toFixed(0)}ms`;
-            
-            if (data.ollama) {
-                text.textContent += ' | 🦙';
-            }
+            let label = `${latency.toFixed(0)}ms`;
+            if (data.ollama) label += ' | 🦙';
+            text.textContent = label;
         } else {
             dot.classList.add('offline');
             dot.classList.remove('online');
             text.textContent = 'Offline';
         }
     } catch (error) {
-        const dot = document.querySelector('.status-dot');
-        const text = document.querySelector('.status-text');
         dot.classList.add('offline');
         dot.classList.remove('online');
         text.textContent = 'Error';
+    }
+
+    // Ops metrics — best-effort, non-blocking
+    try {
+        const mResp = await fetch('/api/ops/metrics', { signal: AbortSignal.timeout(3000) });
+        if (mResp.ok) {
+            const m = await mResp.json();
+            const running = (m.jobs && m.jobs.running) || 0;
+            const pending = (m.jobs && m.jobs.pending) || 0;
+            const trigEnabled = (m.triggers && m.triggers.enabled) || 0;
+
+            // Jobs running pill
+            const pill = document.getElementById('jobsRunningPill');
+            if (pill) {
+                if (running > 0 || pending > 0) {
+                    const parts = [];
+                    if (running > 0) parts.push(`⏳ ${running} 运行中`);
+                    if (pending > 0) parts.push(`🕐 ${pending} 等待`);
+                    pill.textContent = parts.join('  ');
+                    pill.style.display = 'block';
+                } else {
+                    pill.style.display = 'none';
+                }
+            }
+
+            // Trigger count badge in status info
+            const badge = document.getElementById('opsStatusBadge');
+            if (badge && trigEnabled > 0) {
+                badge.textContent = `${trigEnabled} 触发器活跃`;
+                badge.style.display = 'block';
+            } else if (badge) {
+                badge.style.display = 'none';
+            }
+        }
+    } catch (_) {
+        // ops metrics optional — silently ignore
     }
 }
 
@@ -2332,7 +2838,8 @@ function handleKeyDown(event) {
 
 function autoResize(textarea) {
     textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+    const maxH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--input-max-height') || '220');
+    textarea.style.height = Math.min(textarea.scrollHeight, maxH || 220) + 'px';
 }
 
 function scrollToBottom() {
@@ -2821,10 +3328,14 @@ function applySettingsToUI() {
     const currentTheme = currentSettings.appearance?.theme || 'light';
     updateThemeSelector(currentTheme);
     applyTheme(currentTheme);  // 确保设置面板打开时也同步主题
-    document.getElementById('settingLanguage').value = currentSettings.appearance?.language || 'zh-CN';
+    // Note: settingLanguage element removed from UI, skip to avoid TypeError
     
     // AI settings
-    document.getElementById('settingModel').value = currentSettings.ai?.default_model || 'gemini-3-flash-preview';
+    const modelSelect = document.getElementById('settingModel');
+    if (modelSelect) {
+        modelSelect.value = currentSettings.ai?.default_model || 'gemini-3-flash-preview';
+        selectedModel = modelSelect.value; // 同步全局变量
+    }
     
     // 思考过程开关
     const showThinkingCheckbox = document.getElementById('settingShowThinking');
@@ -2839,10 +3350,29 @@ function applySettingsToUI() {
         voiceAutoModeCheckbox.checked = isAutoMode;
         voiceAutoMode = isAutoMode; // 更新全局变量
     }
-    
+
+    // 小游戏设置
+    const miniGameCheckbox = document.getElementById('settingEnableMiniGame');
+    if (miniGameCheckbox) {
+        // 默认为 enabled (undefined or true)
+        const isEnabled = currentSettings.ai?.enable_mini_game !== false;
+        miniGameCheckbox.checked = isEnabled;
+        enableMiniGame = isEnabled; // 更新全局变量
+    }
+
+    // 本地模型独占开关
+    const localOnlyEl = document.getElementById('settingLocalOnly');
+    if (localOnlyEl) {
+        const localOnly = currentSettings.ai?.use_local_only === true;
+        localOnlyEl.checked = localOnly;
+        applyLocalOnlyMode(localOnly);
+    }
+
     // Proxy settings
-    document.getElementById('settingProxyEnabled').checked = currentSettings.proxy?.enabled !== false;
-    document.getElementById('settingManualProxy').value = currentSettings.proxy?.manual_proxy || '';
+    const proxyEnabledEl = document.getElementById('settingProxyEnabled');
+    if (proxyEnabledEl) proxyEnabledEl.checked = currentSettings.proxy?.enabled !== false;
+    const manualProxyEl = document.getElementById('settingManualProxy');
+    if (manualProxyEl) manualProxyEl.value = currentSettings.proxy?.manual_proxy || '';
 }
 
 // Theme selector functions
@@ -2864,11 +3394,198 @@ function selectTheme(theme) {
 function openSettings() {
     loadSettings();
     loadMemories(); // Load memories when opening settings
+    loadSkills();   // Load skills when opening settings
+    loadSkillBindings();    // Load intent bindings
+    loadTriggers();         // Load scheduled triggers
+    fileHubLoadStats();     // Load file registry stats
+    loadShadowStatus();     // Load shadow watcher status
     document.getElementById('settingsPanel').classList.add('active');
+    // Sync zoom slider to current state
+    const savedZ = parseFloat(localStorage.getItem('koto.uiZoom') || '1');
+    setUIZoom(savedZ);
 }
 
 function closeSettings() {
     document.getElementById('settingsPanel').classList.remove('active');
+}
+
+// ================= Skills Management =================
+
+let _allSkills = [];       // full skills data cache
+let _currentSkillFilter = 'all';
+let _editingSkillId = null; // skill being edited
+
+const SKILL_CATEGORY_LABELS = {
+    behavior: '⚙️ 行为',
+    style:    '🎨 风格',
+    domain:   '🔬 领域',
+};
+const SKILL_CAT_COLORS = {
+    behavior: '#4a9eff',
+    style:    '#e06c75',
+    domain:   '#98c379',
+};
+
+async function loadSkills() {
+    const listEl = document.getElementById('skillsList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="memory-empty">正在加载 Skills…</div>';
+
+    try {
+        const resp = await fetch('/api/skills');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '加载失败');
+        _allSkills = data.skills || [];
+        renderSkills(_currentSkillFilter);
+    } catch (e) {
+        listEl.innerHTML = `<div class="memory-empty" style="color:var(--error-color)">⚠️ Skills 加载失败: ${e.message}</div>`;
+    }
+}
+
+function renderSkills(filter) {
+    _currentSkillFilter = filter;
+    const listEl = document.getElementById('skillsList');
+    if (!listEl || !_allSkills.length) return;
+
+    // Update tab highlight
+    document.querySelectorAll('.skill-tab').forEach(btn => {
+        const btnFilter = btn.textContent.includes('行为') ? 'behavior'
+            : btn.textContent.includes('风格') ? 'style'
+            : btn.textContent.includes('领域') ? 'domain'
+            : 'all';
+        btn.classList.toggle('active', btnFilter === filter);
+    });
+
+    const filtered = filter === 'all'
+        ? _allSkills
+        : _allSkills.filter(s => s.category === filter);
+
+    if (!filtered.length) {
+        listEl.innerHTML = '<div class="memory-empty">该分类暂无 Skill</div>';
+        return;
+    }
+
+    listEl.innerHTML = filtered.map(skill => {
+        const scope = skill.task_types && skill.task_types.length
+            ? skill.task_types.join(' · ')
+            : '全任务类型';
+        const catColor = SKILL_CAT_COLORS[skill.category] || '#aaa';
+        const customTag = skill.has_custom_prompt
+            ? '<span style="font-size:10px;color:var(--accent);margin-left:4px;">✏️已自定义</span>'
+            : '';
+        return `
+        <div class="skill-card ${skill.enabled ? 'active' : ''}" data-id="${skill.id}" data-category="${skill.category}">
+            <div class="skill-card-header">
+                <span class="skill-icon">${skill.icon}</span>
+                <div class="skill-info">
+                    <span class="skill-name">${skill.name}${customTag}</span>
+                    <span class="skill-scope" style="border-left:2px solid ${catColor};padding-left:5px;">
+                        ${SKILL_CATEGORY_LABELS[skill.category] || skill.category} &nbsp;·&nbsp; ${scope}
+                    </span>
+                </div>
+                <label class="toggle" title="${skill.enabled ? '点击禁用' : '点击启用'}">
+                    <input type="checkbox" ${skill.enabled ? 'checked' : ''}
+                        onchange="toggleSkill('${skill.id}', this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <p class="skill-desc">${skill.description}</p>
+            <div class="skill-footer">
+                <button class="skill-edit-btn" onclick="openSkillEditor('${skill.id}')">✏️ 编辑 Prompt</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function filterSkills(category) {
+    renderSkills(category);
+}
+
+async function toggleSkill(skillId, enabled) {
+    // Optimistic UI update
+    const card = document.querySelector(`.skill-card[data-id="${skillId}"]`);
+    if (card) card.classList.toggle('active', enabled);
+
+    const skill = _allSkills.find(s => s.id === skillId);
+    if (skill) skill.enabled = enabled;
+
+    try {
+        const resp = await fetch(`/api/skills/${skillId}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '操作失败');
+        console.log(`[Skills] ${enabled ? '✅ 启用' : '⏸️ 禁用'}: ${skillId}`);
+        // Refresh the pill bar in the main chat UI
+        if (typeof window.refreshActiveSkills === 'function') window.refreshActiveSkills();
+    } catch (e) {
+        // Revert on failure
+        if (card) card.classList.toggle('active', !enabled);
+        if (skill) skill.enabled = !enabled;
+        alert('切换失败: ' + e.message);
+    }
+}
+
+function openSkillEditor(skillId) {
+    const skill = _allSkills.find(s => s.id === skillId);
+    if (!skill) return;
+    _editingSkillId = skillId;
+    document.getElementById('skillEditorTitle').textContent = `编辑 Prompt：${skill.icon} ${skill.name}`;
+    document.getElementById('skillEditorContent').value = skill.prompt || '';
+    document.getElementById('skillEditorModal').style.display = 'flex';
+}
+
+function closeSkillEditor() {
+    document.getElementById('skillEditorModal').style.display = 'none';
+    _editingSkillId = null;
+}
+
+async function saveSkillPromptEdit() {
+    if (!_editingSkillId) return;
+    const prompt = document.getElementById('skillEditorContent').value;
+    try {
+        const resp = await fetch(`/api/skills/${_editingSkillId}/prompt`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error);
+        // Update cache
+        const skill = _allSkills.find(s => s.id === _editingSkillId);
+        if (skill) {
+            skill.prompt = prompt;
+            skill.has_custom_prompt = prompt.trim() !== '';
+        }
+        closeSkillEditor();
+        renderSkills(_currentSkillFilter);
+    } catch (e) {
+        alert('保存失败: ' + e.message);
+    }
+}
+
+async function resetSkillPromptEdit() {
+    if (!_editingSkillId) return;
+    if (!confirm('确定恢复该 Skill 的默认 Prompt 吗？')) return;
+    try {
+        const resp = await fetch(`/api/skills/${_editingSkillId}/reset`, { method: 'POST' });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error);
+        // Reload to get default prompt text
+        const listResp = await fetch('/api/skills');
+        const listData = await listResp.json();
+        if (listData.success) {
+            _allSkills = listData.skills;
+            const skill = _allSkills.find(s => s.id === _editingSkillId);
+            if (skill) document.getElementById('skillEditorContent').value = skill.prompt || '';
+        }
+        renderSkills(_currentSkillFilter);
+    } catch (e) {
+        alert('恢复失败: ' + e.message);
+    }
 }
 
 // ================= Memory Management =================
@@ -3021,6 +3738,13 @@ async function updateSetting(category, key, value) {
             if (category === 'ai' && key === 'voice_auto_mode') {
                 voiceAutoMode = value;
                 console.log('[设置] 语音模式:', voiceAutoMode ? '自动' : '手动');
+            }
+
+            // 更新小游戏设置
+            if (category === 'ai' && key === 'enable_mini_game') {
+                enableMiniGame = value;
+                console.log('[设置] 等待小游戏:', enableMiniGame ? '启用' : '禁用');
+                if (!enableMiniGame) hideMiniGame();
             }
         }
     } catch (error) {
@@ -3339,122 +4063,230 @@ function onModelChange(value) {
     updateSetting('ai', 'default_model', value);
 }
 
-// ================= 语音输入功能（后端API方案） =================
-let voiceState = 'idle';  // idle, listening, processing, error
-let isVoiceSupported = true;  // 假设后端API总是可用
+// 本地模型独占开关切换
+function onLocalOnlyChange(enabled) {
+    applyLocalOnlyMode(enabled);
+    updateSetting('ai', 'use_local_only', enabled);
+}
+
+function applyLocalOnlyMode(enabled) {
+    const modelSelect = document.getElementById('settingModel');
+    const modelHint = document.getElementById('settingModelHint');
+    if (enabled) {
+        if (modelSelect) {
+            modelSelect.disabled = true;
+            modelSelect.style.opacity = '0.4';
+            modelSelect.style.pointerEvents = 'none';
+        }
+        if (modelHint) modelHint.textContent = '本地模型独占已开启，所有请求将走 Ollama 本地推理';
+        selectedModel = 'local';
+    } else {
+        if (modelSelect) {
+            modelSelect.disabled = false;
+            modelSelect.style.opacity = '';
+            modelSelect.style.pointerEvents = '';
+            selectedModel = modelSelect.value || 'auto';
+        }
+        if (modelHint) modelHint.textContent = 'Auto 会根据任务类型自动选择最合适的模型';
+    }
+}
+
+// ================= 语音输入功能（全新实时方案 v2） =================
+// 架构: WebSpeech(实时) → SSE+Vosk(离线实时) → MediaRecorder+Gemini(后备)
+let voiceState = 'idle';   // idle | listening | processing | error
+let isVoiceSupported = true;
 let browserRecognition = null;
 
-// 检查浏览器原生语音识别（仅用于检测，优先使用后端）
+// ── 内部状态 ──────────────────────────────────────────────────────────────────
+let _voiceMethod   = null;   // 'webspeech' | 'sse' | 'gemini'
+let _mediaRecorder = null;
+let _audioChunks   = [];
+let _mediaStream   = null;
+let _recStartTime  = 0;
+let _recTimerHandle = null;
+let _sseSource     = null;   // SSE EventSource
+// Web Audio API
+let _audioCtx  = null;
+let _analyser  = null;
+let _animHandle = null;
+// STT engine labels
+let _sttEngine = 'Gemini';
+let _sttLocal  = false;
+// settings
+let voiceAutoMode = true;
+// 实时文本（partial）
+let _voicePartialText = '';
+
 function isBrowserVoiceSupported() {
     return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
 }
 
-// 初始化语音功能
 async function initVoice() {
     const voiceBtn = document.getElementById('voiceBtn');
     if (!voiceBtn) return;
-    
-    // 总是显示语音按钮，因为后端API应该可用
     isVoiceSupported = true;
     voiceBtn.style.display = 'flex';
     voiceBtn.title = '语音输入（点击说话）';
-    console.log('[语音] ✓ 语音输入已就绪（使用后端API）');
+    _injectVoiceStyles();
+
+    // 检测 Web Speech API（最优方案：实时词级反馈）
+    if (isBrowserVoiceSupported()) {
+        _voiceMethod = 'webspeech';
+        console.log('[语音] ✓ Web Speech API 可用（实时识别模式）');
+    }
+
+    // 查询后端 STT 引擎状态
+    try {
+        const r = await fetch('/api/voice/stt_status');
+        if (r.ok) {
+            const s = await r.json();
+            if (s.fast && s.fast.available) {
+                if (!_voiceMethod) _voiceMethod = 'sse';
+                console.log('[语音] ✓ 后端 Vosk 流式识别可用 →', s.fast.label);
+            }
+            if (s.local && s.local.available) {
+                _sttLocal  = true;
+                _sttEngine = '本地 ' + s.local.engine;
+            } else {
+                _sttLocal  = false;
+                _sttEngine = 'Gemini';
+            }
+        }
+    } catch (_) { /* 静默 */ }
+
+    if (!_voiceMethod) _voiceMethod = 'gemini';
+    console.log('[语音] ✓ 语音输入已就绪  方案:', _voiceMethod, '  STT:', _sttEngine);
 }
 
-// 初始化浏览器语音识别（保留作为备用）
-function initBrowserVoice() {
-    // 不再初始化浏览器语音，改用后端API
-}
+function initBrowserVoice() { /* no-op，已由 initVoice 统一管理 */ }
 
-// 显示语音预览（中间结果）
-function updateVoicePreview(text) {
-    let preview = document.getElementById('voicePreview');
-    if (!preview) {
-        preview = document.createElement('div');
-        preview.id = 'voicePreview';
-        preview.style.cssText = `
+// ── 注入语音动画 CSS（只注入一次）──────────────────────────────────────────
+function _injectVoiceStyles() {
+    if (document.getElementById('_voiceCss')) return;
+    const s = document.createElement('style');
+    s.id = '_voiceCss';
+    s.textContent = `
+        /* 录音悬浮气泡 */
+        #_voiceToast {
             position: fixed;
-            bottom: 100px;
+            bottom: 88px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 12px 24px;
+            background: linear-gradient(135deg, #1a6fa8 0%, #1558a0 100%);
+            color: #cce8ff;
+            padding: 12px 20px 10px;
             border-radius: 20px;
-            font-size: 16px;
+            box-shadow: 0 6px 24px rgba(74,184,255,.35);
             z-index: 10000;
-            max-width: 80%;
+            min-width: 220px;
+            max-width: 480px;
             text-align: center;
-        `;
-        document.body.appendChild(preview);
-    }
-    preview.textContent = '🎤 ' + text;
-    preview.style.display = 'block';
+            font-weight: 600;
+            font-size: 14px;
+            display: none;
+            user-select: none;
+            transition: background .3s, box-shadow .3s, color .3s;
+        }
+        #_voiceToast._show { display: block; animation: vt_in .15s ease; }
+        #_voiceToast._detecting { background: linear-gradient(135deg, #1e7d4a 0%, #166038 100%);
+            box-shadow: 0 6px 24px rgba(56,161,105,.45); color: #b7f5d0; }
+        @keyframes vt_in { from { opacity:0; transform:translateX(-50%) translateY(8px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+
+        /* 实时识别文字区域 */
+        #_voicePartial {
+            font-size: 15px;
+            font-weight: 500;
+            margin: 6px 0 4px;
+            min-height: 22px;
+            word-break: break-all;
+            line-height: 1.4;
+            max-height: 80px;
+            overflow-y: auto;
+            padding: 0 4px;
+        }
+        #_voicePartial:not(:empty) { background: rgba(255,255,255,.15); border-radius: 8px; padding: 4px 8px; }
+
+        /* 声浪动画条 */
+        #_waveBars {
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 3px;
+            height: 24px;
+            margin: 6px auto 2px;
+        }
+        #_waveBars ._bar {
+            width: 4px;
+            border-radius: 2px;
+            background: rgba(255,255,255,.9);
+            height: 4px;
+            transition: height .08s;
+        }
+        #_waveBars._active ._bar:nth-child(1) { animation: wv .7s   .0s  ease-in-out infinite alternate; }
+        #_waveBars._active ._bar:nth-child(2) { animation: wv .65s  .08s ease-in-out infinite alternate; }
+        #_waveBars._active ._bar:nth-child(3) { animation: wv .55s  .16s ease-in-out infinite alternate; }
+        #_waveBars._active ._bar:nth-child(4) { animation: wv .7s   .04s ease-in-out infinite alternate; }
+        #_waveBars._active ._bar:nth-child(5) { animation: wv .6s   .12s ease-in-out infinite alternate; }
+        #_waveBars._active ._bar:nth-child(6) { animation: wv .75s  .02s ease-in-out infinite alternate; }
+        #_waveBars._active ._bar:nth-child(7) { animation: wv .5s   .18s ease-in-out infinite alternate; }
+        @keyframes wv { from { height: 3px; } to { height: 20px; } }
+
+        /* 麦克风按钮录音状态 */
+        #voiceBtn.listening  { background: #1a6fa8 !important; color: #cce8ff !important; animation: vbPulse .8s ease-in-out infinite; }
+        #voiceBtn.processing { background: #3182ce !important; color: #fff !important; }
+        @keyframes vbPulse { 0%,100%{box-shadow:0 0 0 0 rgba(74,184,255,.5);} 50%{box-shadow:0 0 0 8px rgba(74,184,255,0);} }
+    `;
+    document.head.appendChild(s);
 }
 
-function hideVoicePreview() {
-    const preview = document.getElementById('voicePreview');
-    if (preview) {
-        preview.style.display = 'none';
-    }
-}
+// ── 旧版兼容 stubs ────────────────────────────────────────────────────────────
+function updateVoicePreview(text) { _updateVoiceToastPartial(text); }
+function hideVoicePreview()             { _hideVoiceToast(); }
+function showVoicePreview()             { /* handled by _showVoiceToast */ }
+function updateVoicePreviewForConfirm() { /* no-op */ }
+window.onVoiceStateChange = function(state) { setVoiceState(state); };
 
-// 语音状态变化回调（供 Python 调用）
-window.onVoiceStateChange = function(state) {
-    setVoiceState(state);
-};
-
-// 设置语音状态
 function setVoiceState(state) {
     voiceState = state;
     const voiceBtn = document.getElementById('voiceBtn');
     if (!voiceBtn) return;
-    
-    // 更新按钮样式
     voiceBtn.classList.remove('listening', 'processing', 'error');
-    
     switch (state) {
         case 'listening':
             voiceBtn.classList.add('listening');
-            voiceBtn.innerHTML = '<span class="voice-icon">🎤</span><span class="voice-pulse"></span>';
-            voiceBtn.title = '正在听...';
+            voiceBtn.innerHTML = '<span class="voice-icon">🎙️</span><span class="voice-pulse"></span>';
+            voiceBtn.title = '正在录音，再次点击停止';
             break;
         case 'processing':
             voiceBtn.classList.add('processing');
-            voiceBtn.innerHTML = '<span class="voice-icon">🔄</span>';
-            voiceBtn.title = '正在识别...';
+            voiceBtn.innerHTML = '<span class="voice-icon">⏳</span>';
+            voiceBtn.title = '识别中...';
             break;
         case 'error':
             voiceBtn.classList.add('error');
             voiceBtn.innerHTML = '<span class="voice-icon">❌</span>';
             voiceBtn.title = '识别失败';
+            setTimeout(() => setVoiceState('idle'), 2000);
             break;
         default:
             voiceBtn.innerHTML = '<span class="voice-icon">🎙️</span>';
-            voiceBtn.title = '语音输入';
+            voiceBtn.title = '语音输入（点击说话）';
     }
 }
 
-// 处理识别结果
 function handleVoiceResult(text) {
     if (!text || !text.trim()) return;
-    
     const input = document.getElementById('messageInput');
     if (input) {
-        // 追加到输入框
-        const currentText = input.value.trim();
-        input.value = currentText ? currentText + ' ' + text : text;
+        const cur = input.value.trim();
+        input.value = cur ? cur + ' ' + text : text;
         autoResize(input);
-        
-        // 默认自动发送（除非明确关闭）
         const autoSend = !currentSettings || !currentSettings.ai || currentSettings.ai.voice_auto_send !== false;
-        
         if (autoSend) {
-            // 立即发送
             showNotification(`🎤 ${text}`, 'success');
             setTimeout(() => {
-                const event = new Event('submit', { cancelable: true });
-                document.querySelector('.chat-input-form').dispatchEvent(event);
+                const form = document.querySelector('.chat-input-form');
+                if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
             }, 100);
         } else {
             showNotification(`识别: ${text}`, 'success');
@@ -3463,453 +4295,518 @@ function handleVoiceResult(text) {
     }
 }
 
-// 语音流式识别的 EventSource
-let voiceEventSource = null;
-let voiceAutoMode = true; // 默认自动模式
-let pendingVoiceText = ''; // 手动模式下暂存的文本
+function getVoiceAutoMode() { return voiceAutoMode; }
 
-// 获取语音模式设置
-function getVoiceAutoMode() {
-    return voiceAutoMode;
-}
-
-// 点击语音按钮 - 使用流式后端API
+// ── 主入口：点击麦克风按钮 ───────────────────────────────────────────────────
 async function toggleVoice() {
-    // 如果正在监听
-    if (voiceState === 'listening' || voiceState === 'processing') {
-        // 手动模式：点击确认上传
-        if (!voiceAutoMode && pendingVoiceText) {
-            handleVoiceResult(pendingVoiceText);
-            pendingVoiceText = '';
-        }
-        stopVoiceRecognition();
+    // 如果正在录音，停止
+    if (voiceState === 'listening') {
+        _stopVoice();
         return;
     }
-    
-    // 重置暂存文本
-    pendingVoiceText = '';
-    
-    // 开始流式监听
-    setVoiceState('listening');
-    
-    // 优化：立即显示反馈（不要等待响应）
-    if (voiceAutoMode) {
-        showNotification('🎤 自动模式（已开始）', 'info', 1500);
-    } else {
-        showNotification('🎤 手动模式（已开始，按麦克风确认）', 'info', 2000);
+    if (voiceState === 'processing') return;
+
+    _voicePartialText = '';
+
+    // 方案选择：WebSpeech → SSE+Vosk → Gemini
+    if (_voiceMethod === 'webspeech') {
+        // 尝试 Web Speech API（实时词级反馈，Chrome内置）
+        const started = _startWebSpeech();
+        if (started) return;
+        // 启动失败 → 降级 SSE
+        _voiceMethod = 'sse';
     }
-    
-    // 显示实时预览
-    showVoicePreview('', voiceAutoMode);
-    
+    if (_voiceMethod === 'sse') {
+        // SSE + 后端 Vosk 流式（实时中间结果）
+        const started = await _startSSEVoice();
+        if (started) return;
+        // 降级 Gemini
+        _voiceMethod = 'gemini';
+    }
+    // 兜底：MediaRecorder → Gemini STT
+    await _startGeminiVoice();
+}
+
+// ── 停止所有录音模式 ─────────────────────────────────────────────────────────
+function _stopVoice() {
+    // 1. Web Speech
+    if (browserRecognition) {
+        try { browserRecognition.stop(); } catch(_) {}
+        browserRecognition = null;
+    }
+    // 2. SSE
+    if (_sseSource) {
+        try { _sseSource.close(); } catch(_) {}
+        _sseSource = null;
+        // 告知后端停止录音
+        fetch('/api/voice/stop', { method: 'POST' }).catch(() => {});
+    }
+    // 3. MediaRecorder
+    if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+        _mediaRecorder.stop();
+    }
+    if (_mediaStream) {
+        _mediaStream.getTracks().forEach(t => t.stop());
+        _mediaStream = null;
+    }
+    _stopWaveAnimation();
+    _hideVoiceToast();
+}
+
+// ── 方案一：Web Speech API（实时 interim 反馈）──────────────────────────────
+function _startWebSpeech() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return false;
+
     try {
-        voiceEventSource = new EventSource('/api/voice/stream');
-        
-        voiceEventSource.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            
-            if (data.type === 'partial') {
-                // 实时更新预览
-                updateVoicePreview(data.text);
-                // 只有真正的识别文字（不是状态消息）才存入 pending
-                if (data.text && !data.text.includes('🎤') && !data.text.includes('🎧') && 
-                    !data.text.includes('✨') && !data.text.includes('⏱️')) {
-                    pendingVoiceText = data.text;
-                }
-            } else if (data.type === 'final') {
-                // 最终结果
-                if (voiceAutoMode) {
-                    // 自动模式：直接发送
-                    hideVoicePreview();
-                    stopVoiceRecognition();
-                    if (data.text) {
-                        handleVoiceResult(data.text);
-                    }
-                } else {
-                    // 手动模式：等待用户确认
-                    pendingVoiceText = data.text;
-                    updateVoicePreviewForConfirm(data.text);
-                }
-            } else if (data.type === 'error') {
-                hideVoicePreview();
-                stopVoiceRecognition();
-                if (data.message && data.message !== '未检测到语音') {
-                    showNotification(data.message, 'warning');
-                }
+        const lang = document.getElementById('voiceLanguage')?.value ||
+                     (currentSettings?.ai?.voice_language) || 'zh-CN';
+
+        browserRecognition = new SpeechRecognition();
+        browserRecognition.lang = lang;
+        browserRecognition.continuous = false;
+        browserRecognition.interimResults = true;   // ← 实时词级反馈
+        browserRecognition.maxAlternatives = 1;
+
+        browserRecognition.onstart = () => {
+            setVoiceState('listening');
+            _recStartTime = Date.now();
+            _showVoiceToast('🎤 WebSpeech 实时识别');
+        };
+
+        browserRecognition.onresult = (event) => {
+            let interim = '';
+            let final_  = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const t = event.results[i][0].transcript;
+                if (event.results[i].isFinal) final_ += t;
+                else                           interim += t;
+            }
+            // 实时显示中间文字
+            if (interim) _updateVoiceToastPartial(interim);
+            if (final_)  _updateVoiceToastPartial(final_);
+        };
+
+        browserRecognition.onerror = (e) => {
+            console.warn('[WebSpeech] 错误:', e.error);
+            browserRecognition = null;
+            _hideVoiceToast();
+            setVoiceState('idle');
+            if (e.error === 'no-speech') {
+                showNotification('未检测到语音，请重试', 'warning', 2000);
+            } else if (e.error === 'not-allowed' || e.error === 'audio-capture') {
+                showNotification('❌ 麦克风权限被拒绝', 'error', 3000);
+            } else if (e.error === 'network') {
+                // 网络错误 → 降级到 SSE/Vosk
+                console.log('[WebSpeech] 网络错误，降级到 SSE+Vosk');
+                _voiceMethod = 'sse';
+                setTimeout(() => toggleVoice(), 100);
             }
         };
-        
-        voiceEventSource.onerror = () => {
-            hideVoicePreview();
-            stopVoiceRecognition();
-            // 降级到非流式 API
-            toggleVoiceFallback();
+
+        browserRecognition.onend = () => {
+            const partial = _voicePartialText;
+            _voicePartialText = '';
+            browserRecognition = null;
+            _hideVoiceToast();
+            setVoiceState('idle');
+            if (partial && partial.trim()) {
+                handleVoiceResult(partial.trim());
+            }
         };
-        
-    } catch (error) {
-        console.error('[语音] 流式API错误:', error);
-        hideVoicePreview();
-        setVoiceState('error');
-        setTimeout(() => setVoiceState('idle'), 1500);
-        showNotification('❌ 语音服务暂时不可用', 'error', 2000);
+
+        browserRecognition.start();
+        return true;
+    } catch (err) {
+        console.warn('[WebSpeech] 启动失败:', err);
+        browserRecognition = null;
+        return false;
     }
 }
 
-// 停止语音识别
-function stopVoiceRecognition() {
-    if (voiceEventSource) {
-        voiceEventSource.close();
-        voiceEventSource = null;
-    }
-    setVoiceState('idle');
-    hideVoicePreview();
-    
-    // 发送停止信号
-    fetch('/api/voice/stop', { method: 'POST' }).catch(() => {});
-}
+// ── 方案二：SSE + 后端 Vosk 流式（离线实时）────────────────────────────────
+async function _startSSEVoice() {
+    return new Promise((resolve) => {
+        try {
+            setVoiceState('listening');
+            _recStartTime = Date.now();
+            _showVoiceToast('🖥️ 本地实时识别');
 
-// 显示语音预览
-function showVoicePreview(text, isAutoMode = true) {
-    let preview = document.getElementById('voicePreview');
-    if (!preview) {
-        preview = document.createElement('div');
-        preview.id = 'voicePreview';
-        preview.style.cssText = `
-            position: fixed;
-            bottom: 100px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: 3px solid #3b82f6;
-            border-radius: 16px;
-            padding: 16px 24px;
-            box-shadow: 0 8px 32px rgba(59,130,246,0.4), 0 0 0 1px rgba(255,255,255,0.1);
-            z-index: 1000;
-            min-width: 260px;
-            max-width: 420px;
-            text-align: center;
-            animation: voicePulse 1.5s ease-in-out infinite;
-        `;
-        document.body.appendChild(preview);
-        
-        // 添加脉冲动画
-        if (!document.getElementById('voicePulseStyle')) {
-            const style = document.createElement('style');
-            style.id = 'voicePulseStyle';
-            style.textContent = `
-                @keyframes voicePulse {
-                    0%, 100% { box-shadow: 0 8px 32px rgba(59,130,246,0.4), 0 0 0 1px rgba(255,255,255,0.1); }
-                    50% { box-shadow: 0 8px 40px rgba(59,130,246,0.6), 0 0 20px rgba(59,130,246,0.3), 0 0 0 1px rgba(255,255,255,0.2); }
+            _sseSource = new EventSource('/api/voice/stream');
+            let resolved = false;
+
+            const done = (text) => {
+                if (resolved) return;
+                resolved = true;
+                if (_sseSource) { try { _sseSource.close(); } catch(_) {} _sseSource = null; }
+                _hideVoiceToast();
+                _stopWaveAnimation();
+                setVoiceState('idle');
+                if (text && text.trim()) handleVoiceResult(text.trim());
+                resolve(true);
+            };
+
+            _sseSource.onmessage = (e) => {
+                let data;
+                try { data = JSON.parse(e.data); } catch(_) { return; }
+
+                if (data.type === 'start') {
+                    _startWaveAnimation(null);  // SSE 模式无 mediaStream
+                    return;
                 }
-            `;
-            document.head.appendChild(style);
-        }
-    }
-    
-    const modeHint = isAutoMode 
-        ? '<span style="color: #86efac;">✅ 自动模式</span> - 说完后自动发送'
-        : '<span style="color: #fbbf24;">✋ 手动模式</span> - 点击麦克风确认';
-    
-    preview.innerHTML = `
-        <div style="color: white; font-size: 13px; margin-bottom: 8px; font-weight: 600;" id="voiceModeLabel">🎤 正在聆听...</div>
-        <div id="voicePreviewText" style="color: rgba(255,255,255,0.95); font-size: 16px; min-height: 28px; font-weight: 500; line-height: 1.4;">${text || ''}</div>
-        <div style="color: rgba(255,255,255,0.7); font-size: 11px; margin-top: 10px;">${modeHint}</div>
-        <div id="voiceElapsedTime" style="color: rgba(255,255,255,0.6); font-size: 10px; margin-top: 4px;"></div>
-    `;
-    preview.style.display = 'block';
-}
+                if (data.type === 'partial' && data.text) {
+                    _voicePartialText = data.text;
+                    _updateVoiceToastPartial(data.text);
+                    return;
+                }
+                if (data.type === 'final') {
+                    done(data.text || _voicePartialText);
+                    return;
+                }
+                if (data.type === 'error') {
+                    console.warn('[SSE Voice] 错误:', data.message);
+                    if (_sseSource) { try { _sseSource.close(); } catch(_) {} _sseSource = null; }
+                    _hideVoiceToast();
+                    setVoiceState('idle');
+                    if (!resolved) {
+                        resolved = true;
+                        resolve(false); // 降级
+                    }
+                }
+            };
 
-// 更新语音预览为等待确认状态（手动模式）
-function updateVoicePreviewForConfirm(text) {
-    const preview = document.getElementById('voicePreview');
-    if (preview) {
-        const label = document.getElementById('voiceModeLabel');
-        if (label) label.innerHTML = '✅ 识别完成';
-        
-        const previewText = document.getElementById('voicePreviewText');
-        if (previewText) previewText.textContent = text;
-        
-        // 更新底部提示
-        const hint = preview.querySelector('div:last-child');
-        if (hint) hint.innerHTML = '<span style="color: #3b82f6; font-weight: 500;">👆 点击麦克风按钮发送</span>';
-    }
-}
+            _sseSource.onerror = () => {
+                if (!resolved) {
+                    console.warn('[SSE Voice] 连接错误，降级到 Gemini');
+                    if (_sseSource) { try { _sseSource.close(); } catch(_) {} _sseSource = null; }
+                    _hideVoiceToast();
+                    setVoiceState('idle');
+                    resolved = true;
+                    resolve(false);
+                }
+            };
 
-// 更新语音预览
-function updateVoicePreview(text) {
-    const previewText = document.getElementById('voicePreviewText');
-    const label = document.querySelector('#voicePreview > div:first-child');
-    
-    if (!text) return;
-    
-    // 判断是状态消息还是识别文字
-    const isStatusMessage = text.includes('🎤') || text.includes('🎧') || 
-                           text.includes('✨') || text.includes('⏱️') || 
-                           text.includes('聆听') || text.includes('录音') || 
-                           text.includes('请说话');
-    
-    if (isStatusMessage) {
-        // 状态消息 - 显示在标签，清空文本区
-        if (label) label.textContent = text;
-        if (previewText) previewText.textContent = '';
-    } else {
-        // 真实识别文字 - 显示在文本区
-        if (previewText) {
-            previewText.textContent = text;
-            // 添加淡入效果
-            previewText.style.opacity = '0';
+            // 60 秒超时保护
             setTimeout(() => {
-                previewText.style.transition = 'opacity 0.3s ease-in';
-                previewText.style.opacity = '1';
-            }, 10);
+                if (!resolved) {
+                    if (_voicePartialText) {
+                        done(_voicePartialText);
+                    } else {
+                        if (_sseSource) { try { _sseSource.close(); } catch(_) {} _sseSource = null; }
+                        _hideVoiceToast();
+                        setVoiceState('idle');
+                        resolved = true;
+                        resolve(false);
+                    }
+                }
+            }, 60000);
+
+        } catch (err) {
+            console.warn('[SSE Voice] 启动失败:', err);
+            _hideVoiceToast();
+            setVoiceState('idle');
+            resolve(false);
         }
-        if (label) label.textContent = '✨ 正在识别...';
-    }
+    });
 }
 
-// 隐藏语音预览
-function hideVoicePreview() {
-    const preview = document.getElementById('voicePreview');
-    if (preview) {
-        preview.style.display = 'none';
-    }
-}
-
-// 非流式 API 降级方案（优化版：立即开始，加快反馈）
-async function toggleVoiceFallback() {
-    if (voiceState === 'listening' || voiceState === 'processing') {
+// ── 方案三：MediaRecorder + Gemini STT（后备）────────────────────────────────
+async function _startGeminiVoice() {
+    try {
+        _mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch (err) {
+        const msg = err.name === 'NotAllowedError' ? '请在浏览器中允许麦克风权限' :
+                    err.name === 'NotFoundError'   ? '未检测到麦克风设备' :
+                    '无法访问麦克风：' + err.message;
+        showNotification('❌ ' + msg, 'error', 4000);
+        setVoiceState('error');
         return;
     }
-    
+
+    _audioChunks = [];
+    const mimeType =
+        MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' :
+        MediaRecorder.isTypeSupported('audio/webm')             ? 'audio/webm'             :
+        MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')  ? 'audio/ogg;codecs=opus'  :
+        '';
+
+    _mediaRecorder = new MediaRecorder(_mediaStream, mimeType ? { mimeType } : {});
+    _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _audioChunks.push(e.data); };
+    _mediaRecorder.onstop = () => _processAudioWithGemini(mimeType || 'audio/webm');
+    _mediaRecorder.start(200);
+
     setVoiceState('listening');
-    // 优化：立即显示反馈，而不是等待响应
-    showNotification('🎤 正在聆听...（立即开始）', 'info', 1000);
-    
-    const startTime = Date.now();
-    
+    _recStartTime = Date.now();
+    _showVoiceToast(_sttLocal ? '🖥️ 本地识别' : '☁️ Gemini 识别');
+    _startWaveAnimation(_mediaStream);
+
+    // 60 秒自动停止
+    setTimeout(() => {
+        if (voiceState === 'listening') {
+            showNotification('⏱️ 已达最长录音时间，自动提交', 'info', 1500);
+            _stopVoice();
+        }
+    }, 60000);
+}
+
+// ── 发送录音到 Gemini / 本地 Whisper ─────────────────────────────────────────
+async function _processAudioWithGemini(mimeType) {
+    if (_audioChunks.length === 0) {
+        setVoiceState('idle');
+        showNotification('未录到音频', 'warning', 1500);
+        return;
+    }
+    const blob = new Blob(_audioChunks, { type: mimeType || 'audio/webm' });
+    if (blob.size < 300) {
+        setVoiceState('idle');
+        showNotification('录音太短，请重说', 'warning', 1500);
+        return;
+    }
     try {
-        // 立即发送请求，不等待
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒硬超时
-        
-        const response = await fetch('/api/voice/listen', {
+        const b64 = await _blobToBase64(blob);
+        const resp = await fetch('/api/voice/stt', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ timeout: 8, language: 'zh-CN' }),
-            signal: controller.signal
+            body: JSON.stringify({ audio: b64, mime: mimeType || 'audio/webm' })
         });
-        
-        clearTimeout(timeoutId);
-        const elapsedMs = Date.now() - startTime;
-        
-        const data = await response.json();
-        
-        // 处理结果前设置为空闲状态
+        if (!resp.ok) {
+            const raw = await resp.text();
+            console.error('[STT] 服务器错误:', resp.status, raw.slice(0, 200));
+            const msg = resp.status === 503 ? '请先配置 Gemini API Key 或安装 faster-whisper' :
+                        resp.status === 413 ? '录音文件太大，请缩短时长' :
+                        `服务器错误 ${resp.status}`;
+            showNotification('❌ ' + msg, 'error', 4000);
+            setVoiceState('error');
+            return;
+        }
+        let data;
+        try { data = await resp.json(); }
+        catch (parseErr) {
+            showNotification('❌ 识别服务返回格式错误', 'error', 3000);
+            setVoiceState('error');
+            return;
+        }
+        if (data.engine) {
+            _sttLocal  = !data.engine.toLowerCase().includes('gemini');
+            _sttEngine = _sttLocal ? ('本地 ' + data.engine) : 'Gemini';
+        }
         setVoiceState('idle');
-        
         if (data.success && data.text) {
-            console.log('[语音] 识别结果:', data.text, `(耗时${elapsedMs}ms)`);
-            // 自动发送
+            const tag = _sttLocal ? '🖥️' : '☁️';
+            console.log(`[STT ${tag}] ✅`, data.text, '←', data.engine);
             handleVoiceResult(data.text);
         } else {
-            const msg = data.message || '未能识别语音';
-            console.log('[语音] 识别失败:', msg);
-            showNotification(msg, 'warning', 2000);
+            showNotification(data.message || '未能识别语音', 'warning', 2000);
         }
-    } catch (error) {
-        console.error('[语音] 后端API错误:', error);
+    } catch (err) {
+        console.error('[STT] 网络错误:', err);
         setVoiceState('error');
-        setTimeout(() => setVoiceState('idle'), 1500);
-        
-        if (error.name === 'AbortError') {
-            showNotification('❌ 识别超时（10秒）', 'error', 2000);
-        } else {
-            showNotification('❌ 语音服务暂时不可用', 'error', 2000);
-        }
+        showNotification('❌ 网络错误：' + err.message, 'error', 3000);
+    }
+}
+
+function _blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(r.result.split(',')[1]);
+        r.onerror   = reject;
+        r.readAsDataURL(blob);
+    });
+}
+
+// ── 录音气泡（仿微信样式，支持实时文字显示）──────────────────────────────────
+function _showVoiceToast(engineLabel) {
+    _injectVoiceStyles();
+    let el = document.getElementById('_voiceToast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = '_voiceToast';
+        document.body.appendChild(el);
+    }
+    const label = engineLabel || (_sttLocal ? '🖥️ 本地识别' : '☁️ Gemini 识别');
+    el.innerHTML = `
+        <div id="_waveBars" class="_active">
+            <div class="_bar"></div><div class="_bar"></div><div class="_bar"></div>
+            <div class="_bar"></div><div class="_bar"></div><div class="_bar"></div>
+            <div class="_bar"></div>
+        </div>
+        <div>● 录音中... <span id="_recSec">0s</span>
+            &nbsp;<span style="opacity:.7;font-size:11px;font-weight:400">${label}</span>
+        </div>
+        <div id="_voicePartial"></div>
+        <div style="font-size:12px;opacity:.75;font-weight:400;margin-top:3px;">再次点击麦克风停止</div>
+    `;
+    el.classList.add('_show');
+    _recTimerHandle = setInterval(() => {
+        const t = document.getElementById('_recSec');
+        if (t) t.textContent = Math.round((Date.now() - _recStartTime) / 1000) + 's';
+    }, 500);
+}
+
+// 实时更新气泡中的识别文字
+function _updateVoiceToastPartial(text) {
+    _voicePartialText = text;
+    const el = document.getElementById('_voicePartial');
+    if (el) {
+        el.textContent = text;
+        // 有识别内容时气泡变绿，表示"正在识别到内容"
+        const toast = document.getElementById('_voiceToast');
+        if (toast) toast.classList.toggle('_detecting', !!text);
+    }
+}
+
+function _hideVoiceToast() {
+    const el = document.getElementById('_voiceToast');
+    if (el) el.classList.remove('_show');
+    if (_recTimerHandle) { clearInterval(_recTimerHandle); _recTimerHandle = null; }
+    const partial = document.getElementById('_voicePartial');
+    if (partial) partial.textContent = '';
+    const toast = document.getElementById('_voiceToast');
+    if (toast) toast.classList.remove('_detecting');
+}
+
+// ── Web Audio 实时振幅 → 声浪条高度 ─────────────────────────────────────────
+function _startWaveAnimation(mediaStreamOrNull) {
+    // SSE模式没有 mediaStream，仅用 CSS 动画
+    if (!mediaStreamOrNull) return;
+    try {
+        _audioCtx  = new (window.AudioContext || window.webkitAudioContext)();
+        _analyser  = _audioCtx.createAnalyser();
+        _analyser.fftSize = 64;
+        _audioCtx.createMediaStreamSource(mediaStreamOrNull).connect(_analyser);
+        const buf  = new Uint8Array(_analyser.frequencyBinCount);
+        const bars = document.querySelectorAll('#_waveBars ._bar');
+        const tick = () => {
+            if (voiceState !== 'listening') return;
+            _analyser.getByteFrequencyData(buf);
+            const step = Math.floor(buf.length / 7);
+            bars.forEach((b, i) => {
+                const pct = buf[i * step] / 255;
+                b.style.height = Math.max(3, Math.round(pct * 22)) + 'px';
+            });
+            _animHandle = requestAnimationFrame(tick);
+        };
+        _animHandle = requestAnimationFrame(tick);
+    } catch (_) { /* 不可用时保持 CSS 动画 */ }
+}
+
+function _stopWaveAnimation() {
+    if (_animHandle) { cancelAnimationFrame(_animHandle); _animHandle = null; }
+    if (_audioCtx)   { try { _audioCtx.close(); } catch(_) {} _audioCtx = null; }
+    _analyser = null;
+    document.querySelectorAll('#_waveBars ._bar').forEach(b => { b.style.height = '3px'; });
+}
+
+// ── 外部兼容接口 ─────────────────────────────────────────────────────────────
+function stopVoiceRecognition() { if (voiceState === 'listening') _stopVoice(); }
+
+// 旧版降级入口（保留，可独立调用）
+async function toggleVoiceFallback() {
+    if (voiceState === 'listening' || voiceState === 'processing') return;
+    setVoiceState('listening');
+    showNotification('🎤 正在聆听（后端模式）', 'info', 1000);
+    try {
+        const resp = await fetch('/api/voice/listen', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({timeout:8, language:'zh-CN'})
+        });
+        const data = await resp.json();
+        setVoiceState('idle');
+        if (data.success && data.text) handleVoiceResult(data.text);
+        else showNotification(data.message || '未能识别语音', 'warning', 2000);
+    } catch (err) {
+        setVoiceState('error');
+        showNotification('❌ ' + err.message, 'error', 2000);
     }
 }
 
 // ==================== 语音功能面板函数 ====================
 
 function initVoicePanel() {
-    // 为语音选项卡添加点击事件
-    const voiceChip = document.querySelector('[data-task="VOICE"]');
-    if (voiceChip) {
-        voiceChip.addEventListener('click', function() {
-            // 防止默认的任务选择行为
-            if (lockedTaskType === 'VOICE') {
-                // 打开语音面板
-                openVoicePanel();
-            }
-        });
-    }
-    
-    // 加载语音命令
     loadVoiceCommands();
-    
-    // 为模态框背景点击关闭
     const modal = document.getElementById('voicePanelModal');
     if (modal) {
         modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                closeVoicePanel();
-            }
+            if (e.target === modal) closeVoicePanel();
         });
     }
 }
 
 function openVoicePanel() {
     const modal = document.getElementById('voicePanelModal');
-    if (modal) {
-        modal.style.display = 'flex';
-    }
+    if (modal) modal.style.display = 'flex';
 }
 
 function closeVoicePanel() {
     const modal = document.getElementById('voicePanelModal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
+    if (modal) modal.style.display = 'none';
 }
 
 async function loadVoiceCommands() {
     try {
         const response = await fetch('/api/voice/commands');
+        if (!response.ok) return;
         const data = await response.json();
-        
         const commandsList = document.getElementById('voiceCommandsList');
         if (commandsList && data.commands) {
             commandsList.innerHTML = '';
             data.commands.forEach(cmd => {
                 const div = document.createElement('div');
                 div.className = 'command-item';
-                div.innerHTML = `
-                    <div class="command-name">${cmd.name}</div>
-                    <div class="command-desc">${cmd.description}</div>
-                `;
+                div.innerHTML = `<div class="command-name">${cmd.name}</div><div class="command-desc">${cmd.description}</div>`;
                 commandsList.appendChild(div);
             });
         }
     } catch (error) {
-        console.error('Failed to load voice commands:', error);
+        console.warn('[VoicePanel] 未能加载语音命令:', error);
     }
 }
 
+// 语音面板内的独立识别按钮（使用 toggleVoice 主逻辑）
 async function startVoiceRecognition() {
-    const btn = document.getElementById('voiceRecognizeBtn');
+    const btn       = document.getElementById('voiceRecognizeBtn');
     const resultDiv = document.getElementById('voiceResult');
     const resultText = document.getElementById('voiceResultText');
-    
-    // 使用应用内独立语音识别（不依赖浏览器）
-    if (false) {  // 禁用浏览器端识别
-        try {
-            btn.disabled = true;
-            btn.textContent = '🎤 监听中...';
-            resultDiv.style.display = 'none';
-            
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const recognition = new SpeechRecognition();
-            
-            // 配置识别参数
-            const language = document.getElementById('voiceLanguage')?.value || 'zh-CN';
-            recognition.lang = language;
-            recognition.continuous = false;
-            recognition.interimResults = false;
-            recognition.maxAlternatives = 1;
-            
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                const confidence = event.results[0][0].confidence;
-                
-                resultText.textContent = transcript;
-                resultDiv.style.display = 'block';
-                
-                console.log('语音识别结果:', transcript, '置信度:', confidence);
-                
-                // 如果启用自动发送
-                if (document.getElementById('voiceAutoSend')?.checked) {
-                    handleVoiceResult(transcript);
-                    closeVoicePanel();
-                }
-            };
-            
-            recognition.onerror = (event) => {
-                console.error('语音识别错误:', event.error);
-                let errorMsg = '识别失败';
-                switch(event.error) {
-                    case 'no-speech':
-                        errorMsg = '未检测到语音，请重试';
-                        break;
-                    case 'audio-capture':
-                        errorMsg = '无法访问麦克风';
-                        break;
-                    case 'not-allowed':
-                        errorMsg = '麦克风权限被拒绝';
-                        break;
-                    case 'network':
-                        errorMsg = '网络错误';
-                        break;
-                    default:
-                        errorMsg = '识别失败: ' + event.error;
-                }
-                resultText.textContent = errorMsg;
-                resultDiv.style.display = 'block';
-            };
-            
-            recognition.onend = () => {
-                btn.disabled = false;
-                btn.textContent = '🎤 开始识别';
-            };
-            
-            // 开始识别
-            recognition.start();
-            
-        } catch (error) {
-            console.error('启动语音识别失败:', error);
-            btn.disabled = false;
-            btn.textContent = '🎤 开始识别';
-            resultText.textContent = '启动失败: ' + error.message;
-            resultDiv.style.display = 'block';
+
+    if (voiceState === 'listening') {
+        _stopVoice();
+        if (btn) { btn.disabled = false; btn.innerHTML = '<span>🎤 开始识别</span>'; }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span>⏸ 录音中...</span>'; }
+    if (resultDiv) resultDiv.style.display = 'none';
+
+    // 临时覆盖 handleVoiceResult 以把结果显示在面板中
+    const origHandle = window._voicePanelOverride;
+    window._voicePanelOverride = (text) => {
+        if (resultText) resultText.textContent = text;
+        if (resultDiv) resultDiv.style.display = 'block';
+        window._voicePanelOverride = null;
+        if (btn) { btn.disabled = false; btn.innerHTML = '<span>🎤 开始识别</span>'; }
+        if (document.getElementById('voiceAutoSend')?.checked) {
+            handleVoiceResult(text);
+            closeVoicePanel();
         }
-    } else {
-        // 降级到后端 API
-        try {
-            btn.disabled = true;
-            btn.textContent = '🎤 录音中...';
-            resultDiv.style.display = 'none';
-            
-            const response = await fetch('/api/voice/listen', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    timeout: 5,
-                    language: document.getElementById('voiceLanguage')?.value || 'zh-CN'
-                })
-            });
-            
-            const result = await response.json();
-            
-            if (result.success) {
-                resultText.textContent = result.text;
-                resultDiv.style.display = 'block';
-                
-                // 如果启用自动发送
-                if (document.getElementById('voiceAutoSend')?.checked) {
-                    handleVoiceResult(result.text);
-                    closeVoicePanel();
-                }
-            } else {
-                resultText.textContent = '识别失败: ' + (result.message || '未知错误');
-                resultDiv.style.display = 'block';
-            }
-        } catch (error) {
-            console.error('Voice recognition error:', error);
-            resultText.textContent = '错误: ' + error.message;
-            resultDiv.style.display = 'block';
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '🎤 开始识别';
+    };
+
+    // 包装 handleVoiceResult 到面板回调
+    const _origHandleVoiceResult = handleVoiceResult;
+    const panelHandleResult = (text) => {
+        if (window._voicePanelOverride) {
+            window._voicePanelOverride(text);
+            // 恢复
         }
+        _origHandleVoiceResult(text);
+    };
+
+    try {
+        await toggleVoice();
+    } catch (err) {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<span>🎤 开始识别</span>'; }
+        if (resultText) resultText.textContent = '错误: ' + err.message;
+        if (resultDiv) resultDiv.style.display = 'block';
+        window._voicePanelOverride = null;
     }
 }
 
@@ -4950,3 +5847,1111 @@ async function runTriggerEvaluation() {
         });
     }
 })();
+
+// ══════════════════════════════════════════
+// 用户回复评分条
+// ══════════════════════════════════════════
+function appendRatingBar(domMsgId, serverMsgId, userText, aiText, taskType) {
+    const bodyEl = document.getElementById(domMsgId + '-body');
+    if (!bodyEl || bodyEl.querySelector('.rating-bar')) return;  // 防重复
+
+    const bar = document.createElement('div');
+    bar.className = 'rating-bar';
+    bar.dataset.msgId = serverMsgId || '';
+    bar.dataset.userText = (userText || '').slice(0, 500);
+    bar.dataset.aiText = (aiText || '').slice(0, 500);
+    bar.dataset.taskType = taskType || 'CHAT';
+
+    const label = document.createElement('span');
+    label.className = 'rb-label';
+    label.textContent = '这个回复对你有帮助吗？';
+    bar.appendChild(label);
+
+    // 5 颗星
+    const starsWrap = document.createElement('span');
+    starsWrap.className = 'rb-stars';
+    let hoveredStar = 0;
+    let selectedStar = 0;
+    for (let i = 1; i <= 5; i++) {
+        const s = document.createElement('span');
+        s.className = 'rb-star';
+        s.textContent = '★';
+        s.dataset.v = String(i);
+        s.addEventListener('mouseenter', () => {
+            hoveredStar = i;
+            starsWrap.querySelectorAll('.rb-star').forEach((el, idx) => {
+                el.classList.toggle('hover', idx < i);
+            });
+        });
+        s.addEventListener('mouseleave', () => {
+            hoveredStar = 0;
+            starsWrap.querySelectorAll('.rb-star').forEach((el, idx) => {
+                el.classList.remove('hover');
+                el.classList.toggle('filled', idx < selectedStar);
+            });
+        });
+        s.addEventListener('click', () => {
+            selectedStar = i;
+            starsWrap.querySelectorAll('.rb-star').forEach((el, idx) => {
+                el.classList.toggle('filled', idx < i);
+            });
+        });
+        starsWrap.appendChild(s);
+    }
+    bar.appendChild(starsWrap);
+
+    // 可选评论框
+    const commentInput = document.createElement('input');
+    commentInput.type = 'text';
+    commentInput.className = 'rb-comment';
+    commentInput.placeholder = '可选：补充反馈...';
+    bar.appendChild(commentInput);
+
+    // 提交按钮
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'rb-submit';
+    submitBtn.textContent = '提交';
+    submitBtn.addEventListener('click', async () => {
+        if (selectedStar === 0) {
+            label.textContent = '请先选择星级 →';
+            label.style.color = '#f5a623';
+            setTimeout(() => { label.textContent = '这个回复对你有帮助吗？'; label.style.color = ''; }, 2000);
+            return;
+        }
+        try {
+            const payload = {
+                msg_id:       bar.dataset.msgId,
+                stars:        selectedStar,
+                comment:      commentInput.value.trim(),
+                session_name: currentSession || '',
+                user_input:   bar.dataset.userText,
+                ai_response:  bar.dataset.aiText,
+                task_type:    bar.dataset.taskType,
+            };
+            const resp = await fetch('/api/response/rate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const result = await resp.json();
+            bar.classList.add('submitted');
+            const doneEl = document.createElement('span');
+            doneEl.className = 'rb-done';
+            doneEl.textContent = selectedStar >= 4 ? '✅ 感谢反馈！' : '✅ 已记录，我会努力改进';
+            submitBtn.replaceWith(doneEl);
+            commentInput.style.display = 'none';
+        } catch(e) {
+            console.warn('[Rating] submit failed:', e);
+        }
+    });
+    bar.appendChild(submitBtn);
+
+    bodyEl.appendChild(bar);
+}
+
+// ================= Skill Bindings Management =================
+
+let _allBindings = [];
+
+function _skillNameById(skillId) {
+    const s = _allSkills.find(x => x.id === skillId);
+    return s ? `${s.icon || '🔧'} ${s.name}` : skillId;
+}
+
+async function loadSkillBindings() {
+    const listEl = document.getElementById('bindingsList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="memory-empty">正在加载绑定...</div>';
+    try {
+        const resp = await fetch('/api/skills/bindings?binding_type=intent');
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '加载失败');
+        _allBindings = data.bindings || [];
+        renderSkillBindings();
+    } catch(e) {
+        listEl.innerHTML = `<div class="memory-empty" style="color:var(--accent-danger)">⚠️ ${e.message}</div>`;
+    }
+}
+
+function renderSkillBindings() {
+    const listEl = document.getElementById('bindingsList');
+    if (!listEl) return;
+    if (!_allBindings.length) {
+        listEl.innerHTML = '<div class="memory-empty">暂无意图绑定。点击"初始化推荐绑定"自动创建。</div>';
+        return;
+    }
+    listEl.innerHTML = _allBindings.map(b => {
+        const name = _skillNameById(b.skill_id);
+        const tags = (b.intent_patterns || []).slice(0, 6).map(p =>
+            `<span class="pattern-tag">${escapeHtml(p)}</span>`
+        ).join('');
+        const more = b.intent_patterns && b.intent_patterns.length > 6
+            ? `<span class="pattern-tag" style="opacity:.6">+${b.intent_patterns.length - 6}</span>` : '';
+        const enabledCls = b.enabled ? 'enabled' : '';
+        return `
+        <div class="binding-row ${enabledCls}" data-bid="${b.binding_id}">
+            <div class="binding-row-info">
+                <div class="binding-skill-name">${escapeHtml(name)}</div>
+                <div class="binding-patterns">${tags}${more}</div>
+            </div>
+            <label class="toggle" title="${b.enabled ? '点击禁用' : '点击启用'}">
+                <input type="checkbox" ${b.enabled ? 'checked' : ''}
+                    onchange="toggleBinding('${b.binding_id}', this.checked)">
+                <span class="toggle-slider"></span>
+            </label>
+            <button class="binding-delete-btn" onclick="deleteBinding('${b.binding_id}')" title="删除">✕</button>
+        </div>`;
+    }).join('');
+}
+
+async function toggleBinding(bindingId, enabled) {
+    const row = document.querySelector(`.binding-row[data-bid="${bindingId}"]`);
+    if (row) row.classList.toggle('enabled', enabled);
+    const b = _allBindings.find(x => x.binding_id === bindingId);
+    if (b) b.enabled = enabled;
+    try {
+        const resp = await fetch(`/api/skills/bindings/${bindingId}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '操作失败');
+    } catch(e) {
+        if (row) row.classList.toggle('enabled', !enabled);
+        if (b) b.enabled = !enabled;
+        alert('切换失败: ' + e.message);
+    }
+}
+
+async function deleteBinding(bindingId) {
+    if (!confirm('确定删除此意图绑定吗？')) return;
+    try {
+        const resp = await fetch(`/api/skills/bindings/${bindingId}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '删除失败');
+        _allBindings = _allBindings.filter(x => x.binding_id !== bindingId);
+        renderSkillBindings();
+    } catch(e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
+async function bootstrapBindings(force = false) {
+    const label = force ? '重建' : '初始化';
+    if (force && !confirm('确定重建所有推荐绑定吗？已有绑定将被替换。')) return;
+    try {
+        const resp = await fetch('/api/skills/bindings/bootstrap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '操作失败');
+        const c = (data.created || []).length;
+        const s = (data.skipped || []).length;
+        console.log(`[Bindings] ${label}: 创建 ${c}, 跳过 ${s}`);
+        await loadSkillBindings();
+    } catch(e) {
+        alert(`${label}失败: ` + e.message);
+    }
+}
+
+// ================= Triggers Management =================
+
+let _allTriggers = [];
+
+const _TRIGGER_TYPE_LABELS = {
+    interval: '⏱️ 间隔',
+    cron: '📅 定时',
+    startup: '🚀 启动',
+    webhook: '🔔 Webhook',
+};
+
+async function loadTriggers() {
+    const listEl = document.getElementById('triggersList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="memory-empty">正在加载触发器...</div>';
+    try {
+        const resp = await fetch('/api/jobs/triggers');
+        if (!resp.ok) throw new Error(`服务暂未就绪 (HTTP ${resp.status})，请稍后刷新`);
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '加载失败');
+        _allTriggers = data.data || [];
+        renderTriggers();
+    } catch(e) {
+        listEl.innerHTML = `<div class="memory-empty" style="color:var(--accent-danger)">⚠️ ${e.message}</div>`;
+    }
+}
+
+function renderTriggers() {
+    const listEl = document.getElementById('triggersList');
+    if (!listEl) return;
+    if (!_allTriggers.length) {
+        listEl.innerHTML = '<div class="memory-empty">暂无触发器。点击"初始化推荐触发器"自动创建。</div>';
+        return;
+    }
+    listEl.innerHTML = _allTriggers.map(t => {
+        const typeLabel = _TRIGGER_TYPE_LABELS[t.trigger_type] || t.trigger_type;
+        const lastRun = t.last_run ? `上次: ${t.last_run.slice(0, 16).replace('T', ' ')}` : '未运行';
+        const enabledCls = t.enabled ? 'enabled' : '';
+        return `
+        <div class="trigger-row ${enabledCls}" data-tid="${t.trigger_id}">
+            <div class="trigger-row-info">
+                <div class="trigger-name">${escapeHtml(t.name)}</div>
+                <div style="display:flex;gap:5px;margin-top:3px;align-items:center;">
+                    <span class="type-badge">${typeLabel}</span>
+                    <span style="font-size:10px;color:var(--text-muted)">${escapeHtml(lastRun)}</span>
+                </div>
+            </div>
+            <label class="toggle" title="${t.enabled ? '点击禁用' : '点击启用'}">
+                <input type="checkbox" ${t.enabled ? 'checked' : ''}
+                    onchange="toggleTrigger('${t.trigger_id}', this.checked)">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>`;
+    }).join('');
+}
+
+async function toggleTrigger(triggerId, enabled) {
+    const row = document.querySelector(`.trigger-row[data-tid="${triggerId}"]`);
+    if (row) row.classList.toggle('enabled', enabled);
+    const t = _allTriggers.find(x => x.trigger_id === triggerId);
+    if (t) t.enabled = enabled;
+    try {
+        const resp = await fetch(`/api/jobs/triggers/${triggerId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '操作失败');
+    } catch(e) {
+        if (row) row.classList.toggle('enabled', !enabled);
+        if (t) t.enabled = !enabled;
+        alert('切换失败: ' + e.message);
+    }
+}
+
+async function bootstrapTriggers(force = false) {
+    const label = force ? '重建' : '初始化';
+    if (force && !confirm('确定重建所有推荐触发器吗？已有推荐触发器将被替换。')) return;
+    try {
+        const resp = await fetch('/api/jobs/triggers/bootstrap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force }),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '操作失败');
+        const c = (data.data && data.data.created || []).length;
+        const s = (data.data && data.data.skipped || []).length;
+        console.log(`[Triggers] ${label}: 创建 ${c}, 跳过 ${s}`);
+        await loadTriggers();
+    } catch(e) {
+        alert(`${label}失败: ` + e.message);
+    }
+}
+
+// ================= Create Intent Binding Modal =================
+
+function openCreateBindingModal() {
+    // Populate skill dropdown from cache (or empty fallback)
+    const sel = document.getElementById('cbSkillId');
+    if (!sel) return;
+    const skills = _allSkills.length ? _allSkills : [];
+    sel.innerHTML = skills.map(s =>
+        `<option value="${s.id}">${escapeHtml((s.icon || '🔧') + ' ' + s.name)}</option>`
+    ).join('') || '<option value="">（请先加载 Skill 列表）</option>';
+    document.getElementById('cbPatterns').value = '';
+    document.getElementById('cbTurns').value = '1';
+    document.getElementById('createBindingModal').style.display = 'flex';
+}
+
+function closeCreateBindingModal() {
+    document.getElementById('createBindingModal').style.display = 'none';
+}
+
+async function saveCreateBinding() {
+    const skillId = document.getElementById('cbSkillId').value;
+    if (!skillId) { alert('请选择一个 Skill'); return; }
+    const rawPatterns = document.getElementById('cbPatterns').value;
+    const turns = parseInt(document.getElementById('cbTurns').value) || 1;
+    const patterns = rawPatterns.split(/[,，]+/).map(s => s.trim()).filter(Boolean);
+    if (!patterns.length) { alert('请至少输入一个关键词'); return; }
+
+    try {
+        const resp = await fetch(`/api/skills/${encodeURIComponent(skillId)}/bindings/intent`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ patterns, auto_disable_after_turns: turns }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '创建失败');
+        closeCreateBindingModal();
+        await loadSkillBindings();
+    } catch(e) {
+        alert('创建失败: ' + e.message);
+    }
+}
+
+// ================= Create Trigger Modal =================
+
+function openCreateTriggerModal() {
+    document.getElementById('ctName').value = '';
+    document.getElementById('ctType').value = 'interval';
+    document.getElementById('ctJobType').value = 'agent_query';
+    document.getElementById('ctQuery').value = '';
+    document.getElementById('ctIntervalSecs').value = '3600';
+    document.getElementById('ctCronTime').value = '09:00';
+    onCreateTriggerTypeChange();
+    document.getElementById('createTriggerModal').style.display = 'flex';
+}
+
+function closeCreateTriggerModal() {
+    document.getElementById('createTriggerModal').style.display = 'none';
+}
+
+function onCreateTriggerTypeChange() {
+    const type = document.getElementById('ctType').value;
+    document.getElementById('ctConfigInterval').style.display = (type === 'interval') ? '' : 'none';
+    document.getElementById('ctConfigCron').style.display     = (type === 'cron')     ? '' : 'none';
+}
+
+async function saveCreateTrigger() {
+    const name = (document.getElementById('ctName').value || '').trim();
+    if (!name) { alert('请输入名称'); return; }
+    const type    = document.getElementById('ctType').value;
+    const jobType = document.getElementById('ctJobType').value;
+    const query   = (document.getElementById('ctQuery').value || '').trim();
+
+    const config = {};
+    if (type === 'interval') {
+        config.interval_seconds = parseInt(document.getElementById('ctIntervalSecs').value) || 3600;
+    } else if (type === 'cron') {
+        config.time = document.getElementById('ctCronTime').value || '09:00';
+    }
+
+    const jobPayload = query ? { query } : {};
+
+    try {
+        const resp = await fetch('/api/jobs/triggers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                trigger_type: type,
+                job_type: jobType,
+                job_payload: jobPayload,
+                config,
+                enabled: false,         // disabled by default — user enables manually
+            }),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '创建失败');
+        closeCreateTriggerModal();
+        await loadTriggers();
+    } catch(e) {
+        alert('创建失败: ' + e.message);
+    }
+}
+
+// ================= Create Custom Skill Modal =================
+
+function openCreateSkillModal() {
+    document.getElementById('csIcon').value = '🤖';
+    document.getElementById('csName').value = '';
+    document.getElementById('csCategory').value = 'custom';
+    document.getElementById('csDesc').value = '';
+    document.getElementById('csPrompt').value = '';
+    document.getElementById('createSkillModal').style.display = 'flex';
+}
+
+function closeCreateSkillModal() {
+    document.getElementById('createSkillModal').style.display = 'none';
+}
+
+async function saveCreateSkill() {
+    const name = (document.getElementById('csName').value || '').trim();
+    if (!name) { alert('请输入技能名称'); return; }
+    const icon     = (document.getElementById('csIcon').value || '').trim() || '🤖';
+    const category = document.getElementById('csCategory').value;
+    const desc     = (document.getElementById('csDesc').value || '').trim();
+    const prompt   = (document.getElementById('csPrompt').value || '').trim();
+
+    try {
+        const resp = await fetch('/api/skills', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name, icon, category,
+                description: desc || `${name} 技能`,
+                system_prompt: prompt || `你是一个专注于「${name}」任务的 AI 助手。`,
+                tags: [category, 'custom'],
+            }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '创建失败');
+        closeCreateSkillModal();
+        await loadSkills();     // refresh skills list
+        filterSkills(_currentSkillFilter);
+    } catch(e) {
+        alert('创建失败: ' + e.message);
+    }
+}
+
+// ================= FileHub Panel =================
+
+const _FILE_CAT_ICONS = {
+    '文档': '📄', '图片': '🖼️', '视频': '🎬', '音频': '🎵',
+    '代码': '💻', '压缩包': '📦', '其他': '📎',
+};
+
+// ---- Mode switch ----
+function fhSwitchTab(tab) {
+    const isSearch = tab === 'search';
+    document.getElementById('fhTabSearch').style.background = isSearch ? 'var(--accent-primary)' : 'var(--bg-card)';
+    document.getElementById('fhTabSearch').style.color       = isSearch ? '#fff' : 'var(--text-primary)';
+    document.getElementById('fhTabBrowse').style.background = isSearch ? 'var(--bg-card)' : 'var(--accent-primary)';
+    document.getElementById('fhTabBrowse').style.color       = isSearch ? 'var(--text-primary)' : '#fff';
+    document.getElementById('fhPaneSearch').style.display = isSearch ? '' : 'none';
+    document.getElementById('fhPaneBrowse').style.display = isSearch ? 'none' : '';
+    document.getElementById('fhFileList').innerHTML = '<div class="memory-empty">在上方选择搜索模式</div>';
+    document.getElementById('fhResultHeader').style.display = 'none';
+}
+
+// ---- Search mode ----
+async function fhDoSearch() {
+    const q   = document.getElementById('fhSearchInput')?.value?.trim() || '';
+    const cat = document.getElementById('fhCatFilter')?.value || '';
+    const list = document.getElementById('fhFileList');
+    if (!list) return;
+    list.innerHTML = '<div class="memory-empty">搜索中…</div>';
+    document.getElementById('fhResultHeader').style.display = 'none';
+    try {
+        const params = new URLSearchParams({ limit: 100 });
+        if (q)   params.set('q', q);
+        if (cat) params.set('category', cat);
+        const r = await fetch(`/api/files/search?${params}`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const files = d.results || d.files || [];
+        _fhRenderFiles(files, list, false);
+        _fhShowCount(files.length, q || cat ? '搜索结果' : '最近文件');
+    } catch(e) {
+        list.innerHTML = `<div class="memory-empty">搜索失败：${_esc(e.message)}</div>`;
+    }
+}
+
+async function fhLoadRecent() {
+    const list = document.getElementById('fhFileList');
+    if (!list) return;
+    list.innerHTML = '<div class="memory-empty">加载中…</div>';
+    document.getElementById('fhResultHeader').style.display = 'none';
+    try {
+        const r = await fetch('/api/files/recent?days=14&limit=50');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const files = d.results || d.files || [];
+        _fhRenderFiles(files, list, false);
+        _fhShowCount(files.length, '最近 14 天');
+    } catch(e) {
+        list.innerHTML = `<div class="memory-empty">加载失败：${_esc(e.message)}</div>`;
+    }
+}
+
+async function fhCheckDuplicates() {
+    const list = document.getElementById('fhFileList');
+    if (!list) return;
+    list.innerHTML = '<div class="memory-empty">检测中，请稍候…</div>';
+    document.getElementById('fhResultHeader').style.display = 'none';
+    try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 15000);
+        const r = await fetch('/api/files/duplicates', { signal: controller.signal });
+        clearTimeout(tid);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const groups = d.groups || d.duplicates || [];
+        if (!groups.length) {
+            list.innerHTML = '<div class="memory-empty">✅ 未发现重复文件</div>';
+            return;
+        }
+        list.innerHTML = groups.map((g, i) => {
+            const pairs = (g.files || g).map(f =>
+                `<div class="fh-dup-path" title="${_esc(f.path||f)}">
+                    <span>• ${_esc((f.name||(f.path||f).split(/[\\/]/).pop()||''))}</span>
+                    <button onclick="_fhCopyPath(${JSON.stringify(f.path||f)})" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:var(--text-muted);">📋</button>
+                </div>`
+            ).join('');
+            return `<div class="fh-dup-group">
+                <div class="fh-dup-title">重复组 ${i+1}（${(g.files||g).length} 个文件）</div>
+                ${pairs}
+            </div>`;
+        }).join('');
+        _fhShowCount(groups.length, '重复组');
+    } catch(e) {
+        const msg = e.name === 'AbortError' ? '检测超时，文件太多，请缩小范围' : '检测失败：' + e.message;
+        list.innerHTML = `<div class="memory-empty">${_esc(msg)}</div>`;
+    }
+}
+
+// ---- Browse mode ----
+let _fhBrowseCache = [];
+
+async function fhPickFolder() {
+    const btn = document.querySelector('#fhPaneBrowse button[onclick="fhPickFolder()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    try {
+        const r = await fetch('/api/files/pick-folder');
+        const d = await r.json();
+        if (d.ok && d.path) {
+            document.getElementById('fhBrowsePath').value = d.path;
+            fhDoBrowse();  // auto-browse once a folder is selected
+        }
+        // cancelled silently — user closed dialog without picking
+    } catch(e) {
+        _showToast('无法打开文件夹选择器：' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '📂'; }
+    }
+}
+
+async function fhDoBrowse() {
+    const path      = document.getElementById('fhBrowsePath')?.value?.trim();
+    const recursive = document.getElementById('fhRecursive')?.checked || false;
+    if (!path) { alert('请输入目录路径'); return; }
+    const list = document.getElementById('fhFileList');
+    if (!list) return;
+    list.innerHTML = '<div class="memory-empty">浏览中…</div>';
+    document.getElementById('fhResultHeader').style.display = 'none';
+    _fhBrowseCache = [];
+    try {
+        const params = new URLSearchParams({ path, limit: 500 });
+        if (recursive) params.set('recursive', 'true');
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 20000);
+        const r = await fetch(`/api/files/browse?${params}`, { signal: controller.signal });
+        clearTimeout(tid);
+        if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.error || 'HTTP ' + r.status);
+        }
+        const d = await r.json();
+        _fhBrowseCache = d.files || [];
+        _fhRenderFiles(_fhBrowseCache, list, true);
+        _fhShowCount(_fhBrowseCache.length, '文件');
+    } catch(e) {
+        const msg = e.name === 'AbortError' ? '浏览超时，目录可能过大，请取消递归或换一个路径' : e.message;
+        list.innerHTML = `<div class="memory-empty">${_esc(msg)}</div>`;
+    }
+}
+
+function fhFilterBrowseResults(q) {
+    if (!_fhBrowseCache.length) return;
+    const lq = q.toLowerCase();
+    const filtered = lq ? _fhBrowseCache.filter(f => (f.name||'').toLowerCase().includes(lq) || (f.path||'').toLowerCase().includes(lq)) : _fhBrowseCache;
+    const list = document.getElementById('fhFileList');
+    if (!list) return;
+    _fhRenderFiles(filtered, list, true);
+    _fhShowCount(filtered.length, '文件');
+}
+
+async function fhRegisterBrowsed() {
+    const path = document.getElementById('fhBrowsePath')?.value?.trim();
+    if (!path) { alert('请先浏览一个目录'); return; }
+    if (!confirm(`将目录「${path}」注册到文件库中，继续？`)) return;
+    try {
+        const r = await fetch('/api/files/scan-dir', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ directory: path }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const msg = d.registered !== undefined
+            ? `✅ 注册完成：新增 ${d.registered} 个，更新 ${d.updated || 0} 个`
+            : (d.message || '✅ 注册完成');
+        alert(msg);
+        fileHubLoadStats();
+    } catch(e) {
+        alert('注册失败: ' + e.message);
+    }
+}
+
+// ---- Shared render helpers ----
+function _fhRenderFiles(files, container, showPath) {
+    if (!files.length) { container.innerHTML = '<div class="memory-empty">没有找到文件</div>'; return; }
+    container.innerHTML = files.map(f => {
+        const icon = _FILE_CAT_ICONS[f.category] || '📎';
+        const size = f.size_bytes
+            ? (f.size_bytes > 1048576 ? (f.size_bytes / 1048576).toFixed(1) + ' MB' : Math.round(f.size_bytes / 1024) + ' KB')
+            : '';
+        const date = f.mtime ? new Date(f.mtime * 1000).toLocaleDateString('zh-CN') : '';
+        const sub  = showPath
+            ? (f.path || '')
+            : [f.category, size, date].filter(Boolean).join(' · ');
+        const path = _esc(f.path || '');
+        return `<div class="fh-card" title="${path}">
+            <span class="fh-icon">${icon}</span>
+            <div class="fh-meta" style="min-width:0;">
+                <div class="fh-name">${_esc(f.name || f.path || '')}</div>
+                <div class="fh-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(sub)}</div>
+            </div>
+            <button onclick="_fhCopyPath(${JSON.stringify(f.path||'')})"
+                title="复制路径" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;color:var(--text-muted);">📋</button>
+        </div>`;
+    }).join('');
+}
+
+function _fhShowCount(n, label) {
+    const hdr = document.getElementById('fhResultHeader');
+    const cnt = document.getElementById('fhResultCount');
+    if (!hdr || !cnt) return;
+    cnt.textContent = `共 ${n} 个${label}`;
+    hdr.style.display = 'flex';
+}
+
+function _fhCopyPath(path) {
+    navigator.clipboard.writeText(path).then(() => {
+        _showToast('路径已复制');
+    }).catch(() => {
+        prompt('复制路径：', path);
+    });
+}
+
+function fhCopyAllPaths() {
+    const cards = document.querySelectorAll('#fhFileList .fh-card');
+    const paths = Array.from(cards).map(c => c.title).filter(Boolean);
+    if (!paths.length) return;
+    navigator.clipboard.writeText(paths.join('\n')).then(() => {
+        _showToast('已复制 ' + paths.length + ' 个路径');
+    }).catch(() => {
+        prompt('所有路径：', paths.join('\n'));
+    });
+}
+
+async function fileHubLoadStats() {
+    try {
+        const r = await fetch('/api/files/stats');
+        if (!r.ok) return;
+        const d = await r.json();
+        const stats = d.stats || d;
+        const total = stats.total || 0;
+        const el = document.getElementById('fhStatsSummary');
+        if (el) el.textContent = `文件库：${total} 个文件`;
+    } catch(e) { /* silent */ }
+}
+
+function _esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ================= Catalog Schedule Wizard (Phase 3-B) =================
+
+async function openCatalogScheduleWizard() {
+    // Pre-fill source dir from browse path if available
+    const scanPath = document.getElementById('fhBrowsePath')?.value?.trim();
+    const srcInput = document.getElementById('cwSourceDir');
+    if (srcInput && scanPath) srcInput.value = scanPath;
+    // Try to load existing downloads_auto_catalog config
+    try {
+        const r = await fetch('/api/jobs/triggers');
+        if (!r.ok) throw new Error('skip');
+        const d = await r.json();
+        const triggers = (d.ok && d.data) ? d.data : [];
+        const preset = triggers.find(t => (t.job_payload?.preset_key === 'downloads_auto_catalog') || t.name === '下载目录自动整理');
+        if (preset) {
+            if (preset.job_payload?.source_dir && srcInput) srcInput.value = preset.job_payload.source_dir;
+            const ivInput = document.getElementById('cwIntervalHours');
+            if (ivInput && preset.config?.interval_seconds) ivInput.value = Math.round(preset.config.interval_seconds / 3600) || 6;
+            window._cwTriggerId = preset.trigger_id || preset.id;
+        }
+    } catch(e) { /* silent */ }
+    document.getElementById('catalogWizardModal').style.display = 'flex';
+}
+
+function closeCatalogScheduleWizard() {
+    document.getElementById('catalogWizardModal').style.display = 'none';
+    window._cwTriggerId = undefined;
+}
+
+async function saveCatalogScheduleWizard() {
+    const sourceDir = document.getElementById('cwSourceDir')?.value?.trim();
+    const hours = parseInt(document.getElementById('cwIntervalHours')?.value || '6', 10);
+    if (!sourceDir) { alert('请填写目录路径'); return; }
+    const intervalSecs = Math.max(60, hours * 3600);
+    try {
+        let triggerId = window._cwTriggerId;
+        // Bootstrap preset if not found yet
+        if (!triggerId) {
+            const bResp = await fetch('/api/jobs/triggers/bootstrap', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({force: false}) });
+            const bData = await bResp.json();
+            const all = await (await fetch('/api/jobs/triggers')).json();
+            const list = (all.ok && all.data) ? all.data : [];
+            const preset = list.find(t => (t.job_payload?.preset_key === 'downloads_auto_catalog') || t.name === '下载目录自动整理');
+            triggerId = preset?.trigger_id || preset?.id;
+        }
+        if (!triggerId) { alert('未找到系统预设触发器，请先在「定时触发器」区域点击「初始化推荐」'); return; }
+        // Update trigger config + payload + enable
+        const patchResp = await fetch(`/api/jobs/triggers/${triggerId}`, {
+            method: 'PATCH',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                enabled: true,
+                config: { interval_seconds: intervalSecs },
+                job_payload: { source_dir: sourceDir },
+            }),
+        });
+        const patchData = await patchResp.json();
+        if (!patchData.ok) throw new Error(patchData.error || '更新失败');
+        closeCatalogScheduleWizard();
+        await loadTriggers();  // refresh trigger list
+        alert(`✅ 定时整理已启用！每 ${hours} 小时自动整理：${sourceDir}`);
+    } catch(e) {
+        alert('保存失败: ' + e.message);
+    }
+}
+
+// ── Panel Resize (drag to resize sidebar & skills panel) ─────────────────
+(function initPanelResize() {
+    const MIN_SIDEBAR = 200, MAX_SIDEBAR = 520;
+    const MIN_SKILLS  = 280, MAX_SKILLS  = 680;
+    const root = document.documentElement;
+
+    // Restore saved sizes from previous session
+    const savedSW = parseInt(localStorage.getItem('koto.sidebarWidth') || '280');
+    const savedKW = parseInt(localStorage.getItem('koto.skillsWidth')  || '400');
+    root.style.setProperty('--sidebar-width',      Math.min(MAX_SIDEBAR, Math.max(MIN_SIDEBAR, savedSW)) + 'px');
+    root.style.setProperty('--skills-panel-width', Math.min(MAX_SKILLS,  Math.max(MIN_SKILLS,  savedKW)) + 'px');
+
+    function enableResize(handle, onMove, onDone) {
+        if (!handle) return;
+        handle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            handle.classList.add('dragging');
+            document.body.style.cursor      = 'col-resize';
+            document.body.style.userSelect  = 'none';
+            document.body.style.webkitUserSelect = 'none';
+
+            function move(ev) { onMove(ev); }
+            function up()     {
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup',   up);
+                handle.classList.remove('dragging');
+                document.body.style.cursor      = '';
+                document.body.style.userSelect  = '';
+                document.body.style.webkitUserSelect = '';
+                if (onDone) onDone();
+            }
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup',   up);
+        });
+    }
+
+    // Sidebar: drag the right edge of nav-rail
+    enableResize(
+        document.getElementById('sidebarResizeHandle'),
+        function(e) {
+            const shell = document.querySelector('.app-shell');
+            if (!shell) return;
+            const newW = Math.min(MAX_SIDEBAR, Math.max(MIN_SIDEBAR, e.clientX - shell.getBoundingClientRect().left - 12));
+            root.style.setProperty('--sidebar-width', newW + 'px');
+        },
+        function() {
+            localStorage.setItem('koto.sidebarWidth', parseInt(root.style.getPropertyValue('--sidebar-width')));
+        }
+    );
+
+    // Skills panel: drag the left edge of the panel
+    enableResize(
+        document.getElementById('skillsResizeHandle'),
+        function(e) {
+            const newW = Math.min(MAX_SKILLS, Math.max(MIN_SKILLS, window.innerWidth - e.clientX));
+            root.style.setProperty('--skills-panel-width', newW + 'px');
+        },
+        function() {
+            localStorage.setItem('koto.skillsWidth', parseInt(root.style.getPropertyValue('--skills-panel-width')));
+        }
+    );
+
+    // Settings panel: drag its left edge to resize
+    const MIN_SETTINGS = 300, MAX_SETTINGS = 640;
+    enableResize(
+        document.getElementById('settingsResizeHandle'),
+        function(e) {
+            const newW = Math.min(MAX_SETTINGS, Math.max(MIN_SETTINGS, window.innerWidth - e.clientX));
+            root.style.setProperty('--settings-panel-width', newW + 'px');
+        },
+        function() {
+            localStorage.setItem('koto.settingsWidth', parseInt(root.style.getPropertyValue('--settings-panel-width')));
+        }
+    );
+    const savedSetW = parseInt(localStorage.getItem('koto.settingsWidth') || '420');
+    root.style.setProperty('--settings-panel-width', Math.min(MAX_SETTINGS, Math.max(MIN_SETTINGS, savedSetW)) + 'px');
+
+    // Chat input: drag the top edge to change textarea max-height
+    const MIN_INPUT = 60, MAX_INPUT = 400;
+    enableResize(
+        document.getElementById('inputResizeHandle'),
+        function(e) {
+            const chatPane = document.querySelector('.chat-pane');
+            if (!chatPane) return;
+            const paneRect = chatPane.getBoundingClientRect();
+            const newH = Math.min(MAX_INPUT, Math.max(MIN_INPUT, paneRect.bottom - e.clientY - 80));
+            root.style.setProperty('--input-max-height', newH + 'px');
+            root.style.setProperty('--input-min-height', Math.min(newH, 80) + 'px');
+            const ta = document.getElementById('messageInput');
+            if (ta) autoResize(ta);
+        },
+        function() {
+            localStorage.setItem('koto.inputMaxH', parseInt(root.style.getPropertyValue('--input-max-height')));
+        }
+    );
+    const savedInputH = parseInt(localStorage.getItem('koto.inputMaxH') || '220');
+    root.style.setProperty('--input-max-height', Math.min(MAX_INPUT, Math.max(MIN_INPUT, savedInputH)) + 'px');
+})();
+
+// ── UI Zoom (global font & layout scale) ─────────────────────────────────
+function setUIZoom(v) {
+    v = Math.max(0.7, Math.min(1.5, parseFloat(v) || 1));
+    document.documentElement.style.zoom = v;
+    // Compensate --viewport-h so 100vh-based containers don't overflow after zoom
+    document.documentElement.style.setProperty('--viewport-h', (window.innerHeight / v) + 'px');
+    localStorage.setItem('koto.uiZoom', v);
+    const pct = Math.round(v * 100);
+    const display = document.getElementById('uiZoomDisplay');
+    if (display) display.textContent = pct + '%';
+    const slider = document.getElementById('uiZoomSlider');
+    if (slider) slider.value = pct;
+    document.querySelectorAll('.fs-preset-btn').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.textContent) === pct);
+    });
+}
+
+// ================= Shadow Watcher (影子追踪 · 主动交互) =================
+
+let _shadowPending = [];             // 当前待展示的主动消息列表
+let _shadowCurrentIdx = 0;          // banner 当前显示的消息索引
+
+// ── 轮询：定期拉取待消息 ─────────────────────────────────────────────────────
+async function shadowPollPending() {
+    try {
+        const resp = await fetch('/api/shadow/pending');
+        if (!resp.ok) return;           // API 未就绪，静默忽略
+        const data = await resp.json();
+        if (!data.ok) return;
+        _shadowPending = data.data || [];
+        _shadowCurrentIdx = 0;
+        _shadowUpdateBanner();
+        _shadowUpdateBadge();
+    } catch(e) { /* 静默：不干扰主界面 */ }
+}
+
+function _shadowUpdateBadge() {
+    const badge = document.getElementById('shadowBadge');
+    if (!badge) return;
+    const count = _shadowPending.length;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? '' : 'none';
+}
+
+function _shadowUpdateBanner() {
+    const banner = document.getElementById('shadowBanner');
+    if (!banner) return;
+    if (!_shadowPending.length) {
+        banner.style.display = 'none';
+        return;
+    }
+    banner.style.display = '';
+    const msg = _shadowPending[_shadowCurrentIdx] || _shadowPending[0];
+    const textEl = document.getElementById('shadowBannerText');
+    if (textEl) textEl.textContent = msg.content;
+    const countEl = document.getElementById('shadowBannerCount');
+    if (countEl) countEl.textContent = `消息 ${_shadowCurrentIdx + 1} / ${_shadowPending.length}`;
+    // Show nav only if >1
+    const navEl = document.getElementById('shadowBannerNav');
+    if (navEl) navEl.style.display = _shadowPending.length > 1 ? '' : 'none';
+
+    // Store current message id for dismiss
+    banner.dataset.msgId = msg.id;
+}
+
+function shadowNextMsg() {
+    if (_shadowPending.length < 2) return;
+    _shadowCurrentIdx = (_shadowCurrentIdx + 1) % _shadowPending.length;
+    _shadowUpdateBanner();
+}
+
+function shadowPrevMsg() {
+    if (_shadowPending.length < 2) return;
+    _shadowCurrentIdx = (_shadowCurrentIdx - 1 + _shadowPending.length) % _shadowPending.length;
+    _shadowUpdateBanner();
+}
+
+async function shadowDismissCurrent() {
+    const banner = document.getElementById('shadowBanner');
+    const msgId = banner?.dataset?.msgId;
+    if (!msgId) return;
+    try {
+        await fetch(`/api/shadow/dismiss/${msgId}`, { method: 'POST' });
+    } catch(e) { /* ignore */ }
+    _shadowPending = _shadowPending.filter(m => m.id !== msgId);
+    _shadowCurrentIdx = Math.min(_shadowCurrentIdx, Math.max(0, _shadowPending.length - 1));
+    _shadowUpdateBanner();
+    _shadowUpdateBadge();
+}
+
+async function shadowDismissAll() {
+    try { await fetch('/api/shadow/dismiss-all', { method: 'POST' }); } catch(e) { /* ignore */ }
+    _shadowPending = [];
+    _shadowUpdateBanner();
+    _shadowUpdateBadge();
+}
+
+function shadowReply() {
+    // Paste the message content into the chat input as a reply trigger
+    const banner = document.getElementById('shadowBanner');
+    const msgId = banner?.dataset?.msgId;
+    const msg = _shadowPending.find(m => m.id === msgId);
+    if (!msg) return;
+    const input = document.getElementById('messageInput');
+    if (input) {
+        input.value = '（回复 Koto 的提醒）' + msg.content;
+        input.focus();
+    }
+    shadowDismissCurrent();
+}
+
+function openShadowPanel() {
+    // Open settings panel and scroll to shadow section
+    openSettings();
+    setTimeout(() => {
+        const el = document.querySelector('.settings-section:has(#shadowWatcherToggle)');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+}
+
+// ── 设置面板内的 Shadow 状态加载 ─────────────────────────────────────────────
+async function loadShadowStatus() {
+    try {
+        const resp = await fetch('/api/shadow/status');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.ok) return;
+        const s = data.data;
+
+        // 更新开关
+        const toggle = document.getElementById('shadowWatcherToggle');
+        const label  = document.getElementById('shadowWatcherLabel');
+        if (toggle) toggle.checked = !!s.enabled;
+        if (label)  label.textContent = s.enabled ? '影子追踪已开启' : '影子追踪已关闭';
+
+        // 显示摘要卡片
+        const cardsEl = document.getElementById('shadowSummaryCards');
+        if (cardsEl) {
+            cardsEl.style.display = '';
+            const topics = (s.top_topics || []).map(t => `<span style="background:var(--bg-hover);border-radius:4px;padding:2px 6px;font-size:11px;">${escapeHtml(t.topic)} ×${t.count}</span>`).join(' ');
+            cardsEl.innerHTML = `
+                <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--text-muted);">
+                    <span>📊 已观察 <strong>${s.total_observations || 0}</strong> 次对话</span>
+                    <span>🔥 连续 <strong>${s.streak_days || 0}</strong> 天</span>
+                    <span>📌 开放任务 <strong>${s.open_tasks_count || 0}</strong> 项</span>
+                    <span>💬 待推送 <strong>${s.pending_messages || 0}</strong> 条</span>
+                </div>
+                ${topics ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${topics}</div>` : ''}
+            `;
+        }
+
+        // 加载开放任务列表
+        await loadShadowOpenTasks();
+    } catch(e) { /* 静默 */ }
+}
+
+async function toggleShadowWatcher(enabled) {
+    const label = document.getElementById('shadowWatcherLabel');
+    try {
+        const resp = await fetch('/api/shadow/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '操作失败');
+        if (label) label.textContent = enabled ? '影子追踪已开启' : '影子追踪已关闭';
+    } catch(e) {
+        alert('切换失败: ' + e.message);
+        // revert
+        const toggle = document.getElementById('shadowWatcherToggle');
+        if (toggle) toggle.checked = !enabled;
+    }
+}
+
+async function shadowForceTick() {
+    try {
+        const resp = await fetch('/api/shadow/tick', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: true }),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '检查失败');
+        const count = (data.data?.messages || []).length;
+        if (count > 0) {
+            await shadowPollPending();
+            alert(`✅ 检查完成，生成 ${count} 条主动消息。`);
+        } else {
+            alert('✅ 检查完成，当前暂无需要主动推送的内容。');
+        }
+        await loadShadowStatus();
+    } catch(e) {
+        alert('检查失败: ' + e.message);
+    }
+}
+
+async function shadowOpenObservations() {
+    try {
+        const resp = await fetch('/api/shadow/observations');
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '获取失败');
+        const obs = data.data;
+        const topics = Object.entries(obs.topics || {}).sort((a,b)=>b[1]-a[1]).slice(0,10);
+        const hours = Object.entries(obs.active_hours || {}).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+        const hourBar = hours.map(([h,c]) => `${h}时:${c}`).join('  ');
+        const detail = [
+            `📊 总观察次数: ${obs.total_observations || 0}`,
+            `🔥 连续天数: ${obs.streak?.days || 0}`,
+            `🕐 活跃时段: ${hourBar || '暂无记录'}`,
+            `🏷️ 话题词频 (TOP10): ${topics.map(([k,v])=>`${k}×${v}`).join(', ') || '暂无'}`,
+            `📌 开放任务: ${(obs.open_tasks||[]).filter(t=>!t.done).length} 项待处理`,
+            `⏱️ 最后活跃: ${obs.last_seen || '无'}`,
+        ].join('\n');
+        alert(detail);
+    } catch(e) {
+        alert('获取失败: ' + e.message);
+    }
+}
+
+async function loadShadowOpenTasks() {
+    const el = document.getElementById('shadowOpenTasksList');
+    if (!el) return;
+    try {
+        const resp = await fetch('/api/shadow/open-tasks');
+        const data = await resp.json();
+        if (!data.ok || !data.data?.length) { el.innerHTML = ''; return; }
+        el.innerHTML = data.data.slice(0, 5).map(t => `
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;">
+                <span style="color:var(--accent-warning);">📌</span>
+                <span style="flex:1;color:var(--text-primary)">${escapeHtml(t.text.slice(0, 60))}${t.text.length>60?'…':''}</span>
+                <button class="btn-secondary btn-sm" onclick="shadowMarkTaskDone('${t.id}')">✓</button>
+            </div>`).join('');
+    } catch(e) { el.innerHTML = ''; }
+}
+
+async function shadowMarkTaskDone(taskId) {
+    try {
+        await fetch(`/api/shadow/dismiss-task/${taskId}`, { method: 'POST' });
+        await loadShadowOpenTasks();
+        await loadShadowStatus();
+    } catch(e) { /* ignore */ }
+}

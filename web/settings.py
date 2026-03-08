@@ -3,12 +3,17 @@ Koto Settings Manager
 用户设置管理模块 - 支持自定义存储路径和应用配置
 """
 import os
+import sys
 import json
 from pathlib import Path
 
 # 默认设置文件位置
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+# 打包模式：config/ 紧邻 Koto.exe；开发模式：config/ 在 web/ 的父级
+if getattr(sys, 'frozen', False):
+    PROJECT_ROOT = os.path.dirname(sys.executable)
+else:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 SETTINGS_FILE = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
 
 # 默认设置
@@ -30,12 +35,15 @@ DEFAULT_SETTINGS = {
         "voice_auto_send": False,  # 语音输入后自动发送
         "stream_response": True,
         "show_thinking": False,  # 显示思考过程（推理链）
+        "enable_mini_game": True,  # 启用等待时的小游戏
     },
     "proxy": {
         "enabled": True,
         "auto_detect": True,
         "manual_proxy": "",
-    }
+    },
+    "model_mode": "cloud",
+    "local_model": "",
 }
 
 

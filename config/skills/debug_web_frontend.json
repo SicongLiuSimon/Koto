@@ -1,0 +1,27 @@
+{
+  "id": "debug_web_frontend",
+  "name": "前端调试",
+  "icon": "🖥️",
+  "category": "domain",
+  "description": "专项前端调试：JS/TS/CSS 报错、控制台异常、DOM 问题、React/Vue 组件 bug",
+  "intent_description": "用户遇到 JS/TS 报错、CSS 样式异常、React/Vue 组件 bug、浏览器控制台错误",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [],
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "包含错误定位、状态/DOM分析和修复代码片段"
+  },
+  "bound_tools": [],
+  "task_types": ["CODER"],
+  "enabled": true,
+  "prompt": "\n\n## 🖥️ 领域要求：前端专项调试\n- 调试排查顺序：控制台错误 → Network 面板 → DOM 状态 → 组件 state/props\n- 区分错误来源：运行时错误（TypeError/ReferenceError）、异步错误（Promise rejection/unhandled）、渲染错误（框架报错边界）\n- React/Vue 特有检查：key 唯一性、状态更新时机、副作用依赖数组、生命周期执行顺序\n- CSS 问题排查：选择器权重（specificity）、盒模型（box-sizing）、flexbox 轴方向、stacking context（z-index）\n- 修复输出：精确到文件行号的代码改动 + DevTools 验证步骤说明",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-07T00:00:00Z",
+  "tags": ["frontend", "debug", "javascript", "css", "react", "vue"]
+}

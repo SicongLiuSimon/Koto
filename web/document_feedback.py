@@ -15,11 +15,11 @@ from datetime import datetime
 class DocumentFeedbackSystem:
     """文档智能反馈系统"""
     
-    def __init__(self, gemini_client=None, default_model_id: str = "gemini-3-pro-preview"):
+    def __init__(self, gemini_client=None, default_model_id: str = "gemini-2.5-pro"):
         """
         Args:
             gemini_client: Gemini API客户端实例
-            default_model_id: 默认优先模型
+            default_model_id: 默认优先模型（必须是支持 generate_content 的模型，不能是 Interactions-only 模型）
         """
         self.client = gemini_client
         self.default_model_id = default_model_id
@@ -304,25 +304,58 @@ class DocumentFeedbackSystem:
         
         elif doc_type == "word":
             base_prompt += """    {
-      "paragraph_index": 0,
+      "paragraph_index": 2,
       "action": "update",
       "content": "修改后的段落内容",
       "reason": "修改原因"
     },
     {
-      "paragraph_index": 3,
+      "paragraph_index": 5,
       "action": "insert",
       "content": "新插入的段落",
-      "reason": "插入原因"
+      "reason": "插入原因（在第5段之前插入）"
+    },
+    {
+      "paragraph_index": 8,
+      "action": "delete",
+      "reason": "删除原因"
+    },
+    {
+      "action": "update_table_cell",
+      "table_index": 0,
+      "row": 1,
+      "col": 2,
+      "value": "新单元格内容",
+      "reason": "修改第1个表格第2行第3列"
+    },
+    {
+      "action": "insert_table_row",
+      "table_index": 0,
+      "row": 3,
+      "reason": "在第3行之前插入空行"
+    },
+    {
+      "action": "delete_table_row",
+      "table_index": 0,
+      "row": 4,
+      "reason": "删除第4行"
     }
   ]
 }
 ```
 
-可用的action类型：
-- update: 修改现有段落
-- insert: 插入新段落
-- delete: 删除段落
+可用的 action 类型：
+锻段落操作（需 paragraph_index）：
+- update: 修改现有段落文本
+- insert: 在 paragraph_index 段落之前插入新段落
+- delete: 删除 paragraph_index 段落
+
+表格操作（需 table_index，索引从0开始）：
+- update_table_cell: 修改单元格，需要 row/col/value（索引从0开始）
+- insert_table_row: 在 row 之前插入空行
+- delete_table_row: 删除 row 行
+
+注意：文档中的 [📷 图片N] 是嵌入图片，无法通过此接口修改图片内容，只能修改其前后的文字。
 """
         
         elif doc_type == "excel":
@@ -374,27 +407,51 @@ class DocumentFeedbackSystem:
         except Exception:
             return "AI建议已生成"
 
+    # Interactions-only 模型：仅支持 Interactions API，不支持 generate_content
+    # document_feedback.py 所有 generate_content 调用必须排除这些模型
+    _INTERACTIONS_ONLY_MODELS = {"gemini-3-flash-preview", "gemini-3-pro-preview"}
+
     def _list_available_models(self) -> List[Dict[str, str]]:
-        """列出当前 API 可用模型（仅包含支持 generateContent 的模型）"""
+        """列出当前 API 可用模型（仅包含支持 generateContent 的模型，排除 Interactions-only）"""
         if self._model_cache is not None:
             return self._model_cache
         if not self.client:
             self._model_cache = []
             return self._model_cache
         try:
-            models = []
-            for m in self.client.models.list():
-                supported = getattr(m, "supported_generation_methods", []) or []
-                if "generateContent" not in supported:
-                    continue
-                name = getattr(m, "name", "")
-                display_name = getattr(m, "display_name", "")
-                base_name = name.split("/")[-1] if name else ""
-                if base_name:
-                    models.append({
-                        "name": base_name,
-                        "display_name": display_name or base_name
-                    })
+            import threading
+            result_holder: Dict[str, Any] = {"models": None}
+
+            def _fetch_models():
+                try:
+                    models = []
+                    for m in self.client.models.list():
+                        name = getattr(m, "name", "")
+                        display_name = getattr(m, "display_name", "")
+                        base_name = name.split("/")[-1] if name else ""
+                        if not base_name:
+                            continue
+                        # 新版 google-genai SDK 中 supported_generation_methods 不再作为属性暴露
+                        # 改为：只要 API 返回该模型，默认认为支持 generateContent（排除 Interactions-only 例外）
+                        supported = getattr(m, "supported_generation_methods", None)
+                        if supported is not None:
+                            # 旧式 SDK 仍有此字段时沿用过滤逻辑
+                            if "generateContent" not in supported:
+                                continue
+                        # 跳过 Interactions-only 模型（仅支持 Interactions API，不能用于 generate_content）
+                        if base_name not in self._INTERACTIONS_ONLY_MODELS:
+                            models.append({"name": base_name, "display_name": display_name or base_name})
+                    result_holder["models"] = models
+                except Exception:
+                    result_holder["models"] = []
+
+            t = threading.Thread(target=_fetch_models, daemon=True)
+            t.start()
+            t.join(timeout=10)  # models.list() 最多等 10s，防止慢网络卡死分析线程
+            models = result_holder["models"]
+            if models is None:  # timeout
+                print("[DocumentFeedback] ⚠️ models.list() 超时（>10s），使用空列表降级", flush=True)
+                models = []
             self._model_cache = models
             return models
         except Exception:
@@ -402,33 +459,38 @@ class DocumentFeedbackSystem:
             return self._model_cache
 
     def _select_best_model(self, preferred: str) -> (str, List[Dict[str, str]]):
-        """根据可用模型选择最高质量模型（优先使用 preferred）"""
+        """根据可用模型选择最高质量模型（优先使用 preferred，排除 Interactions-only 模型）"""
         models = self._list_available_models()
         available = {m["name"] for m in models}
 
+        # 若 preferred 本身是 Interactions-only，直接替换为稳定备选
+        safe_preferred = preferred if preferred not in self._INTERACTIONS_ONLY_MODELS else "gemini-2.5-flash"
+
         if not models:
-            fallback = "gemini-2.5-pro" if preferred != "gemini-2.5-pro" else preferred
-            return fallback, models
+            return safe_preferred, models
 
         priority = [
-            preferred,
-            "gemini-3-flash-preview",
-            "gemini-3-pro-preview",
+            safe_preferred,
+            # gemini-3.1-pro-preview 是目前最强的可用模型（支持 generate_content）
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            # gemini-3-flash-preview / gemini-3-pro-preview 已排除（Interactions API only，不支持 generate_content）
             "gemini-3-flash",
             "gemini-3-pro",
             "gemini-2.5-pro",
             "gemini-2.5-flash",
             "gemini-2.0-pro",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-001",
         ]
 
         for name in priority:
             if name in available:
+                if name != preferred:
+                    print(f"[DocumentFeedback] 🔄 模型降级: {preferred} → {name}", flush=True)
                 return name, models
 
-        # 若无法获取列表，或列表为空，则回退为用户指定模型
-        return preferred, models
+        # 若列表中没有任何匹配，使用 safe_preferred 硬降级
+        print(f"[DocumentFeedback] ⚠️ 无可用匹配模型，强制使用: {safe_preferred}", flush=True)
+        return safe_preferred, models
 
     def _format_model_table(self, models: List[Dict[str, str]]) -> str:
         """生成可用模型表格（Markdown）"""
@@ -439,7 +501,64 @@ class DocumentFeedbackSystem:
         for m in models:
             rows.append(f"| {m['name']} | {m['display_name']} |")
         return "\n".join(rows)
-    
+
+    def _probe_working_model(self, preferred: str, timeout: int = 12) -> Optional[str]:
+        """
+        快速探测优先级模型列表中第一个可正常响应的模型。
+        - 对 503/UNAVAILABLE/overloaded 错误立即跳过（无需重试），尝试下一个
+        - 其他错误（auth/quota等）停止往下探测
+        - 所有候选均失败时返回 None
+        返回第一个成功响应的模型名，若全部失败返回 None。
+        """
+        if not self.client:
+            return preferred
+        from google.genai import types as _gt
+        probe_order = list(dict.fromkeys([
+            preferred,
+            "gemini-3.1-pro-preview",
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-3-flash-preview",
+        ]))
+        probe_order = [m for m in probe_order if m not in self._INTERACTIONS_ONLY_MODELS]
+
+        for candidate in probe_order:
+            import threading
+            _result: Dict[str, Any] = {"ok": False, "err": ""}
+
+            def _try(_m=candidate):
+                try:
+                    self.client.models.generate_content(
+                        model=_m,
+                        contents="1",
+                        config=_gt.GenerateContentConfig(temperature=0.0, max_output_tokens=5)
+                    )
+                    _result["ok"] = True
+                except Exception as exc:
+                    _result["err"] = str(exc)
+
+            t = threading.Thread(target=_try, daemon=True)
+            t.start()
+            t.join(timeout)
+            if t.is_alive():
+                print(f"[DocumentFeedback] ⏱️ 探测 {candidate} 超时，跳过", flush=True)
+                continue
+            if _result["ok"]:
+                print(f"[DocumentFeedback] ✅ 探测成功: {candidate}", flush=True)
+                return candidate
+            err = _result["err"]
+            _is_503 = ("503" in err or "UNAVAILABLE" in err
+                       or "overloaded" in err.lower() or "high demand" in err.lower())
+            if _is_503:
+                print(f"[DocumentFeedback] ⚠️ {candidate} 过载(503)，尝试下一个模型", flush=True)
+                continue
+            # 非 503 错误（认证失败/配额超限等）—— 不再往下尝试
+            print(f"[DocumentFeedback] ❌ {candidate} 探测失败(非503): {err[:100]}", flush=True)
+            break
+
+        print(f"[DocumentFeedback] ⚠️ 所有探测候选模型均不可用", flush=True)
+        return None
+
     # ==================== 文档自动标注功能 ====================
     
     def _analyze_chunk_for_annotations(
@@ -459,13 +578,17 @@ class DocumentFeedbackSystem:
         base_context = user_requirement + f"\n(注：这是文档的第{chunk_index}部分，共{total_chunks}部分)"
         def _call_model(contents: str):
             from google.genai import types
+            # gemini-2.5-pro 是思维链模型：thinking tokens 计入 max_output_tokens 预算
+            # 设置 thinking_budget=4096 防止思考链耗尽 token 预算；max_output_tokens 提升至 16000
+            _is_thinking_model = "2.5" in model_id or "gemini-3" in model_id
+            _thinking_cfg = types.ThinkingConfig(thinking_budget=4096) if _is_thinking_model else None
+            _cfg_kwargs = dict(temperature=0.2, max_output_tokens=16000)
+            if _thinking_cfg is not None:
+                _cfg_kwargs["thinking_config"] = _thinking_cfg
             return self.client.models.generate_content(
                 model=model_id,
                 contents=contents,
-                config=types.GenerateContentConfig(
-                    temperature=0.2,
-                    max_output_tokens=12000,
-                )
+                config=types.GenerateContentConfig(**_cfg_kwargs),
             )
 
         def _call_with_timeout(contents: str, timeout_seconds: int = 120):
@@ -572,12 +695,27 @@ class DocumentFeedbackSystem:
                         prompt = strict_prompt
                         continue
                 except Exception as e:
-                    error_msg = str(e)[:100]
+                    error_msg = str(e)[:120]
+                    # 503/UNAVAILABLE：模型过载，继续用同一模型重试毫无意义，直接返回兜底
+                    _is_503 = ("503" in error_msg or "UNAVAILABLE" in error_msg
+                               or "overloaded" in error_msg.lower()
+                               or "high demand" in error_msg.lower())
+                    if _is_503:
+                        print(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载，跳过重试: {error_msg[:80]}", flush=True)
+                        fallback = self._fallback_annotations_from_chunk(chunk)
+                        for ann in fallback:
+                            ann["_koto_fallback_error"] = error_msg
+                            ann["_koto_503"] = True  # 通知外层需要切换模型
+                        return fallback
                     if retry < max_retries - 1:
                         print(f"[DocumentFeedback] ⚠️ 第{chunk_index}段第{round_idx}轮失败，准备重试: {error_msg}")
                         continue
                     print(f"[DocumentFeedback] ❌ 第{chunk_index}段第{round_idx}轮失败（已重试{max_retries}次）: {error_msg}")
-                    return self._fallback_annotations_from_chunk(chunk)
+                    fallback = self._fallback_annotations_from_chunk(chunk)
+                    # 给每条标注打上兜底标记，供调用层感知（内部键，最终不暴露给用户）
+                    for ann in fallback:
+                        ann["_koto_fallback_error"] = error_msg
+                    return fallback
 
         return all_annotations
 
@@ -1261,7 +1399,13 @@ class DocumentFeedbackSystem:
                 "summary": f"本地兜底分{len(chunks)}段生成{len(selected_annotations)}条标注（目标：{target_count}条）",
                 "annotation_count": len(selected_annotations),
                 "chunks_processed": len(chunks),
-                "chunk_densities": chunk_densities
+                "chunk_densities": chunk_densities,
+                # 兜底标记
+                "fallback_used": True,
+                "partial_fallback": False,
+                "fallback_chunk_count": len(chunks),
+                "ai_chunk_count": 0,
+                "last_api_error": "KOTO_DISABLE_AI=1（手动禁用AI）",
             }
 
         selected_model, available_models = self._select_best_model(effective_model_id)
@@ -1270,7 +1414,17 @@ class DocumentFeedbackSystem:
             model_note += f"（首选: {effective_model_id}，已自动降级）"
         model_table = self._format_model_table(available_models)
 
-        print(f"[DocumentFeedback] � 文档较大({total_length}字符)，分{len(chunks)}段处理")
+        # ── 开始前快速探测，确保所选模型实际可用（防止503退回兜底）──
+        if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
+            _probed = self._probe_working_model(selected_model)
+            if _probed is None:
+                print(f"[DocumentFeedback] ⚠️ 模型探测：所有候选均不可用，将全局使用本地兜底", flush=True)
+            elif _probed != selected_model:
+                print(f"[DocumentFeedback] 🔄 模型探测切换: {selected_model} → {_probed}", flush=True)
+                selected_model = _probed
+                model_note = f"模型: {selected_model}（首选 {effective_model_id} 不可用，已自动降级）"
+
+        print(f"[DocumentFeedback] 📦 文档较大({total_length}字符)，分{len(chunks)}段处理")
         print(f"[DocumentFeedback] 🎯 目标标注数: 约{total_length//1000*10}条（每1000字10条）\n")
 
         # 处理每一段（严格顺序执行，失败自动拆分重试）
@@ -1282,6 +1436,11 @@ class DocumentFeedbackSystem:
         start_time = time.time()
         queue = deque(chunks)
         total_chunks_initial = len(chunks)
+        # ── 兜底追踪 ──────────────────────────────────────────────────
+        fallback_chunk_count = 0   # 完全使用本地正则兜底的分段数
+        ai_chunk_count = 0         # 成功调用 AI 的分段数
+        last_api_error = ""        # 最近一次 API 失败错误信息
+        _model_switched = False    # 是否已因 503 切换过模型（避免反复探测）
 
         while queue:
             chunk = queue.popleft()
@@ -1328,6 +1487,36 @@ class DocumentFeedbackSystem:
                 continue
 
             new_count = 0
+            # ── 检测本段是否全部来自兜底（_koto_fallback_error 标记） ──
+            fb_items = [a for a in annotations if a.get("_koto_fallback_error")]
+            if fb_items:
+                api_err = fb_items[0].get("_koto_fallback_error", "")
+                if not last_api_error:
+                    last_api_error = api_err
+                if len(fb_items) == len(annotations):
+                    fallback_chunk_count += 1
+                    print(f"[DocumentFeedback] ⚠️ 第{processed}段全部使用本地兜底（API错误: {api_err[:60]}）")
+                else:
+                    # 部分兜底（理论上不会出现，保留以防万一）
+                    fallback_chunk_count += 1
+
+                # ── 503 触发模型切换：探测新可用模型，让后续分段继续用 AI ──
+                if (not _model_switched
+                        and any(a.get("_koto_503") for a in annotations)):
+                    _probed_switch = self._probe_working_model(selected_model)
+                    if _probed_switch and _probed_switch != selected_model:
+                        print(f"[DocumentFeedback] 🔄 503触发切换: {selected_model} → {_probed_switch}", flush=True)
+                        selected_model = _probed_switch
+                        model_note = f"模型: {selected_model}（运行中自动从503过载模型切换）"
+                    _model_switched = True  # 无论成功与否只切换一次
+            else:
+                if annotations:
+                    ai_chunk_count += 1
+            # 清除内部标记键，不污染最终输出
+            for ann in annotations:
+                ann.pop("_koto_fallback_error", None)
+                ann.pop("_koto_503", None)
+
             for item in annotations:
                 text = (item.get("原文片段") or "").strip()
                 if text and text not in seen_texts:
@@ -1356,14 +1545,20 @@ class DocumentFeedbackSystem:
             ),
             "annotation_count": len(all_annotations),
             "chunks_processed": processed,
-            "target_count": total_length // 1000 * 10
+            "target_count": total_length // 1000 * 10,
+            # ── 兜底状态（供上层展示警告） ──────────────────────────
+            "fallback_chunk_count": fallback_chunk_count,
+            "ai_chunk_count": ai_chunk_count,
+            "fallback_used": fallback_chunk_count > 0 and ai_chunk_count == 0,
+            "partial_fallback": fallback_chunk_count > 0 and ai_chunk_count > 0,
+            "last_api_error": last_api_error,
         }
     
     def analyze_for_annotation(
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-3-flash-preview"
+        model_id: str = "gemini-2.5-pro"
     ) -> Dict[str, Any]:
         """
         分析文档，生成标注格式的建议
@@ -1384,35 +1579,9 @@ class DocumentFeedbackSystem:
         
         # 第3步：按段落切分
         paragraphs = [p.strip() for p in formatted_content.split("\n\n") if p.strip()]
-        print(f"[DocumentFeedback] 📝 文档共 {len(paragraphs)} 段，将逐段分析...")
-        
-        # 如果段落太多（超过20段），建议使用本地兜底（更快）
-        if len(paragraphs) > 20:
-            print(f"[DocumentFeedback] ⚠️ 文档段落较多（{len(paragraphs)}段），使用本地快速标注模式")
-            print(f"[DocumentFeedback] 💡 提示：如需更详细的 AI 分析，请使用较小的文档或分段上传")
-            
-            all_annotations: List[Dict[str, str]] = []
-            seen_texts = set()
-            
-            # 使用本地兜底处理所有段落
-            for idx, para in enumerate(paragraphs):
-                if para and len(para) > 20:
-                    annotations = self._fallback_annotations_from_chunk(para)
-                    for ann in annotations[:5]:  # 每段最多取5条
-                        text = (ann.get("原文片段") or "").strip()
-                        if text and text not in seen_texts:
-                            seen_texts.add(text)
-                            all_annotations.append(ann)
-                
-                # 显示进度
-                if (idx + 1) % 10 == 0 or idx == len(paragraphs) - 1:
-                    print(f"[DocumentFeedback] 📊 已处理 {idx + 1}/{len(paragraphs)} 段，已收集 {len(all_annotations)} 条标注")
-            
-            return {
-                "success": True,
-                "annotations": all_annotations[:150],  # 限制到150条
-                "summary": f"使用本地规则快速生成 {len(all_annotations[:150])} 条标注建议（共{len(paragraphs)}段）"
-            }
+        print(f"[DocumentFeedback] 📝 文档共 {len(paragraphs)} 段，使用 AI({model_id}) 逐段分析...")
+        # 注意：此函数仅处理小文档（由 analyze_for_annotation_chunked 路由而来）
+        # 大文档已在 analyze_for_annotation_chunked 中按 chunk_size 分段，不应走此函数
         
         # 第4步：收集所有标注
         all_annotations: List[Dict[str, str]] = []
@@ -1431,12 +1600,20 @@ class DocumentFeedbackSystem:
                             all_annotations.append(ann)
             return {
                 "success": True,
-                "annotations": all_annotations[:100],  # 限制到100条
-                "summary": f"使用本地规则生成{len(all_annotations)}条标注建议"
+                "annotations": all_annotations[:100],
+                "summary": f"未配置AI客户端，使用本地规则生成{len(all_annotations)}条标注建议",
+                "fallback_used": True,
+                "partial_fallback": False,
+                "fallback_chunk_count": len(paragraphs),
+                "ai_chunk_count": 0,
+                "last_api_error": "未配置 Gemini 客户端（self.client is None）",
             }
         
         # 第5步：逐段用AI标注
         selected_model, available_models = self._select_best_model(model_id)
+        _para_fb_count = 0   # 降级到本地兜底的段落数
+        _para_ai_count = 0   # 成功调用AI的段落数
+        _para_last_err = ""  # 最近段落API错误
         
         for para_idx, paragraph in enumerate(paragraphs):
             if not paragraph or len(paragraph) < 20:
@@ -1465,6 +1642,7 @@ class DocumentFeedbackSystem:
                 
                 # 解析标注
                 annotations = self._parse_annotation_response(response.text)
+                _para_ai_count += 1
                 for ann in annotations:
                     text = (ann.get("原文片段") or "").strip()
                     if text and text not in seen_texts and len(text) <= 30:
@@ -1481,7 +1659,11 @@ class DocumentFeedbackSystem:
                             all_annotations.append(ann)
                 
             except Exception as e:
-                print(f"[DocumentFeedback] ⚠️ 第 {para_idx + 1} 段分析失败，使用本地标注: {str(e)[:50]}")
+                _err_s = str(e)[:80]
+                if not _para_last_err:
+                    _para_last_err = _err_s
+                _para_fb_count += 1
+                print(f"[DocumentFeedback] ⚠️ 第 {para_idx + 1} 段分析失败，使用本地标注: {_err_s}")
                 fallback = self._fallback_annotations_from_chunk(paragraph)
                 for ann in fallback[:5]:  # 本地标注最多加5条
                     text = (ann.get("原文片段") or "").strip()
@@ -1496,7 +1678,12 @@ class DocumentFeedbackSystem:
         return {
             "success": True,
             "annotations": all_annotations[:150],  # 限制到150条
-            "summary": summary
+            "summary": summary,
+            "fallback_used": _para_fb_count > 0 and _para_ai_count == 0,
+            "partial_fallback": _para_fb_count > 0 and _para_ai_count > 0,
+            "fallback_chunk_count": _para_fb_count,
+            "ai_chunk_count": _para_ai_count,
+            "last_api_error": _para_last_err,
         }
     
     def annotate_document(
@@ -1634,6 +1821,33 @@ class DocumentFeedbackSystem:
         
         chunk_size = 4000 if (self.client and os.getenv("KOTO_DISABLE_AI") != "1") else 10000
         
+        # ===== 🔌 AI 连通性预检 —— 在开始分段之前快速验证 API 可用，503时自动切模型 =====
+        _preflight_error = ""
+        if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
+            _probed_model = self._probe_working_model(effective_model_id)
+            if _probed_model is None:
+                # 所有候选模型均不可用
+                _preflight_error = "所有可用模型当前均不可用（503或其他错误）"
+                print(f"[DocumentFeedback] ❌ AI 预检：所有模型不可用，将使用本地规则兜底")
+                yield {
+                    'stage': 'warning',
+                    'progress': 16,
+                    'message': '⚠️ Gemini API 暂时全部不可用，将使用本地规则兜底（质量有限）',
+                    'detail': '建议稍后重试'
+                }
+            elif _probed_model != effective_model_id:
+                print(f"[DocumentFeedback] 🔄 预检：{effective_model_id} 过载，切换为 {_probed_model}", flush=True)
+                yield {
+                    'stage': 'info',
+                    'progress': 16,
+                    'message': f'🔄 {effective_model_id} 当前负载过高，已自动切换到 {_probed_model}',
+                    'detail': '系统自动选择可用模型继续任务'
+                }
+                effective_model_id = _probed_model
+            else:
+                print(f"[DocumentFeedback] ✅ AI 预检通过: {effective_model_id}", flush=True)
+        # ───────────────────────────────────────────────────────────────────────
+        
         # ===== 使用线程 + Queue 实现真正实时进度推送 =====
         import queue as queue_module
         import threading
@@ -1737,6 +1951,24 @@ class DocumentFeedbackSystem:
             
             annotations = analysis_result.get("annotations", [])
             
+            # ── 兜底检测：若 AI 全部/部分失败，立即向前端推送明显警告 ──
+            _fallback_used    = analysis_result.get("fallback_used", False)
+            _partial_fallback = analysis_result.get("partial_fallback", False)
+            _last_api_error   = analysis_result.get("last_api_error", "")
+            _fb_chunks        = analysis_result.get("fallback_chunk_count", 0)
+            _ai_chunks        = analysis_result.get("ai_chunk_count", 0)
+            
+            if _fallback_used or _partial_fallback:
+                _fb_label = "全部" if _fallback_used else f"{_fb_chunks}/{_fb_chunks+_ai_chunks}"
+                _err_hint = f" `{_last_api_error[:80]}`" if _last_api_error else " 请检查 API Key 与模型配置"
+                yield {
+                    'stage': 'warning',
+                    'progress': 52,
+                    'message': f'⚠️ AI 分析未成功（{_fb_label}分段使用本地规则兜底）',
+                    'detail': f'API 错误:{_err_hint}'
+                }
+                print(f"[DocumentFeedback] ⚠️ 兜底警告已推送: {_fb_label}分段，最近错误: {_last_api_error[:60]}")
+
             yield {
                 'stage': 'analysis_complete',
                 'progress': 50,
@@ -1936,7 +2168,13 @@ class DocumentFeedbackSystem:
                 'applied': applied,
                 'failed': failed,
                 'total': len(annotations),
-                'analysis_summary': analysis_result.get("summary")
+                'analysis_summary': analysis_result.get("summary"),
+                # 兜底状态，供 app.py 展示警告
+                'fallback_used': analysis_result.get("fallback_used", False),
+                'partial_fallback': analysis_result.get("partial_fallback", False),
+                'last_api_error': analysis_result.get("last_api_error", ""),
+                'fallback_chunk_count': analysis_result.get("fallback_chunk_count", 0),
+                'ai_chunk_count': analysis_result.get("ai_chunk_count", 0),
             }
         }
 

@@ -416,7 +416,7 @@ class OrganizeCleanup:
 
             try:
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model="gemini-2.0-flash-lite",
                     contents=prompt,
                 )
                 suggested_name = response.text.strip().strip('"').strip("'")

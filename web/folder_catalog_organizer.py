@@ -20,7 +20,7 @@ class FolderCatalogOrganizer:
         self.analyzer = analyzer
         self.organizer = organizer
 
-    def organize_folder(self, source_dir: str, recursive: bool = True) -> Dict[str, Any]:
+    def organize_folder(self, source_dir: str, recursive: bool = True, ext_filters: list = None) -> Dict[str, Any]:
         source_path = Path(source_dir)
         if not source_path.exists() or not source_path.is_dir():
             return {
@@ -30,6 +30,12 @@ class FolderCatalogOrganizer:
 
         files = list(source_path.rglob("*")) if recursive else list(source_path.glob("*"))
         files = [f for f in files if f.is_file()]
+        # Skip Word temp files
+        files = [f for f in files if not f.name.startswith("~$")]
+        # Apply extension filter if specified
+        if ext_filters:
+            _ext_lower = [e.lower() for e in ext_filters]
+            files = [f for f in files if f.suffix.lower() in _ext_lower]
 
         if not files:
             return {
@@ -62,10 +68,44 @@ class FolderCatalogOrganizer:
                     metadata=metadata,
                 )
 
+                # ── 关键字段提取（截止日期 / 摘要 / 金额）──────────────────
+                key_fields = None
+                _content_preview = analysis.get("preview", "")
+                if _content_preview and _content_preview != "(无法提取内容)":
+                    try:
+                        try:
+                            from web.file_fields_extractor import extract_fields as _ef
+                        except ImportError:
+                            from file_fields_extractor import extract_fields as _ef
+                        key_fields = _ef(file_path.name, _content_preview, file_path.suffix.lower())
+                    except Exception:
+                        pass
+
                 if result.get("success"):
                     organized_count += 1
+                    # 同步更新 FileRegistry：旧路径→新路径
+                    dest_file = result.get("dest_file") or ""
+                    if dest_file:
+                        try:
+                            from app.core.file.file_registry import get_file_registry
+                            _reg = get_file_registry()
+                            _reg.delete(str(file_path))
+                            _reg.register(
+                                dest_file,
+                                source="organizer",
+                                extract_content=False,
+                            )
+                        except Exception as _re:
+                            pass  # 注册失败不影响归档流程
                 else:
                     failed_count += 1
+
+                # ── 截止日期提醒 ──────────────────────────────────────────────
+                deadline_reminders = []
+                if key_fields:
+                    deadline_reminders = self._register_deadline_reminders(
+                        file_path.name, key_fields
+                    )
 
                 entries.append({
                     "file_name": file_path.name,
@@ -76,6 +116,9 @@ class FolderCatalogOrganizer:
                     "organized": bool(result.get("success")),
                     "organized_path": result.get("dest_file") or "",
                     "error": result.get("error") or "",
+                    "summary": (key_fields or {}).get("summary", ""),
+                    "amounts": (key_fields or {}).get("amounts", []),
+                    "deadline_reminders": deadline_reminders,
                 })
             except Exception as e:
                 failed_count += 1
@@ -92,6 +135,16 @@ class FolderCatalogOrganizer:
 
         report_paths = self._write_reports(str(source_path), entries)
 
+        # ── 归纳完成后：异步将新训练样本纳入 TrainingDataBuilder 并推送 Ollama ──
+        # 用 daemon 线程，不阻塞主流程和 UI 响应
+        import threading as _threading
+        _threading.Thread(
+            target=self._flush_training_samples_to_ollama,
+            kwargs={"verbose": True},
+            daemon=True,
+            name="KotoTrainingFlush",
+        ).start()
+
         return {
             "success": organized_count > 0,
             "source_dir": str(source_path),
@@ -102,6 +155,77 @@ class FolderCatalogOrganizer:
             "report_json": report_paths.get("json"),
             "entries": entries,
         }
+
+    @staticmethod
+    def _register_deadline_reminders(file_name: str, key_fields: dict) -> list:
+        """解析 key_fields 中的日期，为未来日期创建系统提醒。返回创建的提醒 id 列表。"""
+        from datetime import datetime as _dt
+        import re as _re
+        created = []
+        # 到期/截止/付款相关关键词才注册提醒
+        _DEADLINE_LABELS = {"到期", "截止", "付款", "交货", "汇款", "合同期", "履行", "deadline"}
+        for d in key_fields.get("dates", []):
+            label = d.get("label", "")
+            value = d.get("value", "")
+            if not value or not _re.match(r"^\d{4}-\d{2}-\d{2}$", value):
+                continue
+            if not any(kw in label for kw in _DEADLINE_LABELS):
+                continue
+            try:
+                remind_at = _dt.strptime(value, "%Y-%m-%d").replace(hour=9, minute=0)
+                if remind_at <= _dt.now():
+                    continue  # 已过期，不注册
+                try:
+                    from web.reminder_manager import get_reminder_manager
+                except ImportError:
+                    from reminder_manager import get_reminder_manager
+                rm = get_reminder_manager()
+                rid = rm.add_reminder(
+                    title=f"📋 文件到期提醒",
+                    message=f"【{file_name}】{label}: {value}",
+                    remind_at=remind_at,
+                )
+                created.append(rid)
+                print(f"[Catalog] ⏰ 已注册提醒: {file_name} {label} {value}")
+            except Exception:
+                pass
+        return created
+
+    @staticmethod
+    def _flush_training_samples_to_ollama(verbose: bool = False) -> None:
+        """归纳结束后，将 file_classify_samples.jsonl 合入全量训练集并推送到 Ollama。"""
+        try:
+            from pathlib import Path as _P
+            _sample_file = _P(__file__).parent.parent / "config" / "training_data" / "file_classify_samples.jsonl"
+            if not _sample_file.exists() or _sample_file.stat().st_size == 0:
+                if verbose:
+                    print("[CatalogOrganizer] ⚠️ 无新分类训练样本，跳过推送")
+                return
+            try:
+                from app.core.learning.training_data_builder import TrainingDataBuilder
+            except ImportError:
+                if verbose:
+                    print("[CatalogOrganizer] ⚠️ TrainingDataBuilder 不可用，跳过推送")
+                return
+            if verbose:
+                import os
+                n = sum(1 for _ in open(_sample_file, encoding="utf-8"))
+                print(f"[CatalogOrganizer] 🧠 构建训练集（含 {n} 条新分类样本）并推送 Ollama...")
+            result = TrainingDataBuilder.build_all(
+                include_routing=False,
+                include_chat=False,
+                include_shadow=False,
+                include_synthetic=False,
+                include_memory=False,
+                min_quality=0.5,
+                verbose=verbose,
+            )
+            if verbose:
+                stats = result.get("stats", {})
+                print(f"[CatalogOrganizer] ✅ 训练集已更新: {stats.get('total', 0)} 条样本，文件: {result.get('full_file', '')}")
+        except Exception as _e:
+            if verbose:
+                print(f"[CatalogOrganizer] ⚠️ 训练集推送失败（不影响归纳）: {_e}")
 
     def _extract_sender_info(self, file_path: Path) -> Dict[str, Optional[str]]:
         ext = file_path.suffix.lower()

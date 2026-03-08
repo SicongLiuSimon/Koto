@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Koto · 工作流 DAG 可视化</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d24;
+      --border: #2d3038;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --success: #22c55e;
+      --warn: #f59e0b;
+      --error: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    header span { color: var(--text-muted); font-size: 0.85rem; }
+
+    /* ── Main layout ─────────────────────────────────────────── */
+    .layout {
+      display: flex;
+      height: calc(100vh - 57px);
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────── */
+    .sidebar {
+      width: 240px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      padding: 16px 12px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .sidebar-title {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      padding: 6px 8px 4px;
+    }
+    .wf-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text);
+      font-size: 0.875rem;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.15s;
+    }
+    .wf-btn:hover { background: rgba(99,102,241,0.1); border-color: var(--border); }
+    .wf-btn.active { background: rgba(99,102,241,0.18); border-color: var(--accent); color: var(--accent-hover); }
+    .wf-btn .icon { font-size: 1.1rem; width: 22px; text-align: center; }
+
+    /* ── Canvas ──────────────────────────────────────────────── */
+    .canvas {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .canvas-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .canvas-toolbar h2 { font-size: 0.9rem; font-weight: 500; flex: 1; }
+    .badge {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 100px;
+      background: rgba(99,102,241,0.2);
+      color: var(--accent-hover);
+      border: 1px solid rgba(99,102,241,0.4);
+    }
+    .btn {
+      font-size: 0.8rem;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: rgba(255,255,255,0.06); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); }
+    .btn.primary:hover { background: var(--accent-hover); }
+
+    .canvas-body {
+      flex: 1;
+      overflow: auto;
+      padding: 32px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+    #diagram-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px;
+      min-width: 400px;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #diagram-container svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    /* ── Status bar ──────────────────────────────────────────── */
+    .status-bar {
+      padding: 6px 20px;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+    .dot.ok { background: var(--success); }
+    .dot.warn { background: var(--warn); }
+    .dot.err { background: var(--error); }
+
+    /* ── Loading ─────────────────────────────────────────────── */
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Raw code panel ─────────────────────────────────────── */
+    #raw-panel {
+      display: none;
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      color: #a5f3fc;
+      white-space: pre;
+      overflow: auto;
+      max-height: 480px;
+      min-width: 400px;
+    }
+
+    /* ── Checkpoint stats ─────────────────────────────────────── */
+    #cp-stats {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    #cp-stats b { color: var(--text); }
+  </style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:1.4rem">🌐</span>
+  <h1>Koto 工作流 DAG 可视化</h1>
+  <span>LangGraph StateGraph · 实时渲染</span>
+  <div style="flex:1"></div>
+  <div id="cp-stats">检查点: 加载中…</div>
+</header>
+
+<div class="layout">
+  <!-- ── Sidebar ── -->
+  <nav class="sidebar">
+    <div class="sidebar-title">ReAct Agent</div>
+    <button class="wf-btn" data-wf="react_agent" data-type="agent">
+      <span class="icon">🤖</span> ReAct Agent
+    </button>
+
+    <div class="sidebar-title" style="margin-top:12px">工作流</div>
+    <button class="wf-btn" data-wf="research_and_document" data-type="workflow">
+      <span class="icon">📄</span> 研究 → 文档
+    </button>
+    <button class="wf-btn" data-wf="multi_agent_ppt" data-type="workflow">
+      <span class="icon">🎨</span> 多 Agent PPT
+    </button>
+  </nav>
+
+  <!-- ── Canvas ── -->
+  <main class="canvas">
+    <div class="canvas-toolbar">
+      <h2 id="canvas-title">← 选择一个工作流查看 DAG</h2>
+      <span class="badge" id="cp-type-badge" style="display:none"></span>
+      <button class="btn" id="btn-raw" style="display:none" onclick="toggleRaw()">查看 Mermaid 源码</button>
+      <button class="btn primary" id="btn-refresh" style="display:none" onclick="refreshCurrent()">🔄 刷新</button>
+    </div>
+
+    <div class="canvas-body">
+      <div id="diagram-container">
+        <div style="text-align:center; color:var(--text-muted)">
+          <div style="font-size:2rem; margin-bottom:8px">🗺️</div>
+          <div>选择左侧的工作流节点，查看完整的 DAG 图</div>
+        </div>
+      </div>
+      <pre id="raw-panel"></pre>
+    </div>
+
+    <div class="status-bar">
+      <div class="dot" id="status-dot"></div>
+      <span id="status-text">就绪</span>
+    </div>
+  </main>
+</div>
+
+<script>
+  // ── Mermaid 初始化 ────────────────────────────────────────────
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#1a1d24',
+      primaryColor: '#6366f1',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#4f46e5',
+      lineColor: '#94a3b8',
+      secondaryColor: '#1e293b',
+      tertiaryColor: '#0f172a',
+      edgeLabelBackground: '#1a1d24',
+      clusterBkg: '#1e293b',
+      titleColor: '#e2e8f0',
+    },
+    flowchart: { curve: 'basis', htmlLabels: true },
+  });
+
+  // ── State ─────────────────────────────────────────────────────
+  let _currentWf = null;
+  let _currentType = null;
+  let _rawCode = '';
+  let _showRaw = false;
+
+  // ── Sidebar click ─────────────────────────────────────────────
+  document.querySelectorAll('.wf-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.wf-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _currentWf = btn.dataset.wf;
+      _currentType = btn.dataset.type;
+      loadDiagram(_currentWf, _currentType);
+    });
+  });
+
+  // ── Load diagram ──────────────────────────────────────────────
+  async function loadDiagram(wf, type) {
+    const container = document.getElementById('diagram-container');
+    const rawPanel = document.getElementById('raw-panel');
+    setStatus('loading', '加载中…');
+    container.style.display = 'flex';
+    rawPanel.style.display = 'none';
+    _showRaw = false;
+    document.getElementById('btn-raw').textContent = '查看 Mermaid 源码';
+    container.innerHTML = '<div class="spinner"></div>';
+    document.getElementById('canvas-title').textContent = wf;
+    document.getElementById('btn-raw').style.display = 'inline-block';
+    document.getElementById('btn-refresh').style.display = 'inline-block';
+
+    try {
+      const resp = await fetch(`/api/dev/graph-mermaid?workflow=${encodeURIComponent(wf)}&type=${encodeURIComponent(type)}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!data.success) throw new Error(data.error || '未知错误');
+
+      _rawCode = data.mermaid;
+      await renderMermaid(_rawCode);
+      setStatus('ok', `已加载 · 节点: ${data.node_count || '?'} · 边: ${data.edge_count || '?'}`);
+    } catch (err) {
+      container.innerHTML = `<div style="color:var(--error);text-align:center"><div style="font-size:1.5rem">⚠️</div><div style="margin-top:8px">${err.message}</div></div>`;
+      setStatus('err', `加载失败: ${err.message}`);
+    }
+  }
+
+  async function renderMermaid(code) {
+    const container = document.getElementById('diagram-container');
+    try {
+      const id = 'mermaid-' + Date.now();
+      const { svg } = await mermaid.render(id, code);
+      container.innerHTML = svg;
+    } catch (err) {
+      container.innerHTML = `<div style="color:var(--warn)">Mermaid 渲染失败: ${err.message}<br><small>请查看源码模式</small></div>`;
+    }
+  }
+
+  function toggleRaw() {
+    const container = document.getElementById('diagram-container');
+    const rawPanel = document.getElementById('raw-panel');
+    const btn = document.getElementById('btn-raw');
+    _showRaw = !_showRaw;
+    if (_showRaw) {
+      container.style.display = 'none';
+      rawPanel.textContent = _rawCode;
+      rawPanel.style.display = 'block';
+      btn.textContent = '查看 DAG 图';
+    } else {
+      container.style.display = 'flex';
+      rawPanel.style.display = 'none';
+      btn.textContent = '查看 Mermaid 源码';
+    }
+  }
+
+  function refreshCurrent() {
+    if (_currentWf) loadDiagram(_currentWf, _currentType);
+  }
+
+  function setStatus(state, text) {
+    const dot = document.getElementById('status-dot');
+    dot.className = 'dot ' + (state === 'ok' ? 'ok' : state === 'loading' ? 'warn' : 'err');
+    document.getElementById('status-text').textContent = text;
+  }
+
+  // ── Checkpoint info ───────────────────────────────────────────
+  async function loadCpInfo() {
+    try {
+      const resp = await fetch('/api/dev/checkpoint-info');
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const badge = document.getElementById('cp-type-badge');
+      badge.style.display = 'inline-block';
+      badge.textContent = data.type === 'sqlite' ? '🗄️ SQLite' : '🧠 Memory';
+      document.getElementById('cp-stats').innerHTML =
+        `检查点: <b>${data.type === 'sqlite' ? 'SQLite 持久化' : '内存（临时）'}</b> · ` +
+        `会话 <b>${data.thread_count}</b> · 快照 <b>${data.total_checkpoints}</b>`;
+    } catch (_) {}
+  }
+
+  loadCpInfo();
+  setInterval(loadCpInfo, 30_000);
+</script>
+</body>
+</html>

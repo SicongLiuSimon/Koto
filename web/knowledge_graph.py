@@ -80,7 +80,25 @@ class KnowledgeGraph:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_edges_weight ON edges(weight DESC)")
-        
+
+        # ── Phase 3: Entity Triple Store ─────────────────────────────────────
+        # 存储从对话中提取的 (主语, 关系, 宾语) 三元组，用于 Graph RAG
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS entity_triples (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject     TEXT NOT NULL,
+                relation    TEXT NOT NULL,
+                object      TEXT NOT NULL,
+                source_text TEXT,           -- 来源语句（用于溯源）
+                confidence  REAL DEFAULT 1.0,
+                origin      TEXT DEFAULT 'user',  -- 'user'|'reflector'|'kb'
+                created_at  TEXT NOT NULL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_triples_subject ON entity_triples(subject)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_triples_object  ON entity_triples(object)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_triples_conf    ON entity_triples(confidence DESC)")
+
         conn.commit()
         conn.close()
     
@@ -554,6 +572,173 @@ class KnowledgeGraph:
             "average_degree": round(avg_degree, 2),
             "graph_density": round(relation_edges / max(file_count * (file_count - 1), 1), 4)
         }
+
+
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Phase 3 — Entity Triple Store  (Graph RAG)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def add_triple(
+        self,
+        subject: str,
+        relation: str,
+        obj: str,
+        source_text: str = "",
+        confidence: float = 1.0,
+        origin: str = "user",
+    ) -> bool:
+        """
+        Add a (subject, relation, object) triple.
+
+        Deduplication: skips exact duplicates silently.
+        Returns True if inserted, False if duplicate / error.
+        """
+        subject  = (subject  or "").strip()
+        relation = (relation or "").strip()
+        obj      = (obj      or "").strip()
+        if not all([subject, relation, obj]):
+            return False
+
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM entity_triples WHERE subject=? AND relation=? AND object=?",
+                (subject, relation, obj),
+            )
+            if cursor.fetchone():
+                conn.close()
+                return False  # duplicate
+
+            cursor.execute(
+                """INSERT INTO entity_triples
+                   (subject, relation, object, source_text, confidence, origin, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (subject, relation, obj, source_text or "", confidence,
+                 origin, datetime.now().isoformat()),
+            )
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"[KG] add_triple error: {e}")
+            return False
+
+    def search_triples(self, entity: str, limit: int = 20) -> List[Dict]:
+        """
+        Return all triples where entity appears as subject OR object.
+        Results are sorted by confidence DESC.
+        """
+        entity = (entity or "").strip()
+        if not entity:
+            return []
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT subject, relation, object, confidence, source_text
+                   FROM entity_triples
+                   WHERE subject = ? OR object = ?
+                   ORDER BY confidence DESC
+                   LIMIT ?""",
+                (entity, entity, limit),
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            return [
+                {
+                    "subject":     r[0],
+                    "relation":    r[1],
+                    "object":      r[2],
+                    "confidence":  r[3],
+                    "source_text": r[4],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            print(f"[KG] search_triples error: {e}")
+            return []
+
+    def search_triples_fuzzy(self, query: str, limit: int = 20) -> List[Dict]:
+        """
+        Full-text LIKE search on subject + object fields.
+        Useful when the exact entity name is unknown.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        pat = f"%{query}%"
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT subject, relation, object, confidence, source_text
+                   FROM entity_triples
+                   WHERE subject LIKE ? OR object LIKE ?
+                   ORDER BY confidence DESC
+                   LIMIT ?""",
+                (pat, pat, limit),
+            )
+            rows = cursor.fetchall()
+            conn.close()
+            return [
+                {
+                    "subject":     r[0],
+                    "relation":    r[1],
+                    "object":      r[2],
+                    "confidence":  r[3],
+                    "source_text": r[4],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            print(f"[KG] search_triples_fuzzy error: {e}")
+            return []
+
+    def get_entity_neighbors(self, entity: str, depth: int = 1) -> Set[str]:
+        """
+        BFS on triple graph: return all entity names reachable from `entity`
+        within `depth` hops (following subject→object OR object→subject edges).
+        """
+        visited: Set[str] = {entity}
+        frontier = {entity}
+        for _ in range(depth):
+            next_frontier: Set[str] = set()
+            for ent in frontier:
+                for triple in self.search_triples(ent, limit=50):
+                    for node in (triple["subject"], triple["object"]):
+                        if node not in visited:
+                            visited.add(node)
+                            next_frontier.add(node)
+            frontier = next_frontier
+            if not frontier:
+                break
+        visited.discard(entity)  # don't return the seed entity itself
+        return visited
+
+    def get_triple_stats(self) -> Dict:
+        """Return statistics about the triple store."""
+        try:
+            conn   = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM entity_triples")
+            total = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(DISTINCT subject) FROM entity_triples")
+            subjects = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(DISTINCT object) FROM entity_triples")
+            objects = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(DISTINCT relation) FROM entity_triples")
+            relations = cursor.fetchone()[0]
+            conn.close()
+            return {
+                "total_triples":    total,
+                "unique_subjects":  subjects,
+                "unique_objects":   objects,
+                "unique_relations": relations,
+            }
+        except Exception:
+            return {}
 
 
 if __name__ == "__main__":

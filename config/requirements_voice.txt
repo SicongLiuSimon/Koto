@@ -4,6 +4,9 @@
 # 核心语音识别
 SpeechRecognition>=3.10.0
 
+# 本地离线 STT - Vosk（中文模型 ~50MB，自动下载）
+vosk>=0.3.45
+
 # 音频处理 (PyAudio 可能需要特殊安装方式)
 # PyAudio - 参考 install_voice_deps.ps1 获取安装说明
 

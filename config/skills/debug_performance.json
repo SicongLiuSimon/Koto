@@ -1,0 +1,27 @@
+{
+  "id": "debug_performance",
+  "name": "性能分析",
+  "icon": "⚡",
+  "category": "domain",
+  "description": "代码/系统性能分析：定位瓶颈、复杂度评估、profiling 工具使用、分层优化建议",
+  "intent_description": "用户遇到程序运行慢、内存占用高、接口延迟大、CPU 飙升等性能瓶颈问题",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": ["瓶颈", "优化"],
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "包含瓶颈定位、复杂度分析和分层优化建议"
+  },
+  "bound_tools": [],
+  "task_types": ["CODER", "SYSTEM"],
+  "enabled": true,
+  "prompt": "\n\n## ⚡ 领域要求：性能分析\n- 分析维度：时间复杂度（Big-O）、空间复杂度、I/O 密集型 vs CPU 密集型\n- 定位瓶颈优先级：数据库 N+1 查询 > 同步 I/O 阻塞 > 算法复杂度 > 内存分配与 GC\n- 输出结构：\n  1. 🎯 **性能瓶颈**：指明具体函数/行号/查询语句\n  2. 📊 **复杂度对比**：当前 vs 优化后的 Big-O\n  3. 🔧 **优化方案**：按收益从大到小排列，给出代码示例\n  4. 🧪 **验证方法**：Python → cProfile/timeit；前端 → Performance DevTools；DB → EXPLAIN ANALYZE\n- 将建议按工期分层：「快速见效（< 1 天）」和「需要重构（> 3 天）」明确区分",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-07T00:00:00Z",
+  "tags": ["performance", "debug", "profiling", "optimization", "bottleneck"]
+}

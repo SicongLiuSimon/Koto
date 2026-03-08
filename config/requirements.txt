@@ -1,0 +1,81 @@
+# ===== Koto - Python Dependencies =====
+# pip install -r requirements.txt
+
+# ── Core (必须) ──
+flask>=3.0.0
+flask-cors>=4.0.0
+python-dotenv>=1.0.0
+google-genai>=1.0.0
+requests>=2.31.0
+httpx>=0.27.0
+psutil>=5.9.0
+markdown>=3.5.0
+gunicorn>=22.0.0           # 生产环境 WSGI 服务器
+
+# ── Document Processing ──
+python-docx>=1.0.0
+lxml>=5.0.0
+pypdf>=4.0.0                   # PDF 文本提取（轻量，纯Python）
+PyPDF2>=3.0.0
+pdfplumber>=0.10.0
+python-pptx>=0.6.23
+openpyxl>=3.1.0
+beautifulsoup4>=4.12.0
+jieba>=0.42.1              # 中文分词
+docx2txt>=0.8              # .doc / .docx 文本提取（无需 Word COM）
+striprtf>=0.0.26           # RTF 纯文本提取
+
+# ── Data ──
+pandas>=2.0.0
+numpy>=1.24.0
+
+# ── Image ──
+Pillow>=10.0.0
+
+# ── LoRA 蒸馏训练（可选，不安装时骨架模式运行）──
+# 普通用户 / 发行版无需安装，未装时自动降级为"骨架模式"
+# 如需在本机启用真实 GPU 训练，单独执行：
+#   pip install -r config/requirements_training.txt
+
+# ── Scheduling ──
+schedule>=1.2.0
+watchdog>=4.0.0            # 文件夹监控 (Watch Mode)
+
+# ── LangChain / LangGraph ──
+langchain-core>=0.3.0
+langchain-google-genai>=2.0.0   # ChatGoogleGenerativeAI wrapper
+langgraph>=0.2.0                 # StateGraph 状态机工作流
+langgraph-checkpoint>=1.0.0      # 检查点持久化基类
+langgraph-checkpoint-sqlite>=1.0.0  # SqliteSaver 持久化检查点（跨重启续跑）
+langchain-community>=0.3.0       # 文档加载器 / Vector store 工具
+
+# ── Security ──
+cryptography>=42.0.0
+PyJWT>=2.8.0               # JWT token auth for SaaS
+
+# ── Desktop (Windows only, optional for server mode) ──
+# pywebview>=5.0.0
+# pystray>=0.19.0
+# pyperclip>=1.8.2
+# keyboard>=0.13.5
+# pyautogui>=0.9.54
+# pywin32>=306
+# win10toast>=0.9
+# wmi>=1.5.1
+# uiautomation>=2.0.18
+
+# ── Voice (optional) ──
+SpeechRecognition>=3.10.0
+PyAudio>=0.2.14
+# edge-tts>=6.1.0
+# vosk>=0.3.45
+# flask-sock>=0.7.0
+# ── 本地离线语音识别（可选，安装后自动替代 Gemini STT，无需 API Key）──
+# faster-whisper>=1.0.0    # 推荐：pip install faster-whisper
+# openai-whisper>=20231117 # 备选：pip install openai-whisper
+
+# ── OCR (optional) ──
+# pytesseract>=0.3.10
+
+# ── Browser Automation (optional) ──
+# selenium>=4.15.0

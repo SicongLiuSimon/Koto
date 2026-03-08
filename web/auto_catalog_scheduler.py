@@ -19,8 +19,12 @@ class AutoCatalogScheduler:
             settings_file: 用户设置JSON文件路径
         """
         if settings_file is None:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(script_dir)
+            import sys
+            if getattr(sys, 'frozen', False):
+                project_root = os.path.dirname(sys.executable)
+            else:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(script_dir)
             settings_file = os.path.join(project_root, 'config', 'user_settings.json')
 
         self.settings_file = settings_file

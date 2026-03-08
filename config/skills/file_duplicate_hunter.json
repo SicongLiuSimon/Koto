@@ -1,0 +1,29 @@
+{
+  "id": "file_duplicate_hunter",
+  "name": "重复文件猎手",
+  "icon": "🎯",
+  "category": "domain",
+  "description": "扫描指定目录找出内容重复的文件（MD5 比对），生成清理报告，安全删除释放空间",
+  "intent_description": "用户想清理磁盘空间、找出重复文件、或询问哪些文件可以删除时",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": ["重复组", "释放"],
+    "must_not_contain": [],
+    "min_chars": 100,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "重复文件分组报告，标明保留文件和建议删除文件，以及预计释放空间"
+  },
+  "bound_tools": ["find_files", "file_info", "list_directory"],
+  "task_types": ["SYSTEM", "CHAT"],
+  "priority": 68,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 🎯 能力增强：重复文件猎手\n\n当用户要求清理重复文件、释放磁盘空间时，使用以下流程：\n\n### 扫描策略\n按以下优先级判断「重复」：\n1. **完全重复**：文件大小 + MD5 哈希完全一致（最可靠）\n2. **名称重复**：同名不同目录（需人工确认）\n3. **相似重复**：名称含 (1)、(2)、_copy、_副本 等后缀（高度可疑）\n\n### 输出报告格式\n```\n## 🎯 重复文件扫描报告\n\n**扫描目录**：{路径}\n**扫描文件数**：X 个\n**发现重复组**：Y 组，共 Z 个冗余文件\n**可释放空间**：约 N MB\n\n### 重复组 #1（占用 X MB）\n| 状态 | 路径 | 大小 | 修改时间 |\n|------|------|------|----------|\n| ✅ 保留 | .../原始文件.jpg | 2.3MB | 2024-01-01 |\n| 🗑️ 建议删除 | .../副本/原始文件.jpg | 2.3MB | 2024-03-15 |\n```\n\n### 删除规则（自动决策哪个保留）\n- 优先保留：路径更短（更接近根目录）的版本\n- 同级优先保留：修改时间更早（原始文件）的版本\n- 有效文件名优先：不含「副本」「copy」「(1)」等后缀的\n\n### 安全规则\n- **绝不自动删除**，必须输出报告等待用户逐组确认\n- 回收站优先：建议先移入回收站而非永久删除\n- 系统文件、隐藏文件跳过不处理",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-08T00:00:00Z",
+  "tags": ["duplicate", "clean", "disk", "space", "重复", "清理", "磁盘", "空间"]
+}

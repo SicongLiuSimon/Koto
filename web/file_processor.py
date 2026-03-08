@@ -96,41 +96,69 @@ class FileProcessor:
     
     @staticmethod
     def _process_pdf(filepath: str, result: Dict) -> Dict:
-        """处理PDF文件 - 优先提取文本，失败则返回二进制"""
+        """处理PDF文件 - 优先以二进制字节提交给 Gemini（支持图表/排版），同时尝试提取文本作为补充"""
         try:
-            # 首先尝试提取文本
+            # 始终读取原始字节（Gemini 原生支持 application/pdf 内联 blob）
+            with open(filepath, 'rb') as f:
+                raw_bytes = f.read()
+            result['binary_data'] = raw_bytes
+            result['mime_type'] = 'application/pdf'
+
+            # 尝试用 PyPDF2 提取文本，供质量评估使用
             try:
                 import PyPDF2
-                with open(filepath, 'rb') as f:
-                    reader = PyPDF2.PdfReader(f)
-                    text_parts = []
-                    
-                    # 读取前10页
-                    max_pages = min(10, len(reader.pages))
-                    for page_num in range(max_pages):
-                        page = reader.pages[page_num]
-                        text_parts.append(page.extract_text())
-                    
-                    result['text_content'] = '\n'.join(text_parts)
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")  # 屏蔽 GBK-EUC-H 等编码警告
+                    with open(filepath, 'rb') as f:
+                        reader = PyPDF2.PdfReader(f)
+                        text_parts = []
+                        max_pages = min(10, len(reader.pages))
+                        for page_num in range(max_pages):
+                            page = reader.pages[page_num]
+                            text_parts.append(page.extract_text() or "")
+                        extracted = '\n'.join(text_parts)
+
+                # 评估文本质量：如果乱码比例高，放弃文本
+                def _is_garbled(text: str) -> bool:
+                    if not text or len(text) < 20:
+                        return True
+                    # 统计无法正常显示的替换字符 / Latin1 误读的中文字符
+                    garbage_chars = sum(
+                        1 for c in text
+                        if '\ufffd' == c                         # Unicode 替换字符
+                        or (0x00C0 <= ord(c) <= 0x00FF and '\u4e00' <= text[max(0, text.index(c)-2):text.index(c)+3][-1] <= '\u9fff')
+                    )
+                    # 乱码特征：大量 xad/Ò series Latin 扩展字符出现在中文上下文
+                    latin_ext = sum(1 for c in text if 0x00C0 <= ord(c) <= 0x00FF)
+                    cjk_chars  = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+                    total = len(text)
+                    if total == 0:
+                        return True
+                    # 若 Latin 扩展字符多于 CJK 且比例超 15%，判断为乱码
+                    if latin_ext > cjk_chars and latin_ext / total > 0.15:
+                        return True
+                    return False
+
+                if extracted.strip() and not _is_garbled(extracted):
+                    result['text_content'] = extracted
                     result['metadata']['pages'] = len(reader.pages)
                     result['metadata']['extracted_pages'] = max_pages
-                    
-                    if result['text_content'].strip():
-                        result['success'] = True
-                        print(f"[FileProcessor] 成功从PDF提取文本: {result['filename']} ({max_pages}页)")
-                        return result
-                    else:
-                        # 提取的文本为空，使用二进制
-                        raise ValueError("PDF文本为空")
-                        
-            except (ImportError, Exception) as e:
-                # PyPDF2不可用或提取失败，读取二进制
-                print(f"[FileProcessor] PDF文本提取失败，使用二进制模式: {e}")
-                with open(filepath, 'rb') as f:
-                    result['binary_data'] = f.read()
-                result['success'] = True
-                return result
-                
+                    result['metadata']['text_quality'] = 'good'
+                    print(f"[FileProcessor] PDF 文本质量良好，文本+二进制双模式: {result['filename']}")
+                else:
+                    result['metadata']['text_quality'] = 'garbled'
+                    print(f"[FileProcessor] PDF 文本乱码或为空，改用纯二进制模式: {result['filename']}")
+
+            except Exception as e:
+                result['metadata']['text_quality'] = 'extract_failed'
+                print(f"[FileProcessor] PDF 文本提取失败，使用纯二进制模式: {e}")
+
+            result['metadata']['pages'] = result['metadata'].get('pages', '?')
+            result['success'] = True
+            print(f"[FileProcessor] PDF 已加载二进制: {result['filename']} ({len(raw_bytes):,} bytes)")
+            return result
+
         except Exception as e:
             result['error'] = f"读取PDF失败: {str(e)}"
             return result

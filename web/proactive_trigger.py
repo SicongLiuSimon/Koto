@@ -314,6 +314,21 @@ class ProactiveTriggerSystem:
         self.trigger_params["threshold_unorganized_files"] = {
             "organization_suggestion_threshold": 2
         }
+
+        # 11. 事件触发：长期目标有新进展（完成 / 等待确认）
+        self.register_trigger(TriggerCondition(
+            trigger_id="event_goal_update",
+            trigger_type=TriggerType.EVENT,
+            condition_func=self._check_goal_updates,
+            priority=8,
+            cooldown_minutes=15,
+            description="长期目标有新进展需用户关注"
+        ))
+        self.trigger_params["event_goal_update"] = {
+            "check_completed_goals": True,
+            "check_waiting_goals": True,
+            "waiting_timeout_minutes": 60
+        }
     
     def register_trigger(self, trigger: TriggerCondition):
         """注册触发条件"""
@@ -1056,6 +1071,55 @@ class ProactiveTriggerSystem:
         
         return None
     
+    def _check_goal_updates(self, user_id: str) -> Optional[Tuple[float, float, Dict]]:
+        """检查长期目标是否有需要用户关注的状态变化（完成 / 等待确认）"""
+        try:
+            from app.core.goal.goal_manager import get_goal_manager, GoalStatus
+            gm = get_goal_manager()
+            params = self.get_trigger_params("event_goal_update")
+            check_completed = params.get("check_completed_goals", True)
+            check_waiting = params.get("check_waiting_goals", True)
+            waiting_timeout = params.get("waiting_timeout_minutes", 60)
+
+            messages = []
+
+            if check_waiting:
+                waiting_goals = gm.list_goals(status=GoalStatus.WAITING_USER, limit=5)
+                for g in waiting_goals:
+                    try:
+                        from datetime import datetime, timedelta
+                        updated = datetime.fromisoformat(g.updated_at[:26])
+                        if (datetime.now() - updated).total_seconds() > waiting_timeout * 60:
+                            ctx = g.get_context()
+                            reason = ctx.get("waiting_reason", "需要你的补充信息")
+                            messages.append(f"《{g.title}》{reason}")
+                    except Exception:
+                        pass
+
+            if check_completed:
+                # 找最近 15 分钟内完成的目标（避免重复提醒）
+                from datetime import datetime, timedelta
+                cutoff = (datetime.now() - timedelta(minutes=15)).isoformat()
+                completed_goals = gm.list_goals(status=GoalStatus.COMPLETED, limit=5)
+                for g in completed_goals:
+                    if g.updated_at and g.updated_at > cutoff:
+                        messages.append(f"《{g.title}》已完成")
+
+            if not messages:
+                return None
+
+            urgency = 0.75 if any("等待" in m or "需要" in m for m in messages) else 0.55
+            content = {
+                "title": "你委托的事情有新进展",
+                "message": "  \n".join(f"• {m}" for m in messages[:3]),
+                "goal_count": len(messages),
+                "scene_type": "goal_update",
+                "trigger_id": "event_goal_update",
+            }
+            return (urgency, 0.8, content)
+        except Exception:
+            return None
+
     def _check_unorganized_files(self, user_id: str) -> Optional[Tuple[float, float, Dict]]:
         """检查杂乱文件"""
         if not self.suggestion_engine:

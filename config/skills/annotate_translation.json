@@ -1,0 +1,27 @@
+{
+  "id": "annotate_translation",
+  "name": "翻译质检批注",
+  "icon": "🌐",
+  "category": "domain",
+  "description": "对翻译文本进行质检批注：忠实度、流畅性、术语一致性对照审查",
+  "intent_description": "用户需要检查翻译质量、对照原文批注、纠正译文错误或术语不一致",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [],
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "原文/译文对照批注，含错误分类和建议译文，附评分"
+  },
+  "bound_tools": [],
+  "task_types": ["DOC_ANNOTATE"],
+  "enabled": true,
+  "prompt": "\n\n## 🌐 领域要求：翻译质检批注\n- 采用「原文 | 现有译文 | 问题类型 | 建议译文」四列对照格式\n- 错误类型分类：漏译（MT）、误译（MIS）、术语不一致（TERM）、语法错误（GRAM）、不自然表达（NAT）\n- 专有名词和术语首次出现后建立「术语表」，后续逐一检查一致性\n- 区分「硬错误」（影响理解，必须修改）和「软错误」（风格偏好，建议修改）\n- 最终给出：忠实度评分 + 流畅度评分 + 术语一致性评分（各 1-5 分）",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-07T00:00:00Z",
+  "tags": ["translation", "annotation", "quality-check", "localization"]
+}

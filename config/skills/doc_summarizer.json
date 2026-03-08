@@ -1,0 +1,29 @@
+{
+  "id": "doc_summarizer",
+  "name": "文档速读摘要",
+  "icon": "📑",
+  "category": "domain",
+  "description": "上传任意 PDF/Word/Excel/TXT，生成结构化摘要：核心观点、关键数据、待办事项",
+  "intent_description": "用户上传或提到文档时，需要快速了解内容要点、生成摘要或提炼关键信息",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": ["##"],
+    "must_not_contain": [],
+    "min_chars": 200,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "结构化摘要，包含核心观点、数据摘录、行动项三个固定章节"
+  },
+  "bound_tools": ["read_file", "find_files", "fill_skill_template"],
+  "task_types": ["CHAT", "FILE_GEN", "RESEARCH", "DOC_ANNOTATE"],
+  "priority": 75,
+  "conflict_with": ["concise_mode"],
+  "enabled": false,
+  "prompt": "\n\n## 📑 能力增强：文档速读摘要专家\n\n当用户提到文档、上传文件、或要求总结/摘要时，使用以下固定结构输出：\n\n### 输出模板\n```\n## 📄 文档摘要：{文档名}\n\n### 🎯 核心观点（3-5 条）\n- \n\n### 📊 关键数据与事实\n| 指标 | 数值 | 备注 |\n|------|------|------|\n\n### ✅ 行动项 / 待办事项\n- [ ] \n\n### 📝 一句话总结\n> \n```\n\n### 处理原则\n- 优先提炼「决策相关」信息，而非平铺直叙内容\n- 数字、日期、名称等事实性信息必须原文引用，不得臆造\n- 如文档内容超过 5000 字，先给出摘要，再问用户是否需要深入某一章节\n- 对于英文文档，默认输出中文摘要，原始术语保留英文括注\n- 如有绑定的 Word 摘要模板，提示用户可一键生成格式化文档",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-08T00:00:00Z",
+  "tags": ["summarize", "document", "pdf", "word", "摘要", "总结", "速读", "提炼"]
+}

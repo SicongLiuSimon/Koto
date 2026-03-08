@@ -50,7 +50,7 @@ class SearchService:
             # We use a model to synthesize the search results.
             # This is how 'web_searcher.py' did it.
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash", # Use a fast model
+                model="gemini-2.5-flash", # Use a fast model
                 contents=query,
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],

@@ -8,9 +8,22 @@ PPT生成器 - 高质量演示文稿生成
 
 import os
 import io
+import re
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from pathlib import Path
+
+try:
+    from pptx import Presentation
+    from pptx.util import Inches, Pt, Cm
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+    from pptx.enum.shapes import MSO_SHAPE
+except ImportError:
+    print("Warning: python-pptx not installed. PPT generation will fail.")
+
+from web.ppt_themes import get_theme, PPTTheme
+from web.image_generator import ImageGenerator
 
 
 class SlideContent:
@@ -70,12 +83,37 @@ class PPTGenerator:
     LATIN_FONTS = ['Calibri', 'Segoe UI', 'Arial', 'Helvetica']
     
     def __init__(self, theme: str = "business"):
-        self.theme = theme
-        self.colors = self.THEMES.get(theme, self.THEMES["business"])
-    
+        self.theme = theme.lower()
+        
+        # Try to load from new Theme System
+        try:
+            from web.ppt_themes import get_theme
+            ppt_theme = get_theme(self.theme)
+            if ppt_theme:
+                # Map new Theme structure to old Dict structure for backward compatibility
+                self.colors = {
+                    "primary": ppt_theme.primary_color,
+                    "accent": ppt_theme.accent_color,
+                    "background": ppt_theme.background_color,
+                    "text": ppt_theme.text_color,
+                    "subtitle": (100, 100, 100), # Default 
+                    "light_bg": ppt_theme.secondary_color,
+                    "bullet_color": ppt_theme.primary_color
+                }
+                # Also store the full theme object for new features
+                self.ppt_theme = ppt_theme
+            else:
+                # Fallback to internal dict
+                self.colors = self.THEMES.get(self.theme, self.THEMES["business"])
+                self.ppt_theme = None
+        except ImportError:
+             # Fallback to internal dict if import fails
+            self.colors = self.THEMES.get(self.theme, self.THEMES["business"])
+            self.ppt_theme = None
+
     @staticmethod
     def _clean_markdown(text: str, strip_bold: bool = False) -> str:
-        """清理文本中残留的 markdown 标记，返回纯净的展示文本
+        """清理文本中残留的 markdown 标记和 AI 对话痕迹，返回纯净的展示文本
         Args:
             strip_bold: 如果 True，同时去除 **bold** 标记。
                         渲染器如果自己处理粗体，传 False 保留 **。
@@ -96,8 +134,29 @@ class PPTGenerator:
         text = re.sub(r'^[\s]*[-•]\s+', '', text)
         # 去除数字编号 1. 2. 
         text = re.sub(r'^[\s]*\d+[.、)]\s+', '', text)
+        # 去除 ~~strikethrough~~
+        text = re.sub(r'~~(.+?)~~', r'\1', text)
+        # 去除 markdown 链接 [text](url) → text
+        text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+        # 去除连续单引号（AI 模型常见输出）
+        text = re.sub(r"'{2,}", "", text)
+        # 去除连续星号（***、**** 等）
+        text = re.sub(r'\*{3,}', '', text)
+        # 去除代码块标记
+        text = re.sub(r'```[\s\S]*?```', '', text)
+        # 去除 AI 对话痕迹
+        ai_patterns = [
+            r'^(当然可以[!！。，,\s]*)',
+            r'^(好的[!！。，,\s]*)',
+            r'^(以下是.*?[：:]\s*)',
+            r'^(Sure[!,.\s]*)',
+            r'^(Here(?:\'s| is).*?[:：]\s*)',
+        ]
+        for pat in ai_patterns:
+            text = re.sub(pat, '', text, flags=re.IGNORECASE)
         return text.strip()
     
+
     def generate_from_outline(
         self,
         title: str,
@@ -105,29 +164,310 @@ class PPTGenerator:
         output_path: str,
         subtitle: str = "",
         author: str = "Koto AI",
-        progress_callback: Optional[Any] = None
+        progress_callback: Optional[Any] = None,
+        enable_ai_images: bool = True  # New Flag
     ) -> Dict[str, Any]:
-        """从大纲生成高质量PPT - 支持智能内容规划和多种幻灯片类型
+        """从大纲生成高质量PPT - 支持智能配图"""
         
-        Args:
-            progress_callback: 可选回调函数，签名 callback(current, total, slide_title, slide_type)
-                               用于向前端推送逐页进度。
-        支持的 slide type (通过 section["type"] 指定):
-          - detail:     详细内容页（默认，3-5 个要点深入展示）
-          - overview:   概览页（多个小主题并列展示，需要 subsections）
-          - highlight:  亮点数据页（突出关键数字/成果，格式: "数值 | 说明"）
-          - divider:    章节过渡页（视觉分隔，引入新大章节）
-          - comparison: 对比页（左右两栏对比，需要 subsections/left+right）
-        """
+        # Initialize Image Generator if needed
+        image_gen = None
+        if enable_ai_images:
+            try:
+                from web.image_generator import ImageGenerator
+                image_gen = ImageGenerator()
+                print("[PPT] 🖼️ AI Image Generator Initialized")
+            except ImportError:
+                print("[PPT] ⚠️ ImageGenerator not found, skipping AI images")
+
         _type_name_map = {"detail": "详细页", "overview": "概览页", "highlight": "亮点页",
-                          "divider": "过渡页", "comparison": "对比页"}
+                          "divider": "过渡页", "comparison": "对比页", "image_full": "图片页"}
         
-        def _progress(cur, tot, stitle, stype):
+        prs = Presentation()
+        # Set 16:9
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+        
+        # 1. Title Slide
+        slide_layout = prs.slide_layouts[0] 
+        slide = prs.slides.add_slide(slide_layout)
+        
+        # Apply Theme Colors to Title Slide (Custom Background)
+        background = slide.background
+        fill = background.fill
+        fill.solid()
+        fill.fore_color.rgb = RGBColor(*self.colors["primary"])
+        
+
+        title_shape = slide.shapes.title
+        subtitle_shape = slide.placeholders[1]
+        
+        title_shape.text = self._clean_markdown(title, strip_bold=True)
+        subtitle_shape.text = self._clean_markdown(subtitle or f"{author} | {datetime.now().strftime('%Y-%m-%d')}", strip_bold=True)
+        
+        # White text on dark primary bg
+        for paragraph in title_shape.text_frame.paragraphs:
+            paragraph.font.color.rgb = RGBColor(255, 255, 255)
+            paragraph.font.name = self.CJK_FONTS[0]
+            
+        for paragraph in subtitle_shape.text_frame.paragraphs:
+            paragraph.font.color.rgb = RGBColor(200, 200, 200)
+            paragraph.font.size = Pt(18)
+
+        total_slides = len(outline)
+        
+        # 2. Iterate Outline
+        for idx, section in enumerate(outline):
+            s_title = section.get("title", "No Title")
+            s_type = section.get("type", "detail")
+            s_points = section.get("points", [])
+            s_content = section.get("content", [])
+            
+            # Progress Callback
             if progress_callback:
                 try:
-                    progress_callback(cur, tot, stitle, _type_name_map.get(stype, stype))
-                except Exception:
-                    pass
+                    progress_callback(idx + 1, total_slides, s_title, _type_name_map.get(s_type, s_type))
+                except: pass
+            
+            # --- AI Image Generation Logic ---
+            generated_img_path = None
+            if image_gen and (s_type in ["image_full", "highlight", "content_image"] or (s_type == "detail" and idx % 3 == 0)):
+                 # Generate image for specific types or every 3rd detail slide
+                 img_prompt = section.get("image_prompt")
+                 if not img_prompt:
+                     # Auto-construct prompt from title and points
+                     context_str = " ".join(s_points[:2])
+                     img_prompt = f"Professional business illustration for presentation slide about '{s_title}'. Context: {context_str}. Style: {self.theme} style, clean, vector art or photorealistic."
+                 
+                 # Define distinct filenames
+                 safe_name = re.sub(r'[\\/*?:"<>|]', "", s_title)[:20].strip()
+                 img_filename = f"slide_{idx}_{safe_name}.png"
+                 local_img_path = os.path.join(os.path.dirname(output_path), "images", img_filename)
+                 os.makedirs(os.path.dirname(local_img_path), exist_ok=True)
+                 
+                 # Call API (Blocking for now, but per-slide ensures progress updates)
+                 print(f"[PPT] 🎨 Generating image for slide {idx+1}: {s_title}")
+                 if image_gen.generate_image(img_prompt, local_img_path, aspect_ratio="16:9"):
+                     generated_img_path = local_img_path
+            
+            # Create Slide based on type
+            if s_type == "divider":
+                self._create_divider_slide(prs, s_title, section.get("description", ""))
+            
+            elif s_type == "overview":
+                self._create_overview_slide(prs, s_title, section.get("subsections", []))
+            
+            elif s_type == "comparison":
+                self._create_comparison_slide(prs, s_title, section.get("left", {}), section.get("right", {}))
+                
+            elif s_type == "highlight":
+                self._create_highlight_slide(prs, s_title, s_points, bg_image=generated_img_path)
+            
+            elif s_type == "image_full" and generated_img_path:
+                 # Full screen image slide
+                 slide = prs.slides.add_slide(prs.slide_layouts[6]) # Blank
+                 slide.shapes.add_picture(generated_img_path, 0, 0, width=prs.slide_width, height=prs.slide_height)
+                 # Add overlay text
+
+                 textbox = slide.shapes.add_textbox(Inches(1), Inches(5.5), Inches(10), Inches(1.5))
+                 tf = textbox.text_frame
+                 p = tf.add_paragraph()
+                 p.text = self._clean_markdown(s_title, strip_bold=True)
+                 p.font.size = Pt(36)
+                 p.font.color.rgb = RGBColor(255, 255, 255)
+                 p.font.bold = True
+                 # Add Shadow
+                 # (Shadow API in python-pptx is complex, skipping for simplicity)
+                 
+            else:
+                # Default Detail Layout
+                # If we have an generated image, use "Picture with Caption" layout logic manually
+                if generated_img_path:
+                    self._create_picture_slide(prs, s_title, s_points, generated_img_path)
+                else:
+                    self._create_detail_slide(prs, s_title, s_points)
+
+        # Save
+        prs.save(output_path)
+        return {"output_path": output_path, "slide_count": len(prs.slides)}
+
+
+
+    def _create_picture_slide(self, prs, title, points, image_path):
+        """Creates a slide with image on right, text on left"""
+        from pptx.util import Inches, Pt
+        slide = prs.slides.add_slide(prs.slide_layouts[1]) # Title and Content
+        
+        # 1. Title
+        title_shape = slide.shapes.title
+        title_shape.text = self._clean_markdown(title, strip_bold=True)
+        
+        # Style Title using same logic as Detail Slide
+        for paragraph in title_shape.text_frame.paragraphs:
+             paragraph.font.name = self.CJK_FONTS[0]
+             # title color usually comes from theme master
+        
+        # 2. Image (Right Half, taking up ~45% width)
+        left = Inches(7.5)
+        top = Inches(2.0)
+        height = Inches(4.5)
+        
+        try:
+            slide.shapes.add_picture(image_path, left, top, height=height)
+        except Exception:
+            pass # Image load fail
+            
+        # 3. Content (Left Half)
+        body_shape = slide.placeholders[1]
+        body_shape.width = Inches(6.5) # Limit to left side
+        tf = body_shape.text_frame
+        tf.clear()
+        
+        for point in points:
+            p = tf.add_paragraph()
+            p.text = self._clean_markdown(str(point), strip_bold=True)
+
+
+    
+
+
+    def _create_detail_slide(self, prs, title, points):
+        """Standard detail slide with bullet points"""
+        from pptx.util import Inches, Pt
+        slide = prs.slides.add_slide(prs.slide_layouts[1]) # Title and Content
+        
+        # Title
+        title_shape = slide.shapes.title
+        title_shape.text = self._clean_markdown(title, strip_bold=True)
+        
+        # Color title
+        for paragraph in title_shape.text_frame.paragraphs:
+            paragraph.font.name = self.CJK_FONTS[0]
+            if self.theme and self.ppt_theme:
+                 paragraph.font.color.rgb = RGBColor(*self.ppt_theme.primary_color)
+            else:
+                 paragraph.font.color.rgb = RGBColor(*self.colors.get("primary", (0,0,0)))
+
+        # Content
+        body_shape = slide.placeholders[1]
+        tf = body_shape.text_frame
+        
+        for point in points:
+            p = tf.add_paragraph()
+            p.text = self._clean_markdown(str(point), strip_bold=True)
+            p.font.size = Pt(24)
+            p.space_before = Pt(14)
+            p.level = 0
+            # Set bullet color if possible (hard with python-pptx, skipping custom bullet)
+
+
+    def _create_overview_slide(self, prs, title, subsections):
+        """Overview slide with multiple sections/cards"""
+        from pptx.util import Inches, Pt
+        slide = prs.slides.add_slide(prs.slide_layouts[5]) # Title Only
+        
+        title_shape = slide.shapes.title
+        title_shape.text = self._clean_markdown(title, strip_bold=True)
+        
+        # Create 2-3 columns depending on subsection count
+        if not subsections:
+            return
+            
+        count = len(subsections)
+        width = (prs.slide_width - Inches(2)) / count
+        for i, sub in enumerate(subsections):
+            left = Inches(1) + (width * i)
+            top = Inches(2.5)
+            height = Inches(4)
+            
+            # Draw a box/shape
+            shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width - Inches(0.2), height)
+            shape.fill.solid()
+            shape.fill.fore_color.rgb = RGBColor(*self.colors.get("light_bg", (240,240,240)))
+            shape.line.color.rgb = RGBColor(*self.colors.get("primary", (0,0,0)))
+            
+            # Add text inside
+            tf = shape.text_frame
+            p = tf.paragraphs[0]
+            p.text = self._clean_markdown(sub.get("title", f"Section {i+1}"), strip_bold=True)
+            p.font.bold = True
+            p.font.size = Pt(20)
+            p.font.color.rgb = RGBColor(*self.colors.get("primary", (0,0,0)))
+            
+            # Content
+            details = sub.get("points", [])
+            for d in details[:3]:
+                p = tf.add_paragraph()
+                p.text = f"• {self._clean_markdown(str(d), strip_bold=True)}"
+                p.font.size = Pt(14)
+                p.font.color.rgb = RGBColor(*self.colors.get("text", (50,50,50)))
+
+
+    def _create_highlight_slide(self, prs, title, points, bg_image=None):
+        """Highlight slide with big numbers or key takeaway"""
+        slide = prs.slides.add_slide(prs.slide_layouts[6]) # Blank
+        
+        if bg_image:
+             try:
+                 slide.shapes.add_picture(bg_image, 0, 0, width=prs.slide_width, height=prs.slide_height)
+             except: pass
+        else:
+             # Use solid color background
+             background = slide.background
+             fill = background.fill
+             fill.solid()
+             fill.fore_color.rgb = RGBColor(*self.colors.get("primary", (0,0,0)))
+
+        # Add Title (White usually)
+        tb = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(11), Inches(1.5))
+        tf = tb.text_frame
+        p = tf.add_paragraph()
+        p.text = self._clean_markdown(title, strip_bold=True)
+        p.font.size = Pt(44)
+        p.font.bold = True
+        p.font.color.rgb = RGBColor(255, 255, 255)
+        p.alignment = PP_ALIGN.CENTER
+        
+        # Points
+        top_offset = Inches(3)
+        for point in points:
+            tb = slide.shapes.add_textbox(Inches(2), top_offset, Inches(9), Inches(1))
+            tf = tb.text_frame
+            p = tf.add_paragraph()
+            p.text = self._clean_markdown(str(point), strip_bold=True)
+            p.font.size = Pt(28)
+            p.font.color.rgb = RGBColor(255, 255, 255)
+            p.alignment = PP_ALIGN.CENTER
+            top_offset += Inches(1.2)
+
+
+    def _create_comparison_slide(self, prs, title, left, right):
+        """Comparison side by side"""
+        slide = prs.slides.add_slide(prs.slide_layouts[1]) 
+        slide.shapes.title.text = self._clean_markdown(title, strip_bold=True)
+        
+        # Left Box
+        left_box = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(5.5), Inches(5))
+        tf_l = left_box.text_frame
+        tf_l.text = self._clean_markdown(left.get("title", "Left Side"), strip_bold=True)
+        tf_l.paragraphs[0].font.bold = True
+        for p_text in left.get("points", []):
+            p = tf_l.add_paragraph()
+            p.text = f"• {self._clean_markdown(str(p_text), strip_bold=True)}"
+            
+        # Right Box
+        right_box = slide.shapes.add_textbox(Inches(7), Inches(2), Inches(5.5), Inches(5))
+        tf_r = right_box.text_frame
+        tf_r.text = self._clean_markdown(right.get("title", "Right Side"), strip_bold=True)
+        tf_r.paragraphs[0].font.bold = True
+        for p_text in right.get("points", []):
+            p = tf_r.add_paragraph()
+            p.text = f"• {self._clean_markdown(str(p_text), strip_bold=True)}"
+            
+
+    def _create_divider_slide(self, prs, title, subtitle):
+        """Section divider"""
+        self._create_highlight_slide(prs, title, [subtitle])
+
         
         try:
             from pptx import Presentation
@@ -386,21 +726,21 @@ class PPTGenerator:
         # 根据要点数量调整字号
         point_count = len(points)
         if point_count <= 3:
-            font_size = 20
-            spacing = Pt(16)
+            font_size = 24  # Size up for fewer points
+            spacing = Pt(20)
         elif point_count <= 5:
-            font_size = 17
-            spacing = Pt(10)
+            font_size = 20
+            spacing = Pt(14)
         else:
-            font_size = 15
-            spacing = Pt(6)
+            font_size = 18
+            spacing = Pt(10)
         
         content_box = slide.shapes.add_textbox(
             Inches(0.8), Inches(1.7), content_width, Inches(5.3)
         )
         ctf = content_box.text_frame
         ctf.word_wrap = True
-        ctf.auto_size = None
+        ctf.auto_size = None  # We manually manage font size
         
         for i, point in enumerate(points):
             if i == 0:
@@ -408,15 +748,18 @@ class PPTGenerator:
             else:
                 p = ctf.add_paragraph()
             
+            # Use native bullet level (for indent) but manual char for safety
+            p.level = 0
+            
+            # Add bullet manually to ensure visibility
+            bullet_run = p.add_run()
+            bullet_run.text = "•  "
+            self._set_font(bullet_run, font_size, color_key="accent")
+
             # 先清理 markdown 残留
             point = self._clean_markdown(point)
             
-            # Bullet 符号
-            bullet_run = p.add_run()
-            bullet_run.text = "●  "
-            self._set_font(bullet_run, font_size - 4, color_key="accent")
-            
-            # 解析粗体标记 **text** 并分段渲染
+            # 解析粗体...
             import re as _re
             parts = _re.split(r'(\*\*.*?\*\*)', point)
             for part in parts:
@@ -433,14 +776,27 @@ class PPTGenerator:
             p.space_before = spacing
             p.space_after = Pt(4)
         
-        # 图片 (右侧)
+        # 图片 (右侧) - Fix: Preserve Aspect Ratio
         if has_image:
             try:
-                slide.shapes.add_picture(
-                    str(image_path),
-                    Inches(7.5), Inches(1.8),
-                    width=Inches(5), height=Inches(4.5)
-                )
+                # Add picture without specifying dimensions first to get natural size
+                pic = slide.shapes.add_picture(str(image_path), Inches(7.5), Inches(1.8))
+                
+                # Define constraints
+                max_width = Inches(5.0)
+                max_height = Inches(4.5)
+                
+                # Calculate scaling factor to fit within box while preserving aspect ratio
+                width_ratio = max_width / pic.width
+                height_ratio = max_height / pic.height
+                scale = min(width_ratio, height_ratio)
+                
+                pic.width = int(pic.width * scale)
+                pic.height = int(pic.height * scale)
+                
+                # Optional: Center image in the reserved area? 
+                # Currently top-aligned at Inches(1.8), Left-aligned at Inches(7.5)
+                
             except Exception as e:
                 print(f"[PPT] 添加图片失败: {e}")
     
@@ -553,9 +909,14 @@ class PPTGenerator:
                     p = ptf.paragraphs[0]
                 else:
                     p = ptf.add_paragraph()
+                
+                # Use native bullet
+                p.level = 0
+                
                 bullet = p.add_run()
                 bullet.text = "• "
-                self._set_font(bullet, 11, color_key="accent")
+                self._set_font(bullet, 12, color_key="accent")
+                
                 run = p.add_run()
                 display = pt[:100] + ('...' if len(pt) > 100 else '')
                 run.text = display
@@ -578,11 +939,18 @@ class PPTGenerator:
         
         for i, point in enumerate(points):
             p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            
+            # Use native bullet
+            p.level = 0
+            
+            # Manual bullet
+            bullet = p.add_run()
+            bullet.text = "• "
+            self._set_font(bullet, 12, color_key="accent")
+            
             # 清理 markdown 残留
             point = self._clean_markdown(point)
-            bullet = p.add_run()
-            bullet.text = "●  "
-            self._set_font(bullet, font_size - 4, color_key="accent")
+            
             parts = _re.split(r'(\*\*.*?\*\*)', point)
             for part in parts:
                 if part.startswith('**') and part.endswith('**'):
@@ -591,6 +959,7 @@ class PPTGenerator:
                     self._set_font(run, font_size, bold=True, color_key="text")
                 elif part:
                     run = p.add_run()
+                    # 允许较长的内容，python-pptx 会自动换行
                     run.text = part[:200] + ('...' if len(part) > 200 else '')
                     self._set_font(run, font_size, color_key="text")
             p.space_before = spacing
@@ -666,18 +1035,28 @@ class PPTGenerator:
                 vp.text = hl["value"]
                 vp.alignment = PP_ALIGN.CENTER
                 self._set_font(vp.runs[0], 42, bold=True, color_key="accent")
+                
+                # 说明文字 (standard)
+                lbl_box = slide.shapes.add_textbox(
+                    Inches(x + 0.25), Inches(y_card + 2.2),
+                    Inches(card_w - 0.5), Inches(1.3)
+                )
+                label_size = 15
+                label_y_offset = 0 # Included in box position
+            else:
+                # No value -> Center the label and make it bigger
+                lbl_box = slide.shapes.add_textbox(
+                    Inches(x + 0.25), Inches(y_card + 1.2),
+                    Inches(card_w - 0.5), Inches(2.3)
+                )
+                label_size = 24
             
-            # 说明文字
-            lbl_box = slide.shapes.add_textbox(
-                Inches(x + 0.25), Inches(y_card + 2.2),
-                Inches(card_w - 0.5), Inches(1.3)
-            )
             ltf = lbl_box.text_frame
             ltf.word_wrap = True
             lp = ltf.paragraphs[0]
             lp.text = hl["label"]
             lp.alignment = PP_ALIGN.CENTER
-            self._set_font(lp.runs[0], 15, color_key="text")
+            self._set_font(lp.runs[0], label_size, color_key="text" if hl["value"] else "primary")
     
     # ─── 章节过渡页 ─────────────────────────────────
     
@@ -801,9 +1180,14 @@ class PPTGenerator:
                     p = ptf.paragraphs[0]
                 else:
                     p = ptf.add_paragraph()
+                
+                # Use native bullet
+                p.level = 0
+                
                 bullet = p.add_run()
-                bullet.text = "●  "
+                bullet.text = "• "
                 self._set_font(bullet, 12, color_key="accent")
+                
                 run = p.add_run()
                 run.text = pt[:150] + ('...' if len(pt) > 150 else '')
                 self._set_font(run, 16, color_key="text")

@@ -8,7 +8,7 @@ __pycache__/
 *.egg
 dist/
 build/
-*.spec
+build/*.spec
 
 # Virtual environment
 .venv/
@@ -16,10 +16,14 @@ venv/
 env/
 
 # Secrets & API keys
-config/gemini_config.env
+**/gemini_config.env
 config/user_settings.json
 config/user_profile.json
 config/memory.json
+config/token_usage.json
+config/skill_bindings.json
+config/model_setup_done.json
+config/koto_checkpoints.sqlite*
 
 # IDE
 .vscode/
@@ -36,6 +40,15 @@ Desktop.ini
 logs/
 *.log
 
+# Koto runtime temp files
+_probe*.txt
+_probe*.py
+.koto.lock
+test_output.txt
+test_doc_output.txt
+test_e2e.txt
+build_log.txt
+
 # Workspace user data
 workspace/
 chats/
@@ -44,6 +57,7 @@ chats/
 models/
 
 # Build artifacts
+_archive/
 archive/build_logs/
 archive/installer_backup/
 *.zip
@@ -59,6 +73,9 @@ archive/installer_backup/
 
 # User auth data
 config/users.json
+
+# User uploads
+web/uploads/
 
 # Node modules (if any)
 node_modules/

@@ -118,57 +118,110 @@ class DocumentReader:
             paragraphs_data = []
             tables_data = []
             
-            # 提取段落（增强：包含格式信息）
-            for para in doc.paragraphs:
-                if not para.text.strip():
-                    continue
-                
-                # 提取runs的格式信息
-                runs_info = []
-                has_format_change = False
-                for run in para.runs:
-                    if not run.text:
+            # 内联元素序号追踪（表格 / 图片）
+            _table_idx = 0
+            _img_idx = 0
+
+            # 构建段落→表格的位置映射（python-docx body顺序）
+            from docx.oxml.ns import qn as _qn
+            body = doc.element.body
+            _body_children = list(body)
+            _para_elements = [p._element for p in doc.paragraphs]
+
+            # 遍历 body 子节点，按出现顺序将段落/表格/图片交织读取
+            _seen_para_idx = 0
+            for child in _body_children:
+                tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+
+                if tag == 'p':
+                    # 找到对应的段落对象
+                    try:
+                        local_idx = _para_elements.index(child)
+                    except ValueError:
                         continue
-                    run_data = {
-                        "text": run.text,
-                        "bold": run.bold if run.bold is not None else False,
-                        "italic": run.italic if run.italic is not None else False,
+                    para = doc.paragraphs[local_idx]
+
+                    # 检测段落内是否含图片（w:drawing 或 w:pict）
+                    has_image = bool(
+                        child.findall('.//' + _qn('w:drawing')) or
+                        child.findall('.//' + _qn('w:pict'))
+                    )
+
+                    if has_image:
+                        _img_idx += 1
+                        para_info = {
+                            "text": f"[📷 图片{_img_idx}]",
+                            "style": para.style.name if para.style else "Normal",
+                            "type": "image",
+                            "image_index": _img_idx,
+                            "runs": [],
+                            "has_format_change": False,
+                        }
+                        paragraphs_data.append(para_info)
+                        continue
+
+                    # 空段落跳过
+                    if not para.text.strip():
+                        continue
+
+                    # 提取 runs 格式信息
+                    runs_info = []
+                    has_format_change = False
+                    for run in para.runs:
+                        if not run.text:
+                            continue
+                        run_data = {
+                            "text": run.text,
+                            "bold": run.bold if run.bold is not None else False,
+                            "italic": run.italic if run.italic is not None else False,
+                        }
+                        if run.font.size:
+                            run_data["size_pt"] = run.font.size.pt
+                        if run.font.color and run.font.color.rgb:
+                            run_data["color"] = str(run.font.color.rgb)
+                            has_format_change = True
+                        if run.bold or run.italic:
+                            has_format_change = True
+                        runs_info.append(run_data)
+
+                    para_info = {
+                        "text": para.text,
+                        "style": para.style.name if para.style else "Normal",
+                        "runs": runs_info,
+                        "has_format_change": has_format_change,
                     }
-                    if run.font.size:
-                        run_data["size_pt"] = run.font.size.pt
-                    if run.font.color and run.font.color.rgb:
-                        run_data["color"] = str(run.font.color.rgb)
-                        has_format_change = True
-                    if run.bold or run.italic:
-                        has_format_change = True
-                    runs_info.append(run_data)
-                
-                para_info = {
-                    "text": para.text,
-                    "style": para.style.name if para.style else "Normal",
-                    "runs": runs_info,  # 新增：run级别的格式信息
-                    "has_format_change": has_format_change,  # 新增：是否有格式变化
-                }
-                
-                # 检测标题
-                if para.style and "Heading" in para.style.name:
-                    para_info["type"] = "heading"
-                    para_info["level"] = int(para.style.name.split()[-1]) if para.style.name.split()[-1].isdigit() else 1
-                # 检测列表
-                elif para.style and "List" in para.style.name:
-                    para_info["type"] = "list"
-                else:
-                    para_info["type"] = "paragraph"
-                
-                paragraphs_data.append(para_info)
-            
-            # 提取表格
-            for table in doc.tables:
-                table_data = []
-                for row in table.rows:
-                    row_data = [cell.text for cell in row.cells]
-                    table_data.append(row_data)
-                tables_data.append(table_data)
+                    if para.style and "Heading" in para.style.name:
+                        para_info["type"] = "heading"
+                        para_info["level"] = int(para.style.name.split()[-1]) if para.style.name.split()[-1].isdigit() else 1
+                    elif para.style and "List" in para.style.name:
+                        para_info["type"] = "list"
+                    else:
+                        para_info["type"] = "paragraph"
+                    paragraphs_data.append(para_info)
+
+                elif tag == 'tbl':
+                    # 表格：按出现顺序找对应 doc.tables 对象
+                    if _table_idx < len(doc.tables):
+                        table = doc.tables[_table_idx]
+                        table_data = {
+                            "index": _table_idx,
+                            "rows": []
+                        }
+                        for row in table.rows:
+                            row_data = [cell.text.strip() for cell in row.cells]
+                            table_data["rows"].append(row_data)
+                        tables_data.append(table_data)
+
+                        # 在段落流中插入表格占位符，让 AI 知道位置
+                        paragraphs_data.append({
+                            "text": f"[📊 表格{_table_idx + 1}，共{len(table_data['rows'])}行×{len(table_data['rows'][0]) if table_data['rows'] else 0}列]",
+                            "style": "Table",
+                            "type": "table_placeholder",
+                            "table_index": _table_idx,
+                            "runs": [],
+                            "has_format_change": False,
+                        })
+                        _table_idx += 1
             
             return {
                 "success": True,
@@ -320,17 +373,43 @@ class DocumentReader:
 
         elif doc_type == "word":
             output.append(f"**段落总数**: {doc_data.get('paragraph_count', 0)}")
-            output.append(f"**表格总数**: {doc_data.get('table_count', 0)}\n")
-            output.append("## 文档内容\n")
-            
+            table_count = len(doc_data.get('tables', []))
+            output.append(f"**表格总数**: {table_count}\n")
+            output.append("## 文档内容（段落、表格、图片按出现顺序排列）\n")
+
+            # 预构建表格网格字符串（供占位符引用）
+            table_grids = {}
+            for t in doc_data.get("tables", []):
+                tidx = t.get("index", 0) if isinstance(t, dict) else 0
+                rows = t.get("rows", []) if isinstance(t, dict) else t
+                if not rows:
+                    table_grids[tidx] = "（空表格）"
+                    continue
+                col_count = max(len(r) for r in rows)
+                # 表头分隔线
+                header = "| " + " | ".join(str(c) if c else "" for c in rows[0]) + " |"
+                sep = "|" + "|".join(["---"] * col_count) + "|"
+                body_rows = []
+                for r in rows[1:]:
+                    body_rows.append("| " + " | ".join(str(c) if c else "" for c in r) + " |")
+                table_grids[tidx] = "\n".join([header, sep] + body_rows)
+
             for para in doc_data.get("paragraphs", []):
-                if para['type'] == 'heading':
+                ptype = para.get('type', 'paragraph')
+                if ptype == 'heading':
                     level = para.get('level', 1)
                     output.append(f"{'#' * (level + 2)} {para['text']}")
-                elif para['type'] == 'list':
+                elif ptype == 'list':
                     output.append(f"- {para['text']}")
+                elif ptype == 'image':
+                    output.append(f"> {para['text']}  *(图片，无法直接编辑文本)*")
+                elif ptype == 'table_placeholder':
+                    tidx = para.get('table_index', 0)
+                    output.append(f"\n### {para['text']}")
+                    if tidx in table_grids:
+                        output.append(table_grids[tidx])
+                    output.append("")
                 else:
-                    # 新增：如果有格式变化，标记出来
                     if para.get('has_format_change') and para.get('runs'):
                         formatted_text = ""
                         for run in para['runs']:
@@ -342,7 +421,7 @@ class DocumentReader:
                             if run.get('color'):
                                 text = f"[{text}](颜色:{run['color']})"
                             formatted_text += text
-                        output.append(formatted_text + "  ← [此段落有格式变化，包含粗体/斜体/颜色等]")
+                        output.append(formatted_text + "  ← [此段落有格式变化]")
                     else:
                         output.append(para['text'])
                 output.append("")

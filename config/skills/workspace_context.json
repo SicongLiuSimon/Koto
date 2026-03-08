@@ -1,0 +1,29 @@
+{
+  "id": "workspace_context",
+  "name": "工作区感知",
+  "icon": "🗺️",
+  "category": "domain",
+  "description": "对话前自动扫描当前工作目录，让 AI 掌握项目文件结构，所有文件操作更精准",
+  "intent_description": "用户在处理文件、询问项目结构、或需要 AI 了解当前工作目录时自动生效",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [],
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "包含工作区文件结构摘要，让后续操作有精确上下文"
+  },
+  "bound_tools": ["list_directory", "find_files", "file_info"],
+  "task_types": ["SYSTEM", "CHAT", "CODER", "FILE_GEN"],
+  "priority": 85,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 🗺️ 能力增强：工作区上下文感知\n\n在回答任何文件相关问题之前，你需要先了解用户的工作区结构。\n\n### 工作流程\n1. **主动扫描**：用户询问文件问题时，先调用 `list_directory` 工具获取工作目录结构（深度 ≤ 3 层）\n2. **快速定位**：根据文件名关键词调用 `find_files` 精确定位目标文件\n3. **上下文汇报**：在回答前简短说明「当前工作区包含 X 个目录、Y 个文件，相关文件在 Z 路径」\n4. **记忆路径**：一次对话中已扫描过的路径不重复请求，提升效率\n\n### 触发条件\n- 用户提到「当前目录」「这个项目」「我的文件夹」等模糊引用时\n- 需要对文件进行操作但路径不明确时\n- 用户询问目录结构、文件组织方式时\n\n### 注意事项\n- 不访问系统目录（/etc、/sys、C:\\Windows 等）\n- 文件列表超过 50 项时，只展示目录结构，不列出所有文件\n- 优先展示最近修改的文件和与当前话题相关的文件",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-08T00:00:00Z",
+  "tags": ["file", "workspace", "directory", "context", "工作区", "目录", "项目结构"]
+}

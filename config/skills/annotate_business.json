@@ -1,0 +1,27 @@
+{
+  "id": "annotate_business",
+  "name": "商务批注",
+  "icon": "💼",
+  "category": "domain",
+  "description": "对商业报告、合同、邮件进行专业批注：语气规范化、结构清晰化、歧义消除",
+  "intent_description": "用户需要修改商务报告、合同文本、商务邮件或内部公文",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [],
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "以批注表格和修订全文两部分输出"
+  },
+  "bound_tools": [],
+  "task_types": ["DOC_ANNOTATE", "FILE_GEN"],
+  "enabled": true,
+  "prompt": "\n\n## 💼 领域要求：商务批注\n- 聚焦「语气是否专业」「结构是否清晰」「表达是否精准」三个维度\n- 标注过于口语化、产生歧义或可能引发误解的措辞，给出替代表达\n- 检查文档逻辑结构：开头目的是否明确、中间论据是否支撑结论、结尾行动项是否清晰\n- 对关键数据或承诺用「🔍 建议核实」标注，防止后期争议\n- 输出格式：批注表格（位置 | 原文 | 问题 | 建议） + 下方附修订版全文",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-07T00:00:00Z",
+  "tags": ["business", "annotation", "report", "email", "contract"]
+}

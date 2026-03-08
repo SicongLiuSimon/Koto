@@ -16,8 +16,12 @@ from web.reminder_manager import get_reminder_manager
 
 class CalendarManager:
     def __init__(self):
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(script_dir)
+        import sys
+        if getattr(sys, 'frozen', False):
+            project_root = os.path.dirname(sys.executable)
+        else:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(script_dir)
         self.project_root = project_root
         self.calendar_dir = os.path.join(project_root, 'workspace', 'calendar')
         os.makedirs(self.calendar_dir, exist_ok=True)

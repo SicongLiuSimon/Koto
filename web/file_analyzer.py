@@ -165,17 +165,31 @@ class FileAnalyzer:
         # 3.5 识别公司/项目实体
         entity_name, entity_type = self._extract_primary_entity(file_name, content)
         
-        # ★ AI 增强：规则置信度低时，用本地 Ollama 模型重新分类
+        # ★ AI 增强：只要提取到文件内容就用本地 Ollama 模型分类（不再受置信度门槛限制）
+        # 本地模型比关键词规则更准确；规则结果仅作兜底。
         ai_used = False
-        if confidence < 0.3:
-            ai_result = self._ai_classify(file_name, content, file_type)
-            if ai_result:
-                industry = ai_result.get("industry", industry)
-                category = ai_result.get("category", category)
-                confidence = ai_result.get("confidence", confidence)
-                ai_entity = ai_result.get("entity")
-                if ai_entity and not self._is_generic_name(ai_entity):
-                    entity_name = ai_entity
+        ai_result = self._ai_classify(file_name, content, file_type) if content else None
+        if ai_result:
+            industry = ai_result.get("industry", industry)
+            category = ai_result.get("category", category)
+            confidence = ai_result.get("confidence", confidence)
+            ai_entity = ai_result.get("entity")
+            if ai_entity and not self._is_generic_name(ai_entity):
+                entity_name = ai_entity
+                entity_type = "ai_extracted"
+            ai_used = True
+            # ── 保存训练样本（异步，不阻塞主流程）────────────────────────
+            self._save_training_sample(file_name, file_type, content, ai_result)
+        elif confidence < 0.3:
+            # 内容为空时才走原来的低置信兜底
+            ai_result2 = self._ai_classify(file_name, content, file_type)
+            if ai_result2:
+                industry = ai_result2.get("industry", industry)
+                category = ai_result2.get("category", category)
+                confidence = ai_result2.get("confidence", confidence)
+                ai_entity2 = ai_result2.get("entity")
+                if ai_entity2 and not self._is_generic_name(ai_entity2):
+                    entity_name = ai_entity2
                     entity_type = "ai_extracted"
                 ai_used = True
         
@@ -244,7 +258,7 @@ class FileAnalyzer:
                 
                 _client = _genai.Client(api_key=api_key)
                 resp = _client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model="gemini-2.0-flash-lite",
                     contents=f"{self.AI_CLASSIFY_PROMPT}\n\n{user_msg}",
                     config=_types.GenerateContentConfig(
                         temperature=0.0,
@@ -439,6 +453,53 @@ class FileAnalyzer:
         if re.fullmatch(r"[0-9_\-]+", cleaned):
             return True
         return False
+
+    def _save_training_sample(self, file_name: str, file_type: str, content: str, ai_result: dict) -> None:
+        """将 AI 分类结果保存为本地训练样本 (JSONL)，供后续微调使用。
+        同一文件名已存在则跳过（防止重复运行产生重复样本）。
+        """
+        try:
+            import json
+            from pathlib import Path as _P
+            from datetime import datetime as _dt
+
+            _train_dir = _P(__file__).parent.parent / "config" / "training_data"
+            _train_dir.mkdir(parents=True, exist_ok=True)
+            _train_file = _train_dir / "file_classify_samples.jsonl"
+
+            # ── 去重：若该文件名已存在样本则跳过 ──────────────────────────
+            if _train_file.exists():
+                _seen: set = set()
+                try:
+                    with open(_train_file, "r", encoding="utf-8") as _rf:
+                        for _line in _rf:
+                            _obj = json.loads(_line)
+                            # user 字段第一行 "文件名: <name>"
+                            _u = _obj.get("user", "")
+                            if _u.startswith("文件名: "):
+                                _seen.add(_u.split("\n", 1)[0][len("文件名: "):])
+                    if file_name in _seen:
+                        return  # 已有此文件的分类样本，跳过
+                except Exception:
+                    pass  # 去重失败时仍继续写入，宁可重复也不丢数据
+
+            content_preview = (content or "")[:600].strip()
+            sample = {
+                "system": (
+                    "你是文件分类专家。根据文件名和内容摘要，输出 JSON 分类结果，"
+                    "字段：industry, category, entity, confidence。"
+                ),
+                "user": f"文件名: {file_name}\n文件类型: {file_type}\n内容摘要: {content_preview}",
+                "assistant": json.dumps(ai_result, ensure_ascii=False),
+                "task_type": "FILE_CLASSIFY",
+                "source": "catalog_run",
+                "quality": float(ai_result.get("confidence", 0.7)),
+                "timestamp": _dt.now().isoformat(),
+            }
+            with open(_train_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        except Exception:
+            pass  # 训练样本写入失败不影响主流程
 
     def _sanitize_component(self, value: str) -> str:
         """Clean a path component to avoid invalid characters."""

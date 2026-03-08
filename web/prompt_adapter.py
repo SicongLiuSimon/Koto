@@ -87,17 +87,22 @@ class PromptAdapter:
 
     @staticmethod
     def _summarize_history(history: Optional[List[dict]], max_turns: int = 4) -> str:
-        if not history:
-            return ""
-        last_turns = []
-        for turn in history[-max_turns:]:
-            role = turn.get("role", "")
-            parts = " ".join(turn.get("parts", []))
-            if parts:
-                last_turns.append(f"- {role}: {parts[:120]}")
-        if not last_turns:
-            return ""
-        return "\n".join(last_turns)
+        """
+        [已禁用] 为了防止历史上下文干扰当前任务的独立解析，暂时禁用历史摘要注入。
+        解决问题：当用户提出新问题时，旧的历史（特别是长篇大论的回答）会误导模型，使其重复回答旧问题。
+        """
+        return ""
+        # if not history:
+        #     return ""
+        # last_turns = []
+        # for turn in history[-max_turns:]:
+        #     role = turn.get("role", "")
+        #     parts = " ".join(turn.get("parts", []))
+        #     if parts:
+        #         last_turns.append(f"- {role}: {parts[:120]}")
+        # if not last_turns:
+        #     return ""
+        # return "\n".join(last_turns)
 
     @staticmethod
     def _build_markdown(
@@ -121,20 +126,6 @@ class PromptAdapter:
             for item in items:
                 lines.append(f"- {item}")
 
-        # 追加结构化模板（让模型补全）
-        lines += [
-            "",
-            "## 任务结构化模板",
-            "- 目标：",
-            "- 背景：",
-            "- 输入：",
-            "- 输出：",
-            "- 约束：",
-            "- 注意事项：",
-            "- 步骤：",
-            "- 示例：",
-        ]
-
         return "\n".join(lines)
 
     @staticmethod
@@ -146,6 +137,9 @@ class PromptAdapter:
     ) -> str:
         """将用户请求转为结构化Markdown；如提供小模型则二次润色"""
         if not user_input or len(user_input.strip()) < 20:
+            return user_input
+        # CHAT 和 WEB_SEARCH 是直接问答型任务，不需要结构化包装
+        if task_type in ("CHAT", "WEB_SEARCH"):
             return user_input
         if PromptAdapter._has_markdown(user_input):
             return user_input

@@ -1,0 +1,29 @@
+{
+  "id": "file_smart_rename",
+  "name": "智能重命名",
+  "icon": "✏️",
+  "category": "domain",
+  "description": "批量将含糊文件名（如 IMG_001.jpg）改为语义化名称，规则可自定义，支持预览确认后执行",
+  "intent_description": "用户想批量重命名文件、整理照片命名、或让文件名更有意义时",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": ["→"],
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "输出「旧名 → 新名」对照表，用户确认后再执行"
+  },
+  "bound_tools": ["list_directory", "find_files", "file_info", "rename_file"],
+  "task_types": ["SYSTEM", "CHAT"],
+  "priority": 70,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## ✏️ 能力增强：智能文件重命名\n\n当用户要求重命名文件或整理文件名时，遵循以下流程：\n\n### 命名规则体系\n根据文件类型自动选择命名策略：\n- **图片**：`{日期}_{场景描述}_{序号}` → `20240101_三亚旅行_001.jpg`\n- **文档**：`{日期}_{类型}_{主题}` → `20240315_合同_某某公司_服务协议.docx`\n- **代码**：保持原名，仅去除特殊字符和空格\n- **视频/音频**：`{日期}_{内容描述}_{时长}` → `20240510_会议录音_45min.mp4`\n\n### 工作流程（必须遵守）\n1. **扫描目录**：调用 `list_directory` 获取目标文件列表\n2. **分析文件**：读取文件元信息（创建日期、大小、扩展名）\n3. **生成预览表**：以 Markdown 表格展示「原名 → 新名」映射，**等待用户确认**\n4. **执行重命名**：用户确认后，逐个调用 `rename_file` 工具执行\n5. **输出结果**：报告成功/失败数量，列出任何冲突文件名\n\n### 安全规则\n- **必须先预览，等用户说「确认」「执行」「ok」后才真正重命名**\n- 遇到同名冲突，自动添加 `_02`、`_03` 后缀，不覆盖\n- 用户可提供自定义规则：「按项目名+日期命名」「保留原前缀」等\n- 单次最多处理 200 个文件，超出时分批进行",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-08T00:00:00Z",
+  "tags": ["rename", "file", "batch", "organize", "重命名", "整理", "批量"]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "file_version_guardian",
+  "name": "文件版本守护",
+  "icon": "🛡️",
+  "category": "workflow",
+  "description": "用自然语言做版本控制：「回到昨天的版本」「比较两次修改差异」，保护重要文档不丢失",
+  "intent_description": "用户想撤销文档修改、查看历史版本、比较文件差异，或询问某个文件以前的内容",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [],
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "版本操作结果或差异比较报告"
+  },
+  "bound_tools": ["read_file", "file_info", "find_files", "list_directory"],
+  "task_types": ["SYSTEM", "CHAT"],
+  "priority": 62,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 🛡️ 能力增强：文件版本守护者\n\n当用户提到版本回退、文件历史、比较差异时，触发此能力：\n\n### 版本识别策略\nKoto 通过以下方式识别文件版本：\n1. **备份命名模式**：`文件名_20240101.docx`、`文件名_v2.docx`、`文件名_backup.docx`\n2. **时间戳目录**：`backups/` 或 `_archive/` 子目录中的旧版文件\n3. **系统快照**（Windows）：VSS 卷影副本（需管理员权限，谨慎使用）\n\n### 常见请求处理\n\n**「回到某个日期的版本」**\n1. 调用 `find_files` 搜索含时间戳的历史备份文件\n2. 找到最接近目标日期的版本，展示「找到版本：{文件名}_{日期}，修改时间：{时间}，大小：{大小}」\n3. 询问用户「是覆盖当前文件，还是另存为新版本？」\n4. **等待用户确认后**再执行操作\n\n**「比较两个版本的差异」**\n1. 读取两个文件的内容\n2. 以 diff 格式展示差异（+ 新增行 / - 删除行 / ~ 修改行）\n3. 给出自然语言摘要：「主要变化是在第 2 段新增了…，删除了…」\n\n**「列出历史版本」**\n1. 搜索该文件的所有历史备份\n2. 按时间倒序列出：日期 / 大小 / 文件位置\n\n### 主动保护建议\n- 当用户修改重要文档前，提示「是否先备份当前版本？」\n- 定期提醒：「距上次备份已超过 7 天，建议保存快照」\n\n### 注意事项\n- **不自动覆盖文件**，所有回退操作需用户确认\n- 原始文件回退前自动创建 `_before_restore_{timestamp}` 备份",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-08T00:00:00Z",
+  "tags": ["version", "backup", "restore", "diff", "版本", "回滚", "备份", "差异比较"]
+}

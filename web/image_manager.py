@@ -110,7 +110,7 @@ class ImageManager:
             # 回退链 2: Imagen 4.0 (高质量图像生成 API)
             # ========================================
             try:
-                model_name = "imagen-4.0-generate-preview-06-06"
+                model_name = "imagen-4.0-generate-001"
                 print(f"[ImageManager] 尝试模型: {model_name}")
                 response = self.client.models.generate_images(
                     model=model_name,
@@ -130,9 +130,9 @@ class ImageManager:
                 print(f"[ImageManager] ⚠️ {model_name} 失败: {e2}")
             
             # ========================================
-            # 回退链 3: Imagen 3.0 (旧版)
+            # 回退链 3: Imagen 4.0 其他备选
             # ========================================
-            for imagen_model in ["imagen-3.0-generate-002", "imagen-3.0-generate-001", "imagen-3.0-fast-generate-001"]:
+            for imagen_model in ["imagen-4.0-fast-generate-001", "imagen-4.0-ultra-generate-001"]:
                 try:
                     print(f"[ImageManager] 尝试模型: {imagen_model}")
                     response = self.client.models.generate_images(
@@ -155,7 +155,7 @@ class ImageManager:
             # ========================================
             # 回退链 4: Gemini 多模态图像生成
             # ========================================
-            for gemini_model in ["gemini-2.0-flash-preview-image-generation", "gemini-2.0-flash-exp"]:
+            for gemini_model in ["gemini-2.0-flash-exp-image-generation", "gemini-2.5-flash-image"]:
                 try:
                     print(f"[ImageManager] 尝试模型: {gemini_model}")
                     response = self.client.models.generate_content(

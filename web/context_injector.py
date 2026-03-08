@@ -156,10 +156,10 @@ class ContextSelector:
                 ContextType.WARNINGS,  # 系统警告
             ],
             TaskType.LEARNING: [
-                ContextType.TIME,  # 可能需要时间信息
+                # 学习/解释类问题不主动注入系统信息
             ],
             TaskType.GENERAL: [
-                ContextType.TIME,  # 最基础的时间信息
+                # 通用问题不主动注入系统信息，减少无关上下文
             ],
         }
     
@@ -433,11 +433,19 @@ class ContextInjector:
             注入了上下文的系统指令
         """
         # 确定任务类型和需要的上下文
+        # 置信度阈值：低于此值时降级为 GENERAL（不注入重量级系统信息）
+        _CONFIDENCE_THRESHOLD = 0.4
+
         if question:
             task_type, _confidence = self.classifier.classify(question)
+            # 置信度不足时降级，避免误判导致不必要的系统信息注入
+            if _confidence < _CONFIDENCE_THRESHOLD and task_type not in (
+                TaskType.SYSTEM_DIAGNOSIS, TaskType.SYSTEM_MANAGEMENT
+            ):
+                task_type = TaskType.GENERAL
         else:
             task_type = TaskType.GENERAL
-        
+
         context_types = self.selector.select_contexts(task_type)
         
         # 构建上下文
@@ -453,29 +461,25 @@ class ContextInjector:
 
 ## 👤 角色定位
 - 精通多个领域：编程、数据分析、写作、问题解决、系统管理
-- 充分了解用户的计算环境和当前状态
-- 快速理解用户意图，提供符合实际情境的答案
+- 能在需要时查询用户的计算环境状态
+- 快速理解用户意图，提供清晰、直接的答案
 - 充当用户与Windows系统的智能中介
 
 ## 📋 回答原则
 1. **简洁直接** - 不自我介绍，直接进入主题
 2. **优先中文** - 默认用中文回答，除非用户要求其他语言
 3. **清晰结构** - 使用标题、列表、代码块组织内容，便于快速理解
-4. **上下文感知** - 结合用户的系统状态给出建议
-5. **环境感知** - 了解当前 CPU、内存、磁盘状态，做出合适的建议
-6. **时间准确性** - 使用系统时间准确计算相对日期
-7. **禁止生成文件** - 仅在明确要求PDF/Word/Excel/PPT时才生成
+4. **按需引用系统信息** - 仅当用户明确询问系统状态、性能诊断或相关操作任务时，才引用 CPU/内存/磁盘数据；普通问答、学习解释、写作等场景**不主动提及**系统信息
+5. **时间准确性** - 使用系统时间准确计算相对日期
+6. **严格限制文件生成** - 绝对禁止主动生成任何文件（PPT/PDF/Word/Excel/Code）或使用了BEGIN_FILE标记，除非用户明确使用了"生成"、"创建"、"制作"等动词要求文件。对于"分析"、"解释"、"怎么做"等咨询类问题，仅提供纯文本回答。
 
 ## ✅ 能做的事
 - 帮助用户分析本地文件、文档、图片
 - 建议系统操作、自动化脚本、PowerShell命令
 - 理解文件路径、应用名称、快捷键等Windows内容
-- 根据当前系统状况给出性能优化建议
-- 基于磁盘剩余空间建议存储位置
-- 基于内存和 CPU 使用情况建议何时执行任务
 - 协助处理剪贴板、监听快捷键、系统设置
 - 联动本地应用（打开微信、邮件、浏览器等）
-- 进行系统诊断：如果用户反映电脑卡，可以分析当前 CPU/内存/磁盘情况
+- 进行系统诊断：**仅当**用户反映电脑卡顿或主动查询时，才分析 CPU/内存/磁盘情况
 - 准确理解和计算时间问题"""
 
 

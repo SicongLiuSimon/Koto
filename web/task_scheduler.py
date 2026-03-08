@@ -122,8 +122,12 @@ class TaskScheduler:
         self._worker_thread = None
         
         # 持久化文件
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(script_dir)
+        import sys as _sys_ts
+        if getattr(_sys_ts, 'frozen', False):
+            project_root = os.path.dirname(_sys_ts.executable)
+        else:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(script_dir)
         tasks_dir = os.path.join(project_root, 'workspace', 'tasks')
         os.makedirs(tasks_dir, exist_ok=True)
         self.tasks_file = os.path.join(tasks_dir, 'scheduled_tasks.json')

@@ -1,0 +1,208 @@
+# -*- coding: utf-8 -*-
+"""
+Koto Shadow Routes — 影子追踪 REST API
+=======================================
+挂载前缀: /api/shadow
+
+端点列表:
+  GET  /api/shadow/status           — 启用状态 + 统计摘要
+  POST /api/shadow/toggle           — 开启 / 关闭
+  GET  /api/shadow/observations     — 全部观察数据（调试用）
+  GET  /api/shadow/pending          — 待展示的主动消息
+  POST /api/shadow/dismiss/<id>     — 关闭单条消息
+  POST /api/shadow/dismiss-all      — 全部关闭
+  POST /api/shadow/tick             — 手动触发一次主动检查（测试用）
+  POST /api/shadow/reset            — 清空观察数据
+"""
+from __future__ import annotations
+
+import logging
+
+from flask import Blueprint, jsonify, request
+
+logger = logging.getLogger(__name__)
+
+shadow_bp = Blueprint("shadow", __name__, url_prefix="/api/shadow")
+
+
+def _ok(data=None, **kw):
+    body = {"ok": True}
+    if data is not None:
+        body["data"] = data
+    body.update(kw)
+    return jsonify(body)
+
+
+def _err(msg: str, code: int = 400):
+    return jsonify({"ok": False, "error": msg}), code
+
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+def _get_watcher():
+    from app.core.monitoring.shadow_watcher import get_shadow_watcher
+    return get_shadow_watcher()
+
+
+def _get_agent():
+    from app.core.agent.proactive_agent import get_proactive_agent
+    return get_proactive_agent()
+
+
+# ── 端点 ──────────────────────────────────────────────────────────────────────
+
+@shadow_bp.get("/status")
+def shadow_status():
+    """启用状态 + 观察摘要。"""
+    try:
+        obs = _get_watcher().get_observations()
+        topics = sorted(obs.get("topics", {}).items(), key=lambda x: -x[1])[:5]
+        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])[:5]
+        open_tasks = _get_watcher().get_open_tasks()
+        pending = _get_agent().pending()
+        return _ok({
+            "enabled": obs.get("enabled", True),
+            "total_observations": obs.get("total_observations", 0),
+            "last_seen": obs.get("last_seen"),
+            "streak_days": obs.get("streak", {}).get("days", 0),
+            "top_topics": [{"topic": k, "count": v} for k, v in topics],
+            "top_phrases": [{"phrase": k, "count": v} for k, v in phrases],
+            "open_tasks_count": len(open_tasks),
+            "pending_messages": len(pending),
+        })
+    except Exception as exc:
+        logger.exception("[shadow/status] error")
+        return _err(str(exc), 500)
+
+
+@shadow_bp.post("/toggle")
+def shadow_toggle():
+    """
+    Body: { "enabled": true | false }
+    或者 Body 为空时自动反转当前状态。
+    """
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        watcher = _get_watcher()
+        if "enabled" in body:
+            new_state = bool(body["enabled"])
+        else:
+            new_state = not watcher.enabled
+        watcher.set_enabled(new_state)
+        return _ok({"enabled": new_state})
+    except Exception as exc:
+        logger.exception("[shadow/toggle] error")
+        return _err(str(exc), 500)
+
+
+@shadow_bp.get("/observations")
+def shadow_observations():
+    """完整观察数据（适合调试面板）。"""
+    try:
+        obs = _get_watcher().get_observations()
+        return _ok(obs)
+    except Exception as exc:
+        return _err(str(exc), 500)
+
+
+@shadow_bp.get("/pending")
+def shadow_pending():
+    """前端轮询获取待展示的主动消息。"""
+    try:
+        msgs = _get_agent().pending()
+        return _ok(msgs)
+    except Exception as exc:
+        return _err(str(exc), 500)
+
+
+@shadow_bp.post("/dismiss/<msg_id>")
+def shadow_dismiss(msg_id: str):
+    """用户关闭单条主动消息。"""
+    try:
+        _get_agent().dismiss(msg_id)
+        return _ok({"dismissed": msg_id})
+    except Exception as exc:
+        return _err(str(exc), 500)
+
+
+@shadow_bp.post("/dismiss-all")
+def shadow_dismiss_all():
+    """全部关闭。"""
+    try:
+        _get_agent().dismiss_all()
+        return _ok({"dismissed": "all"})
+    except Exception as exc:
+        return _err(str(exc), 500)
+
+
+@shadow_bp.post("/tick")
+def shadow_tick():
+    """
+    手动触发一次主动消息检查（测试 / 调试用）。
+    可传 { "force": true } 跳过冷却时间检测。
+    """
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        force = bool(body.get("force", False))
+
+        agent = _get_agent()
+        if force:
+            # 清空冷却记录强制触发
+            agent._last_type_time.clear()
+
+        # 尝试获取 LLM 函数（可选）
+        llm_fn = None
+        try:
+            from web.app import client
+            from google.genai import types as _types
+
+            def _llm(prompt: str) -> str:
+                resp = client.models.generate_content(
+                    model="gemini-2.0-flash-lite",
+                    contents=prompt,
+                    config=_types.GenerateContentConfig(
+                        temperature=0.7, max_output_tokens=80
+                    ),
+                )
+                return resp.text or ""
+
+            llm_fn = _llm
+        except Exception:
+            pass  # run without LLM
+
+        agent.tick(llm_fn=llm_fn)
+        pending = agent.pending()
+        return _ok({"pending_count": len(pending), "messages": pending})
+    except Exception as exc:
+        logger.exception("[shadow/tick] error")
+        return _err(str(exc), 500)
+
+
+@shadow_bp.get("/open-tasks")
+def shadow_open_tasks():
+    """列出开放任务列表。"""
+    try:
+        tasks = _get_watcher().get_open_tasks()
+        return _ok(tasks)
+    except Exception as exc:
+        return _err(str(exc), 500)
+
+
+@shadow_bp.post("/dismiss-task/<task_id>")
+def shadow_dismiss_task(task_id: str):
+    """标记某个开放任务为已完成。"""
+    try:
+        _get_watcher().dismiss_task(task_id)
+        return _ok({"dismissed_task": task_id})
+    except Exception as exc:
+        return _err(str(exc), 500)
+
+
+@shadow_bp.post("/reset")
+def shadow_reset():
+    """清空所有观察数据（保留 enabled 状态）。"""
+    try:
+        _get_watcher().reset()
+        return _ok({"reset": True})
+    except Exception as exc:
+        return _err(str(exc), 500)

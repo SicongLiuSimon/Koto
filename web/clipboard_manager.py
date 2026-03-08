@@ -19,8 +19,12 @@ class ClipboardManager:
     
     def __init__(self, history_file: str = None, max_items: int = 50):
         if history_file is None:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(script_dir)
+            import sys
+            if getattr(sys, 'frozen', False):
+                project_root = os.path.dirname(sys.executable)
+            else:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                project_root = os.path.dirname(script_dir)
             clipboard_dir = os.path.join(project_root, 'workspace', 'clipboard')
             os.makedirs(clipboard_dir, exist_ok=True)
             history_file = os.path.join(clipboard_dir, 'history.json')

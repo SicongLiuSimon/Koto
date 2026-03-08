@@ -108,6 +108,9 @@ class SystemToolsPlugin(AgentPlugin):
 
         results: List[str] = []
         for pkg in pkg_list:
+            if getattr(sys, 'frozen', False):
+                results.append(f"❌ {pkg}: 打包版不支持安装新包，请联系开发者。")
+                continue
             try:
                 proc = subprocess.run(
                     [sys.executable, "-m", "pip", "install", pkg],

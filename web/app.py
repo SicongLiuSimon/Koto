@@ -357,6 +357,15 @@ def _extract_system_proxy_candidates() -> list:
     """Collect proxy candidates from system settings (Windows) and env."""
     candidates = []
 
+    # 0) User-configured manual proxy (highest priority after FORCE_PROXY)
+    try:
+        _us = settings_manager.get('proxy', 'enabled')
+        _um = settings_manager.get('proxy', 'manual_proxy') or ''
+        if _us is not False and _um.strip():
+            candidates.append(_normalize_proxy_url(_um.strip()))
+    except Exception:
+        pass
+
     # 1) Environment variables first (if user/system already configured)
     env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
     if env_proxy:
@@ -414,6 +423,16 @@ def setup_proxy():
         print(f"🔧 使用强制代理: {FORCE_PROXY}")
         return FORCE_PROXY
 
+    # 用户明确禁用代理时，清除环境变量并退出
+    try:
+        if settings_manager.get('proxy', 'enabled') is False:
+            os.environ.pop("HTTPS_PROXY", None)
+            os.environ.pop("HTTP_PROXY", None)
+            print("🔧 用户已禁用代理")
+            return None
+    except Exception:
+        pass
+
     # 自动匹配系统代理与本地常见端口
     import socket
     from urllib.parse import urlparse
@@ -470,7 +489,7 @@ threading.Thread(target=_warmup_proxy, daemon=True).start()
 def create_client():
     import httpx
     proxy = get_detected_proxy()
-    # 超时时间: 连接30秒, 读取180秒 (Nano Banana 图像生成和长文本生成需要更长时间)
+    # 超时时间: 连接30秒, 读取180秒 (图像生成和长文本生成需要更长时间)
     timeout_config = httpx.Timeout(180.0, connect=30.0)
     
     # 构建 http_options
@@ -492,52 +511,199 @@ def create_client():
         print(f"🔌 设置代理: {proxy}")
         
     # 使用 httpx with explicit proxy for genai
+    # 注意：HttpOptions 字段名为 httpx_client (snake_case)，不是 httpxClient
+    # 但实测显示：通过 env vars 设置代理比显式传入 httpx_client 更稳定（无 SSL 问题），
+    # 因此这里直接使用 timeout-only 的 httpx 客户端，代理由 env vars 自动接管
+    from google.genai._api_client import HttpOptions as _HttpOptions
     try:
-        if proxy:
-            http_client = httpx.Client(
-                proxy=proxy,
-                timeout=timeout_config,
-                verify=False  # SSL verification disabled with proxy
-            )
-            http_options['httpxClient'] = http_client
-        else:
-            # 无代理时也要配置超时
-            http_client = httpx.Client(
-                timeout=timeout_config,
-                verify=True
-            )
-            http_options['httpxClient'] = http_client
+        http_client = httpx.Client(
+            timeout=timeout_config,
+            verify=True
+        )
     except Exception as e:
-        print(f"⚠️ 创建 HTTP 客户端出错 (proxy={proxy}): {e}")
-        # 回退：不使用代理
-        if proxy:
-            print(f"⚠️ 尝试不使用代理重新创建客户端")
-            http_client = httpx.Client(
-                timeout=timeout_config,
-                verify=True
-            )
-            http_options['httpxClient'] = http_client
+        print(f"⚠️ 创建 HTTP 客户端出错: {e}")
+        http_client = httpx.Client(timeout=timeout_config)
+    
+    # 构建 HttpOptions 对象
+    opts_kwargs = dict(
+        api_version=http_options.get('api_version', 'v1beta'),
+        httpx_client=http_client,
+    )
+    if http_options.get('base_url'):
+        opts_kwargs['base_url'] = http_options['base_url']
     
     return genai.Client(
         api_key=API_KEY,
-        http_options=http_options if http_options else None
+        http_options=_HttpOptions(**opts_kwargs)
     )
 
-# 懒加载客户端
+# ── 本地模型配置读取 ──────────────────────────────────────────────────────
+def _get_local_model_config() -> tuple:
+    """
+    读取 user_settings.json，返回 (model_mode, local_model_tag)。
+    model_mode: "local" 或 "cloud"（默认 cloud）
+    local_model_tag: 如 "qwen2.5:7b" 或 None
+    """
+    try:
+        settings_path = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
+        with open(settings_path, "r", encoding="utf-8") as _f:
+            _data = json.load(_f)
+        mode = _data.get("model_mode", "cloud")
+        tag = _data.get("local_model")
+        return mode, tag
+    except Exception:
+        return "cloud", None
+
+
+# 懒加载客户端（mode+tag 作为缓存 key，切换模式后自动重建）
 _client = None
+_client_mode_key: tuple = (None, None)  # (model_mode, local_model_tag)
+
 
 def get_client():
-    """获取 GenAI 客户端（懒加载）"""
-    global _client
+    """
+    获取 AI 客户端（懒加载）。
+    - 若 user_settings.json 中 model_mode == "local"，返回 OllamaClientProxy
+    - 否则返回 Gemini genai.Client（原有行为）
+    """
+    global _client, _client_mode_key
+    model_mode, local_model = _get_local_model_config()
+    current_key = (model_mode, local_model)
+
+    # 模式或模型发生变化时，重置缓存
+    if _client is not None and _client_mode_key != current_key:
+        _client = None
+
     if _client is None:
-        _client = create_client()
+        if model_mode == "local" and local_model:
+            try:
+                from app.core.llm.ollama_provider import OllamaClientProxy
+                _client = OllamaClientProxy(model_tag=local_model)
+                print(f"[Koto] 🦙 使用本地模型: {local_model}")
+            except Exception as _e:
+                print(f"[Koto] ⚠️ Ollama 初始化失败，回退到 Gemini: {_e}")
+                _client = create_client()
+        else:
+            _client = create_client()
+        _client_mode_key = current_key
+
     return _client
+
+# ── Token 监测模块（本地统计，无需额外连接 Google）─────────────────────────
+try:
+    from token_tracker import record_usage as _record_token_usage
+    _TOKEN_TRACKER_ENABLED = True
+except ImportError:
+    _TOKEN_TRACKER_ENABLED = False
+    def _record_token_usage(*_a, **_kw): pass
+
+class _TrackedModels:
+    """拦截 client.models.generate_content，自动记录 token 用量"""
+
+    def __init__(self, real_models):
+        object.__setattr__(self, '_real', real_models)
+
+    def generate_content(self, model=None, *args, **kwargs):
+        # 新版 google-genai SDK：(*, model, contents, config) 全为关键字参数
+        # 不能将 model 作为位置参数传入，必须作为关键字参数传递
+        # 兼容旧式位置调用：如果 model 在 args 中，移到 kwargs
+        if model is None and args:
+            model, args = args[0], args[1:]
+        # 合并剩余位置参数到 kwargs（新 SDK 不接受位置参数，args 应始终为空）
+        real = object.__getattribute__(self, '_real')
+        response = real.generate_content(model=model, **kwargs)
+        if _TOKEN_TRACKER_ENABLED:
+            try:
+                usage = getattr(response, 'usage_metadata', None)
+                if usage:
+                    _record_token_usage(
+                        model=str(model or 'unknown'),
+                        prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
+                        completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
+                    )
+            except Exception:
+                pass
+        return response
+
+    def generate_content_stream(self, model=None, *args, **kwargs):
+        """拦截 generate_content_stream，记录最后一个 chunk 的 usage_metadata"""
+        if model is None and args:
+            model, args = args[0], args[1:]
+        real = object.__getattribute__(self, '_real')
+        stream = real.generate_content_stream(model=model, **kwargs)
+        _model_str = str(model or 'unknown')
+        for chunk in stream:
+            yield chunk
+            if _TOKEN_TRACKER_ENABLED:
+                try:
+                    usage = getattr(chunk, 'usage_metadata', None)
+                    if usage and (getattr(usage, 'prompt_token_count', 0) or 0) > 0:
+                        _record_token_usage(
+                            model=_model_str,
+                            prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
+                            completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
+                        )
+                except Exception:
+                    pass
+
+    def generate_images(self, model=None, *args, **kwargs):
+        """拦截 generate_images（Imagen），按图片数量记录合成 token 用量"""
+        if model is None and args:
+            model, args = args[0], args[1:]
+        real = object.__getattribute__(self, '_real')
+        response = real.generate_images(model=model, **kwargs)
+        if _TOKEN_TRACKER_ENABLED:
+            try:
+                # Imagen 按张计费，用合成 token 数换算（1000 tokens/张，配合定价表得出正确费用）
+                num_images = max(1, len(getattr(response, 'generated_images', []) or []))
+                _record_token_usage(
+                    model=str(model or 'unknown'),
+                    prompt_tokens=1000 * num_images,
+                    completion_tokens=0,
+                )
+            except Exception:
+                pass
+        return response
+
+    def embed_content(self, model=None, *args, **kwargs):
+        """拦截 embed_content（text-embedding-004 等），记录 embedding token 用量"""
+        if model is None and args:
+            model, args = args[0], args[1:]
+        real = object.__getattribute__(self, '_real')
+        response = real.embed_content(model=model, **kwargs)
+        if _TOKEN_TRACKER_ENABLED:
+            try:
+                usage = getattr(response, 'usage_metadata', None)
+                if usage:
+                    prompt_tokens = int(getattr(usage, 'prompt_token_count', 0) or 0)
+                else:
+                    # embed_content 并不总是返回 usage_metadata，按输入内容字符数估算
+                    contents = kwargs.get('contents', '') or ''
+                    if isinstance(contents, list):
+                        contents = ' '.join(str(c) for c in contents)
+                    prompt_tokens = max(1, len(str(contents)) // 4)  # 粗略估算 1 token ≈ 4 字符
+                _record_token_usage(
+                    model=str(model or 'unknown'),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=0,
+                )
+            except Exception:
+                pass
+        return response
+
+    def __getattr__(self, name):
+        real = object.__getattribute__(self, '_real')
+        return getattr(real, name)
+
 
 # 保持向后兼容的 client 变量（通过属性访问触发懒加载）
 class _ClientProxy:
     """代理类，实现懒加载"""
     def __getattr__(self, name):
-        return getattr(get_client(), name)
+        obj = getattr(get_client(), name)
+        if name == 'models':
+            return _TrackedModels(obj)
+        return obj
 
 client = _ClientProxy()
 
@@ -582,6 +748,84 @@ def create_research_client():
         api_key=API_KEY,
         http_options=http_options if http_options else None
     )
+
+
+def _call_interactions_api_sync(model_id: str, user_prompt: str, sys_instruction: str = None, timeout: float = 90.0) -> str:
+    """
+    通过 Interactions API 调用 gemini-3-*-preview 模型。
+    这些模型不支持 client.models.generate_content()，必须使用此端点。
+    ⚡ 本地模型模式下自动降级为 Ollama，跳过 Interactions API。
+
+    Args:
+        model_id: 模型 ID，如 "gemini-3-flash-preview"
+        user_prompt: 用户输入文本（已包含格式化内容）
+        sys_instruction: 系统指令（可选），将拼接到 input 前
+        timeout: 最大等待时间（秒）
+
+    Returns:
+        模型响应文本；失败时抛出异常
+    """
+    # ── 本地模型模式：用 Ollama 直接回答，无需 Interactions API ──
+    model_mode, _ = _get_local_model_config()
+    if model_mode == "local":
+        try:
+            full_prompt = user_prompt
+            if sys_instruction:
+                full_prompt = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{user_prompt}"
+            resp = get_client().models.generate_content(
+                model=model_id,
+                contents=full_prompt,
+            )
+            return getattr(resp, "text", "") or ""
+        except Exception as _e:
+            raise RuntimeError(f"本地模型 Interactions 降级失败: {_e}") from _e
+
+    rc = create_research_client()
+
+    full_input = user_prompt
+    if sys_instruction:
+        full_input = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{user_prompt}"
+
+    interaction = rc.interactions.create(
+        agent=model_id,
+        input=full_input[:80000],   # 支持大文档（gemini-3 上下文窗口 >1M tokens）
+        background=True,
+        stream=False,
+    )
+
+    interaction_id = getattr(interaction, "id", None)
+    status = getattr(interaction, "status", "")
+    start_wait = time.time()
+
+    while interaction_id and status not in ("completed", "failed", "cancelled") and (time.time() - start_wait) < timeout:
+        time.sleep(2)
+        interaction = rc.interactions.get(interaction_id)
+        status = getattr(interaction, "status", "")
+
+    if status not in ("completed", "failed", "cancelled"):
+        try:
+            rc.interactions.cancel(interaction_id)
+        except Exception:
+            pass
+        raise TimeoutError(f"Interactions API 超时 ({timeout}s) model={model_id}")
+
+    # 从 interaction 对象中提取文本
+    def _get_text_from_obj(obj):
+        if obj is None:
+            return ""
+        if isinstance(obj, str):
+            return obj
+        if hasattr(obj, "text") and obj.text:
+            return str(obj.text)
+        if hasattr(obj, "parts"):
+            return " ".join(str(p.text) for p in (obj.parts or []) if hasattr(p, "text") and p.text)
+        if hasattr(obj, "outputs"):
+            texts = [_get_text_from_obj(o) for o in (obj.outputs or [])]
+            return "\n".join(t for t in texts if t)
+        return ""
+
+    text = _get_text_from_obj(getattr(interaction, "outputs", None)) or _get_text_from_obj(interaction)
+    return text.strip()
 
 
 def run_with_timeout(fn, timeout_seconds):
@@ -730,6 +974,8 @@ def stream_with_keepalive(response_stream, start_time, keepalive_interval=5, max
 app = Flask(__name__)
 # 静态资源缓存，减少重复加载
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 3600
+# ✅ 允许最大 20MB 请求体（语音 base64 约 1-5MB，留足余量）
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024
 
 # CORS: 云模式限制来源，本地模式打开
 _cors_origins = os.environ.get('KOTO_CORS_ORIGINS', '*')
@@ -791,6 +1037,16 @@ def _register_blueprints_deferred():
             return
         _blueprints_registered = True
     
+    # 注册任务管理 API（任务台账 + 进度总线 + 打断控制）
+    try:
+        from app.api.task_routes import task_bp as _task_bp
+        app.register_blueprint(_task_bp, url_prefix='/api/tasks')
+        print("[TaskAPI] ✅ 任务管理 API 已注册: /api/tasks")
+    except ImportError as e:
+        print(f"[TaskAPI] ⚠️ 未能导入任务管理 API 蓝图: {e}")
+    except Exception as e:
+        print(f"[TaskAPI] ❌ 任务管理 API 注册失败: {e}")
+
     # 注册统一 Agent API
     try:
         from app.api import agent_bp as _agent_bp
@@ -801,6 +1057,49 @@ def _register_blueprints_deferred():
         print(f"[UnifiedAgent] ⚠️ 未能导入统一 Agent API 蓝图: {e}")
     except Exception as e:
         print(f"[UnifiedAgent] ❌ 注册失败: {e}")
+
+    # 注册 Skill CRUD + MCP 导出 API（Phase 2）
+    try:
+        from app.api.skill_routes import skill_bp as _skill_bp
+        app.register_blueprint(_skill_bp)
+        print("[SkillAPI] ✅ Skill CRUD API 已注册: /api/skills")
+    except ImportError as e:
+        print(f"[SkillAPI] ⚠️ 未能导入 Skill API 蓝图: {e}")
+    except Exception as e:
+        print(f"[SkillAPI] ❌ Skill API 注册失败: {e}")
+
+    # 注册 Skill Marketplace API（风格市场 + 自动构建 + 导入导出）
+    try:
+        from app.api.skill_marketplace_routes import marketplace_bp as _marketplace_bp
+        app.register_blueprint(_marketplace_bp)
+        print("[SkillMarket] ✅ Skill Marketplace API 已注册: /api/skillmarket")
+    except ImportError as e:
+        print(f"[SkillMarket] ⚠️ 未能导入 Skill Marketplace API 蓝图: {e}")
+    except Exception as e:
+        print(f"[SkillMarket] ❌ Skill Marketplace API 注册失败: {e}")
+
+    # 注册训练数据 API + LoRA 蒸馏训练 API
+    # 仅在开发机上启用（需设置环境变量 KOTO_DEV_TRAINING=1）
+    # 公共发行版不包含此功能，设备要求极高（≥16GB VRAM），普通用户无法使用
+    if os.environ.get("KOTO_DEV_TRAINING") == "1":
+        try:
+            from app.core.learning.training_data_builder import register_training_routes as _reg_training
+            _reg_training(app)
+        except ImportError as e:
+            print(f"[TrainingAPI] ⚠️ 未能导入训练数据模块: {e}")
+        except Exception as e:
+            print(f"[TrainingAPI] ❌ 训练数据 API 注册失败: {e}")
+
+        try:
+            from app.api.distill_routes import distill_bp as _distill_bp
+            app.register_blueprint(_distill_bp, url_prefix='/api/distill')
+            print("[DistillAPI] ✅ LoRA 蒸馏训练 API 已注册（开发模式）: /api/distill")
+        except ImportError as e:
+            print(f"[DistillAPI] ⚠️ 未能导入蒸馏训练模块: {e}")
+        except Exception as e:
+            print(f"[DistillAPI] ❌ 蒸馏训练 API 注册失败: {e}")
+    else:
+        print("[DistillAPI] ℹ️ LoRA 训练 API 已封存（公共版），如需启用请设置 KOTO_DEV_TRAINING=1")
     
     # 注册增强语音 API
     try:
@@ -830,10 +1129,144 @@ def _register_blueprints_deferred():
     except Exception as e:
         print(f"[AdaptiveAgent] ⚠️ 旧 Agent 初始化失败 (非致命): {e}")
     
+    # 注册长期目标 API（GoalManager: 跨天持续执行的委托任务）
+    try:
+        from app.api.goal_routes import goal_bp as _goal_bp
+        app.register_blueprint(_goal_bp, url_prefix='/api/goals')
+        print("[GoalAPI] ✅ 长期目标 API 已注册: /api/goals")
+    except ImportError as e:
+        print(f"[GoalAPI] ⚠️ 未能导入长期目标 API 蓝图: {e}")
+    except Exception as e:
+        print(f"[GoalAPI] ❌ 长期目标 API 注册失败: {e}")
+
+    # 注册文件 Hub API（FileRegistry + FileWatcher 统一接口）
+    try:
+        from app.api.file_hub_routes import file_hub_bp as _file_hub_bp
+        app.register_blueprint(_file_hub_bp, url_prefix='/api/files')
+        print("[FileHubAPI] ✅ 文件 Hub API 已注册: /api/files")
+    except ImportError as e:
+        print(f"[FileHubAPI] ⚠️ 未能导入文件 Hub 蓝图: {e}")
+    except Exception as e:
+        print(f"[FileHubAPI] ❌ 文件 Hub API 注册失败: {e}")
+
+    # 注册后台作业 API（JobRunner + TriggerRegistry）
+    try:
+        from app.api.job_routes import job_bp as _job_bp
+        app.register_blueprint(_job_bp)
+        print("[JobAPI] ✅ 后台作业 API 已注册: /api/jobs")
+    except ImportError as e:
+        print(f"[JobAPI] ⚠️ 未能导入作业 API 蓝图: {e}")
+    except Exception as e:
+        print(f"[JobAPI] ❌ 作业 API 注册失败: {e}")
+
+    # 注册运维健康 API（HealthSnapshot + RemediationPolicy + OpsEventBus）
+    try:
+        from app.api.ops_routes import ops_bp as _ops_bp
+        app.register_blueprint(_ops_bp)
+        print("[OpsAPI] ✅ 运维健康 API 已注册: /api/ops")
+    except ImportError as e:
+        print(f"[OpsAPI] ⚠️ 未能导入运维 API 蓝图: {e}")
+    except Exception as e:
+        print(f"[OpsAPI] ❌ 运维 API 注册失败: {e}")
+
+    # 注册影子追踪 API（ShadowWatcher + ProactiveAgent）
+    try:
+        from app.api.shadow_routes import shadow_bp as _shadow_bp
+        app.register_blueprint(_shadow_bp)
+        print("[ShadowAPI] ✅ 影子追踪 API 已注册: /api/shadow")
+    except ImportError as e:
+        print(f"[ShadowAPI] ⚠️ 未能导入影子追踪蓝图: {e}")
+    except Exception as e:
+        print(f"[ShadowAPI] ❌ 影子追踪 API 注册失败: {e}")
+
+    # 注册宏录制 API（MacroRecorder 主动建议）
+    try:
+        from app.api.macro_routes import macro_bp as _macro_bp
+        app.register_blueprint(_macro_bp)
+        print("[MacroAPI] ✅ 宏录制 API 已注册: /api/macro")
+    except ImportError as e:
+        print(f"[MacroAPI] ⚠️ 未能导入宏录制蓝图: {e}")
+    except Exception as e:
+        print(f"[MacroAPI] ❌ 宏录制 API 注册失败: {e}")
+
     print("[INIT] ✅ 所有蓝图注册完成")
 
-# 在后台线程中注册蓝图，不阻塞主线程
-threading.Thread(target=_register_blueprints_deferred, name="BlueprintLoader", daemon=True).start()
+
+def _initialize_background_runtime():
+    """Warm up long-running subsystems so jobs, triggers, and ops are live after startup."""
+    try:
+        time.sleep(1)
+
+        from app.core.ops.ops_event_bus import get_ops_bus
+        from app.core.jobs.job_runner import get_job_runner
+        from app.core.jobs.trigger_registry import get_trigger_registry
+        from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+
+        get_ops_bus()
+        runner = get_job_runner()
+        registry = get_trigger_registry()
+        bindings = get_skill_binding_manager()
+
+        # 初始化 GoalManager 并注册 goal_check 处理器
+        try:
+            from app.core.goal.goal_manager import get_goal_manager
+            from app.core.goal.goal_job_handler import register_goal_handler
+            _gm = get_goal_manager()
+            register_goal_handler(runner)
+            print(f"[GoalManager] ✅ 长期目标管理器已启动 (活跃目标: {_gm.count()} 条)")
+        except Exception as _ge:
+            print(f"[GoalManager] ⚠️ 初始化失败（非致命）: {_ge}")
+
+        # 初始化 FileRegistry 并启动 FileWatcher
+        try:
+            from app.core.file.file_registry import get_file_registry
+            from app.core.file.file_watcher import get_file_watcher
+            _fr = get_file_registry()
+            _fw = get_file_watcher()
+            _fw.start()
+            print(f"[FileHub] ✅ 文件注册表已启动 (已收录: {_fr.count()} 个文件)")
+        except Exception as _fe:
+            print(f"[FileHub] ⚠️ 文件模块初始化失败（非致命）: {_fe}")
+
+        print(
+            "[Runtime] ✅ 后台运行时已启动: "
+            f"job_runner={runner is not None}, "
+            f"triggers={len(registry.list_all())}, "
+            f"bindings={len(bindings.list_bindings())}"
+        )
+
+        # 注册 ShadowTracer 阈值 → DistillManager 自动提交训练（数据飞轮闭环）
+        try:
+            from app.core.learning.shadow_tracer import ShadowTracer, TraceEvent
+            from app.core.learning.distill_manager import DistillManager
+
+            def _on_training_ready(event: str, skill_id: str, count: int):
+                if event == TraceEvent.TRAINING_READY:
+                    print(f"[Flywheel] 🚀 skill={skill_id} 已积累 {count} 条优质记录，自动提交 LoRA 训练...")
+                    try:
+                        job_id = DistillManager.instance().submit(skill_id)
+                        print(f"[Flywheel] ✅ 训练任务已提交 job_id={job_id} skill={skill_id}")
+                    except Exception as _e:
+                        print(f"[Flywheel] ⚠️ 自动提交训练失败: {_e}")
+
+            ShadowTracer.add_listener(_on_training_ready)
+            print("[Flywheel] ✅ 数据飞轮监听器已注册（ShadowTracer → DistillManager）")
+        except Exception as _fe:
+            print(f"[Flywheel] ⚠️ 飞轮监听器注册失败（非致命）: {_fe}")
+
+    except Exception as exc:
+        print(f"[Runtime] ⚠️ 后台运行时初始化失败: {exc}")
+
+# 同步注册所有蓝图（必须在 app.run() 之前完成，否则 Flask 3.x 会在首次请求后拒绝注册）
+_register_blueprints_deferred()
+threading.Thread(target=_initialize_background_runtime, name="RuntimeBootstrap", daemon=True).start()
+
+# 后台预加载 Vosk 语音模型（减少首次识别延迟）
+try:
+    from web.voice_engine import preload as _voice_preload
+    _voice_preload()
+except Exception:
+    pass
 
 CHAT_DIR = os.path.join(PROJECT_ROOT, "chats")
 WORKSPACE_DIR = get_workspace_root()
@@ -849,97 +1282,105 @@ except ImportError:
     from web.settings import SettingsManager
 settings_manager = SettingsManager()
 
-# ================= 智能模型矩阵 (2026-01 最先进) =================
-# 使用 Gemini 3.0 系列 + Imagen 4.0 图像模型
+# ================= 动态模型管理器 =================
+# 自动从 API 发现可用模型并按任务类型智能匹配，无需手动维护模型列表。
+# 新模型上线后自动感知，TTL 缓存每 6 小时刷新一次。
 
+try:
+    from web.model_manager import ModelManager, KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
+    _model_manager_available = True
+except ImportError:
+    try:
+        from model_manager import ModelManager, KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
+        _model_manager_available = True
+    except ImportError:
+        _model_manager_available = False
+        ModelManager = None
+        _MODEL_REGISTRY = {}
+
+# 静态默认值（API 不可用时的兜底，也是启动时的初始值）
 MODEL_MAP = {
-    # 日常对话 - Gemini 3.0 Flash (快速响应)
-    "CHAT": "gemini-3-flash-preview",
-    
-    # 编程/代码 - Gemini 3.0 Pro, 但不稳定时回退
-    "CODER": "gemini-3-pro-preview",
-    
-    # 🌐 联网搜索 - Gemini 2.5 Flash (grounding 支持好)
-    "WEB_SEARCH": "gemini-2.5-flash", 
-    
-    # 视觉理解 - Gemini 3.0 Flash (多模态)
-    "VISION": "gemini-3-flash-preview",
-    
-    # 深度研究 - Gemini 3.0 Pro (稳定) - 原deep-research经常timeout
-    "RESEARCH": "gemini-3-pro-preview",
-    
-    # 文档生成 - 根据复杂度动态选择
-    "FILE_GEN": "gemini-3-flash-preview",
-    
-    # 🎨 图像生成 - Nano Banana Pro (原生图像生成)
-    "PAINTER": "nano-banana-pro-preview",
-    
-    # 🖥️ 系统操作 - 本地执行 (不需要模型)
-    "SYSTEM": "local-executor",
-    
-    # 📂 文件操作 - 本地文件系统
-    "FILE_OP": "local-executor",
-    
-    # 🤖 Agent 工具调用 - Gemini 3.0 Flash (function calling)
-    "AGENT": "gemini-3-flash-preview",
+    "CHAT":        "gemini-3-flash-preview",
+    "CODER":       "gemini-3-pro-preview",
+    "WEB_SEARCH":  "gemini-2.5-flash",
+    "VISION":      "gemini-3-flash-preview",
+    "RESEARCH":    "deep-research-pro-preview-12-2025",
+    "FILE_GEN":    "gemini-3-flash-preview",
+    "PAINTER":     "gemini-3.1-flash-image-preview",
+    "SYSTEM":      "local-executor",
+    "FILE_OP":     "local-executor",
+    "AGENT":       "gemini-3-flash-preview",
+    "FILE_SEARCH": "gemini-3-flash-preview",  # 文件搜索/整理始终 Flash
+    "DOC_ANNOTATE":"gemini-3-flash-preview",  # 标准标注 Flash，complex 时由 get_model_for_task 升级 Pro
+    "COMPLEX":     "gemini-3-pro-preview",    # 复杂度升级兜底：Pro
 }
 
-# 模型能力矩阵 (用于智能路由和显示)
+# ─── Interactions-API-only 模型（动态更新，静态默认兜底）──────────────────────
+# 这些模型不支持 client.models.generate_content()，必须走 Interactions API
+_INTERACTIONS_ONLY_MODELS = {
+    "gemini-3-flash-preview",
+    "gemini-3-pro-preview",
+}
+# 当 Interactions API 也失败时的最终降级模型
+_INTERACTIONS_FALLBACK_MODEL = "gemini-2.5-flash"
+
+# 全局模型管理器实例（后台初始化）
+_model_manager = None
+
+def _init_model_manager():
+    """
+    在后台线程中初始化动态模型管理器并更新全局路由表。
+    不阻塞主线程启动；路由表更新期间仍使用静态默认值。
+    """
+    global MODEL_MAP, _model_manager, _INTERACTIONS_ONLY_MODELS, _INTERACTIONS_FALLBACK_MODEL
+    if not _model_manager_available or ModelManager is None:
+        print("[ModelManager] 模块不可用，使用静态默认路由")
+        return
+    try:
+        print("[ModelManager] 🔍 正在发现可用模型...")
+        _model_manager = ModelManager(client)
+        dynamic_map = _model_manager.get_model_map()
+        MODEL_MAP.update(dynamic_map)
+        _INTERACTIONS_ONLY_MODELS = _model_manager.get_interactions_only_models()
+        _INTERACTIONS_FALLBACK_MODEL = _model_manager.get_fallback_model()
+        # 同步更新 SmartDispatcher 的 MODEL_MAP 引用
+        try:
+            SmartDispatcher._dependencies["MODEL_MAP"] = MODEL_MAP
+        except Exception:
+            pass
+        print(f"[ModelManager] ✅ 动态路由已加载: {len(dynamic_map)} 个任务")
+    except Exception as _me:
+        import traceback as _tb
+        print(f"[ModelManager] ⚠️ 动态路由初始化失败，使用静态默认值: {_me}")
+        _tb.print_exc()
+
+# 模型能力矩阵（用于显示，动态模型自动补充）
 MODEL_INFO = {
-    # Gemini 3.0 系列 (最新最强)
-    "gemini-3-pro-preview": {
-        "name": "Gemini 3.0 Pro",
-        "speed": "🚀",
-        "tier": 7,
-        "strengths": ["推理", "分析", "代码", "复杂任务"],
-    },
-    "gemini-3-flash-preview": {
-        "name": "Gemini 3.0 Flash",
-        "speed": "⚡",
-        "tier": 6,
-        "strengths": ["快速", "对话", "多模态"],
-    },
-    # Gemini 2.5 (grounding)
-    "gemini-2.5-flash": {
-        "name": "Gemini 2.5 Flash",
-        "speed": "🌐",
-        "tier": 5,
-        "strengths": ["联网搜索", "grounding"],
-    },
-    # 深度研究
-    "deep-research-pro-preview-12-2025": {
-        "name": "Deep Research Pro",
-        "speed": "🔬",
-        "tier": 7,
-        "strengths": ["深度研究", "学术分析", "综合报告"],
-    },
-    # 图像生成 (Nano Banana)
-    "nano-banana-pro-preview": {
-        "name": "Nano Banana Pro",
-        "speed": "🎨",
-        "tier": 5,
-        "strengths": ["图像生成", "创意绘画", "艺术风格"],
-    },
-    # Gemini 2.0 Flash Exp (图像生成备用)
-    "gemini-2.0-flash-exp": {
-        "name": "Gemini 2.0 Flash Exp",
-        "speed": "🎨",
-        "tier": 5,
-        "strengths": ["图像生成", "多模态", "实验功能"],
-    },
-    # 本地执行器
-    "local-executor": {
-        "name": "Local Executor",
-        "speed": "🖥️",
-        "tier": 0,
-        "strengths": ["系统操作", "打开应用", "文件管理"],
-    },
+    "gemini-3-pro-preview":              {"name": "Gemini 3.0 Pro",        "speed": "🚀", "tier": 7, "strengths": ["推理", "分析", "代码", "复杂任务"]},
+    "gemini-3-flash-preview":            {"name": "Gemini 3.0 Flash",      "speed": "⚡", "tier": 6, "strengths": ["快速", "对话", "多模态"]},
+    "gemini-2.5-flash":                  {"name": "Gemini 2.5 Flash",      "speed": "🌐", "tier": 5, "strengths": ["联网搜索", "grounding"]},
+    "gemini-2.5-flash-preview":          {"name": "Gemini 2.5 Flash Preview","speed": "🌐", "tier": 5, "strengths": ["联网搜索", "grounding"]},
+    "gemini-2.5-pro-preview":            {"name": "Gemini 2.5 Pro",        "speed": "🎯", "tier": 6, "strengths": ["推理", "代码", "分析"]},
+    "deep-research-pro-preview-12-2025": {"name": "Deep Research Pro",     "speed": "🔬", "tier": 7, "strengths": ["深度研究", "学术分析", "综合报告"]},
+    "gemini-3.1-flash-image-preview":    {"name": "Gemini 3.1 Flash Image","speed": "🎨", "tier": 6, "strengths": ["图像生成", "创意绘画", "艺术风格"]},
+    "gemini-2.0-flash-exp":              {"name": "Gemini 2.0 Flash Exp",  "speed": "🧪", "tier": 5, "strengths": ["图像生成", "多模态", "实验功能"]},
+    "gemini-2.0-flash":                  {"name": "Gemini 2.0 Flash",      "speed": "⚡", "tier": 5, "strengths": ["快速", "多模态"]},
+    "gemini-1.5-pro":                    {"name": "Gemini 1.5 Pro",        "speed": "📚", "tier": 5, "strengths": ["长上下文", "推理"]},
+    "gemini-1.5-flash":                  {"name": "Gemini 1.5 Flash",      "speed": "⚡", "tier": 4, "strengths": ["快速", "经济"]},
+    "local-executor":                    {"name": "Local Executor",        "speed": "🖥️", "tier": 0, "strengths": ["系统操作", "打开应用", "文件管理"]},
 }
 
 def get_model_display_name(model_id):
+    """获取模型友好显示名称；动态发现的新模型自动从能力注册表补充。"""
     info = MODEL_INFO.get(model_id)
     if info:
         return f"{info['name']} {info['speed']}"
+    # 动态模型：从 ModelManager 能力缓存获取
+    if _model_manager:
+        caps = _model_manager._cached_caps.get(model_id)
+        if caps and caps.get("display"):
+            return caps["display"]
+    # 未知模型：直接展示 ID
     return model_id
 
 
@@ -1884,6 +2325,10 @@ class WebSearcher:
         "比分", "比赛结果", "谁赢了",
         # 新闻（只匹配明确的新闻请求）
         "今天新闻", "最新新闻", "latest news",
+        # 交通出行票务（高置信 — 余票/时刻表实时变化）
+        "火车票", "高铁票", "动车票", "机票", "余票", "班次查询",
+        "车次查询", "时刻表", "列车时刻", "航班查询", "航班动态",
+        "几点出发", "几点到", "几点到达", "多久到", "要多久",
     ]
     
     @classmethod
@@ -1907,6 +2352,11 @@ class WebSearcher:
             r'(突发|紧急|最新)\w*事件',  # 突发事件
             r'(当前|今日|实时|最新).*?(金价|黄金)',  # 黄金实时行情
             r'(金价|黄金).*?(多少|报价|走势|行情)',  # 金价查询
+            # 交通出行——余票/时刻均实时变化
+            r'(查|看|查询|查一下|有没有|有无|还有).{0,6}(火车票|高铁票|动车票|机票|余票)',
+            r'(下周|明天|后天|今天|大后天|\d+[号日]).{0,12}(去|到|从).{0,12}(的|要).{0,5}(票|高铁|动车|火车|航班)',
+            r'(去|从).{1,12}(去|到).{1,18}(火车|高铁|动车|机票|班次|航班)',
+            r'(几点|什么时候).{0,6}(出发|到|到达|抵达).{0,12}(班|次|票|车|机)',
         ]
         
         import re
@@ -1921,8 +2371,89 @@ class WebSearcher:
         return False
     
     @classmethod
-    def search_with_grounding(cls, query):
-        """使用 Gemini Google Search Grounding 进行实时搜索"""
+    def _detect_query_type(cls, query: str) -> str:
+        """检测搜索查询的意图类型，返回: travel / weather / finance / news / general"""
+        q = query.lower()
+        travel_kw = [
+            '火车票', '高铁票', '动车票', '机票', '余票', '班次', '车次',
+            '时刻表', '列车时刻', '列车', '高铁', '动车', '航班', '航班动态',
+            '几点到', '几点出发', '几点抵达', '要多久', '多久到',
+        ]
+        if any(kw in q for kw in travel_kw):
+            return 'travel'
+        weather_kw = ['天气', '气温', '下雨', '下雪', '温度', 'weather', 'forecast', '天气预报']
+        if any(kw in q for kw in weather_kw):
+            return 'weather'
+        finance_kw = ['股价', '股票', '汇率', '比特币', '黄金', '金价', '行情', '基金', '石油', '原油']
+        if any(kw in q for kw in finance_kw):
+            return 'finance'
+        return 'general'
+
+    @classmethod
+    def _build_search_context(cls, query: str, query_type: str) -> tuple:
+        """根据查询类型返回 (enriched_query, system_instruction)"""
+        if query_type == 'travel':
+            instruction = (
+                "你是 Koto，一个智能出行助手。用户在查询交通出行信息（高铁/火车/动车/机票等）。\n"
+                "请基于搜索结果，按以下格式输出（用 Markdown）：\n\n"
+                "1. 先用一句话说明查询的出发日期和路线（如有）。\n"
+                "2. 用 **Markdown 表格** 列出主要班次，列标题为：\n"
+                "   | 班次 | 出发站 | 到达站 | 出发时间 | 到达时间 | 历时 | 二等座 | 一等座 |\n"
+                "   至少列出 5 个代表性班次（早、中、晚各时段）。\n"
+                "3. 表格后，提醒用户前往 12306 或铁路官方渠道查看实时余票并购票。\n"
+                "4. 若搜索结果信息不足，请尽量根据已知班次填写，并注明「以下为参考班次，请以12306实时信息为准」。\n"
+                "用中文输出，格式整洁，突出关键数据。"
+            )
+            return query, instruction
+        elif query_type == 'weather':
+            instruction = (
+                "你是 Koto，一个智能助手。请根据搜索结果提供准确的天气信息。\n"
+                "格式要求：\n"
+                "1. 当前气温和天气状况\n"
+                "2. 今日最高 / 最低气温\n"
+                "3. 未来 3 天天气（如果有）\n"
+                "4. 简短的出行或着装建议\n"
+                "用中文输出，简洁清晰。"
+            )
+            return query, instruction
+        elif query_type == 'finance':
+            instruction = (
+                "你是 Koto，一个智能助手。请根据搜索结果提供准确的金融行情信息。\n"
+                "格式要求：\n"
+                "1. 当前价格 / 价值及所属市场\n"
+                "2. 今日涨跌幅（如有）\n"
+                "3. 近期走势简析（1-2 句）\n"
+                "用中文输出，简洁专业。"
+            )
+            return query, instruction
+        else:
+            instruction = (
+                "你是 Koto，一个智能助手。使用搜索结果提供准确、实时的信息。"
+                "用中文回答，格式清晰，关键数据用 Markdown 列表或加粗呈现。"
+            )
+            return query, instruction
+
+    @classmethod
+    def search_with_grounding(cls, query, skill_prompt=None):
+        """使用 Gemini Google Search Grounding 进行实时搜索（意图感知版本）
+
+        skill_prompt: 来自本地/AI路由器生成的执行指令。
+          - 若提供，直接用作 system_instruction（正确理解用户意图）
+          - 若未提供，回退到关键词检测分支（保指安全下线）
+        """
+        # 1. 优先使用模型生成的 skill_prompt
+        if skill_prompt and len(skill_prompt.strip()) > 5:
+            system_instruction = (
+                "你是 Koto，一个智能助手。请使用搜索结果提供准确、实时的信息。\n"
+                f"{skill_prompt}\n"
+                "用中文回答，格式整洁清晰。"
+            )
+            print(f"[WebSearcher] 使用 skill_prompt: {skill_prompt[:60]}")
+        else:
+            # 2. 回退：关键词检测 + 分类 system_instruction
+            query_type = cls._detect_query_type(query)
+            _, system_instruction = cls._build_search_context(query, query_type)
+            print(f"[WebSearcher] 关键词检测备用: {query_type}")
         try:
             # 使用 Google Search 作为工具
             response = client.models.generate_content(
@@ -1930,7 +2461,7 @@ class WebSearcher:
                 contents=query,
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],
-                    system_instruction="你是 Koto，一个智能助手。使用搜索结果提供准确、实时的信息。用中文回答，格式清晰。"
+                    system_instruction=system_instruction
                 )
             )
             
@@ -1955,7 +2486,7 @@ class WebSearcher:
     
     @classmethod
     def generate_ppt_images(cls, slide_titles: list, topic: str, max_images: int = 3) -> list:
-        """为 PPT 幻灯片生成配图（使用 Imagen / Nano Banana）
+        """为 PPT 幻灯片生成配图（使用 Imagen / Gemini 图像模型）
         
         从幻灯片标题中挑选最适合配图的 2-3 页，生成高质量配图。
         返回: [{"slide_index": int, "image_path": str}, ...]
@@ -2014,12 +2545,12 @@ class WebSearcher:
             result_q = _queue.Queue()
             
             def _gen_image(p, q):
-                # ① 首选: Nano Banana Pro（Koto 指定的图像生成模型）
+                # ① 首选: Gemini 3.1 Flash Image
                 try:
                     res = client.models.generate_content(
-                        model="nano-banana-pro-preview",
+                        model="gemini-3.1-flash-image-preview",
                         contents=p,
-                        config=types.GenerateContentConfig(response_modalities=["IMAGE"])
+                        config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"])
                     )
                     if res.candidates and res.candidates[0].content.parts:
                         for part in res.candidates[0].content.parts:
@@ -2027,12 +2558,12 @@ class WebSearcher:
                                 q.put(("success", part.inline_data.data))
                                 return
                 except Exception as e0:
-                    print(f"[PPT-IMAGE] Nano Banana 失败: {e0}")
+                    print(f"[PPT-IMAGE] Gemini 3.1 Flash Image 失败: {e0}")
                 
-                # ② 备选: Imagen 4.0（高质量图像生成 API）
+                # ② 备选: Imagen 4.0
                 try:
                     res = client.models.generate_images(
-                        model="imagen-4.0-generate-preview-06-06",
+                        model="imagen-4.0-generate-001",
                         prompt=p,
                         config=types.GenerateImagesConfig(number_of_images=1)
                     )
@@ -2042,25 +2573,23 @@ class WebSearcher:
                 except Exception as e1:
                     print(f"[PPT-IMAGE] Imagen 4.0 失败: {e1}")
                 
-                # ③ 最后备选: Gemini 多模态图像生成
+                # ③ 最后备选: Imagen 4.0 Fast
                 try:
-                    res2 = client.models.generate_content(
-                        model="gemini-2.0-flash-preview-image-generation",
-                        contents=f"Generate an image: {p}",
-                        config=types.GenerateContentConfig(response_modalities=["IMAGE", "TEXT"])
+                    res2 = client.models.generate_images(
+                        model="imagen-4.0-fast-generate-001",
+                        prompt=p,
+                        config=types.GenerateImagesConfig(number_of_images=1)
                     )
-                    if res2.candidates and res2.candidates[0].content.parts:
-                        for part in res2.candidates[0].content.parts:
-                            if hasattr(part, "inline_data") and part.inline_data and part.inline_data.data:
-                                q.put(("success", part.inline_data.data))
-                                return
+                    if res2.generated_images:
+                        q.put(("success", res2.generated_images[0].image.image_bytes))
+                        return
                 except Exception as e2:
-                    print(f"[PPT-IMAGE] Gemini 多模态也失败: {e2}")
+                    print(f"[PPT-IMAGE] Imagen 4.0 Fast 也失败: {e2}")
                 q.put(("fail", None))
             
             thread = threading.Thread(target=_gen_image, args=(full_prompt, result_q), daemon=True)
             thread.start()
-            thread.join(timeout=90)  # Nano Banana 可能较慢，给足时间
+            thread.join(timeout=120)  # Gemini 图像生成可能较慢，给足时间
             
             try:
                 status, data = result_q.get_nowait()
@@ -2103,10 +2632,99 @@ class WebSearcher:
         )
         if search_context:
             research_prompt += f"\n已有的搜索参考资料：\n{search_context[:8000]}\n"
+
+        def _extract_text_from_obj(obj) -> list[str]:
+            texts = []
+            if obj is None:
+                return texts
+            if isinstance(obj, str):
+                s = obj.strip()
+                if s:
+                    texts.append(s)
+                return texts
+            if isinstance(obj, dict):
+                for key in ("output_text", "text"):
+                    val = obj.get(key)
+                    if isinstance(val, str) and val.strip():
+                        texts.append(val.strip())
+                for val in obj.values():
+                    texts.extend(_extract_text_from_obj(val))
+                return texts
+            if isinstance(obj, (list, tuple)):
+                for item in obj:
+                    texts.extend(_extract_text_from_obj(item))
+                return texts
+            if hasattr(obj, "model_dump"):
+                try:
+                    texts.extend(_extract_text_from_obj(obj.model_dump()))
+                    return texts
+                except Exception:
+                    pass
+            return texts
+
+        def _extract_interaction_text(interaction_obj) -> str:
+            if not interaction_obj:
+                return ""
+            parts = _extract_text_from_obj(getattr(interaction_obj, "outputs", None))
+            if not parts:
+                parts = _extract_text_from_obj(interaction_obj)
+            dedup = []
+            seen = set()
+            for part in parts:
+                if part not in seen:
+                    dedup.append(part)
+                    seen.add(part)
+            return "\n".join(dedup).strip()
+
+        # 深度研究专用：Interactions API（deep-research-pro-preview-*）
+        preferred_model = MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025")
+        if preferred_model.startswith("deep-research-pro-preview"):
+            try:
+                research_client = create_research_client()
+                interaction = research_client.interactions.create(
+                    agent=preferred_model,
+                    input=research_prompt,
+                    background=True,
+                    stream=False,
+                )
+                interaction_id = getattr(interaction, "id", None)
+                status = getattr(interaction, "status", "")
+                start_wait = time.time()
+                max_wait_time = 180  # 限制最大等待时间为 3 分钟
+                
+                while interaction_id and status not in ("completed", "failed", "cancelled") and (time.time() - start_wait) < max_wait_time:
+                    time.sleep(3)
+                    interaction = research_client.interactions.get(interaction_id)
+                    status = getattr(interaction, "status", "")
+
+                if status not in ("completed", "failed", "cancelled"):
+                    print(f"[PPT-RESEARCH] ⚠️ Interactions 超时 ({max_wait_time}s)，尝试取消并回退")
+                    try:
+                        research_client.interactions.cancel(interaction_id)
+                    except Exception:
+                        pass
+                else:
+                    text = _extract_interaction_text(interaction)
+                    if text and len(text) > 200:
+                        print(f"[PPT-RESEARCH] ✅ 深度研究完成 ({preferred_model}), {len(text)} 字符")
+                        return text
+                    print(f"[PPT-RESEARCH] ⚠️ Interactions 返回空结果或过短，status={status}")
+            except Exception as inter_err:
+                print(f"[PPT-RESEARCH] Interactions 失败: {inter_err}")
         
-        research_models = ["gemini-3-pro-preview", "gemini-2.5-flash"]
+        print(f"[PPT-RESEARCH] 🔄 切换到备用模型进行研究...")
+        research_models = [
+            MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025"),
+            "gemini-3-pro-preview",
+            "gemini-2.5-flash",
+        ]
+        # 去重并去空，保持顺序
+        research_models = [m for i, m in enumerate(research_models) if m and m not in research_models[:i]]
         for model in research_models:
             try:
+                # deep-research 和 gemini-3-preview 仅支持 Interactions API，不走 generate_content
+                if model.startswith("deep-research-pro-preview") or model in _INTERACTIONS_ONLY_MODELS:
+                    continue
                 resp = client.models.generate_content(
                     model=model,
                     contents=research_prompt,
@@ -2125,6 +2743,15 @@ class WebSearcher:
 
 # === System Instruction ===
 # 简化版系统指令 - 用于CHAT/RESEARCH等非文件生成任务
+# 任务专属 system prompt 补充片段（在 chat_stream 确定 task_type 后追加）
+_TASK_SYSTEM_ADDENDUMS: dict = {
+    "CODER":      "\n\n## 🔧 代码任务规范\n- 直接给出可运行代码，不加废话前言\n- 使用代码块（```语言）包裹\n- 必要时说明运行方式，但不超过3行",
+    "RESEARCH":   "\n\n## 🔍 研究任务规范\n- 必须分段：摘要 → 正文 → 小结\n- 给出信息来源或推理依据\n- 避免模糊表述，用具体数据或例子",
+    "FILE_GEN":   "\n\n## 📄 文件生成规范\n- 严格使用 ---BEGIN_FILE: filename.ext--- / ---END_FILE--- 标记\n- 代码必须完整可执行，不允许省略号或 placeholder\n- 生成完成后告知保存路径",
+    "DOC_ANNOTATE": "\n\n## 📝 文档批注规范\n- 批注定位精确，引用原文片段\n- 修改建议简洁，不改变原文意图\n- 按重要性排序（严重 → 建议 → 细节）",
+}
+
+
 def _get_chat_system_instruction(question: str = None):
     """
     生成包含当前日期时间和系统状态的系统指令
@@ -2219,14 +2846,14 @@ def _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION():
         return "你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。精通多个领域，快速理解用户意图，提供符合实际情境的答案。"
 
 def _get_system_instruction():
-    """生成包含当前日期时间的文档生成系统指令"""
+    """生成包含当前日期时间的文档生成系统指令（含 Skills 注入）"""
     from datetime import datetime
-    
+
     now = datetime.now()
     date_str = now.strftime("%Y年%m月%d日")
     weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()]
     
-    return f"""你是 Koto 文档生成专家，专注于生成高质量、可用的文档。
+    _base_filegen = f"""你是 Koto 文档生成专家，专注于生成高质量、可用的文档。
 
 ## 当前时间上下文
 📅 **生成日期**: {date_str} {weekday}
@@ -2279,6 +2906,12 @@ def _get_system_instruction():
 2. 内容准确、结构清晰 > 输出格式完美
 3. 实际可执行性 > 审美程度
 """
+    # 注入 FILE_GEN 相关的 Skills
+    try:
+        from app.core.skills.skill_manager import SkillManager
+        return SkillManager.inject_into_prompt(_base_filegen, task_type="FILE_GEN")
+    except Exception:
+        return _base_filegen
 
 # SYSTEM_INSTRUCTION 不再在模块加载时构建，改为按需调用 _get_system_instruction()
 # SYSTEM_INSTRUCTION = _get_system_instruction()
@@ -2482,6 +3115,18 @@ class ContextAnalyzer:
             "require_start": True,  # 需要在句首出现
             "prompt_template": "用户引用了之前的内容：{reference}"
         },
+        "reference_loose": {
+            # 引用类（宽松）：用于计划/大纲/方案等需要跟随之前内容的请求
+            "indicators": [
+                "这个计划", "该计划", "上述计划", "上面的计划",
+                "这个方案", "该方案", "上述方案", "这个大纲", "该大纲",
+                "这个ppt", "该ppt", "这个PPT", "该PPT",
+                "按照这个", "根据这个"
+            ],
+            "weight": 0.78,
+            "require_start": False,
+            "prompt_template": "用户引用了之前的计划或大纲：{reference}"
+        },
         "convert": {
             # 转换类：明确的格式转换请求
             "indicators": ["做成word", "做成pdf", "做成excel", "转成word", "转成pdf", "变成文档", "导出为", "保存为word", "保存为pdf"],
@@ -2651,6 +3296,13 @@ class ContextAnalyzer:
             if len(output) > 4000:
                 output = output[:4000] + "\n...(内容已截断)"
             prompt_parts.append(f"\n[需要转换的源内容:]\n{output}")
+
+        # 7. 如果是引用类延续，附上最近输出摘要
+        if continuation_type in ("reference", "reference_loose") and context_summary.get("last_model_output"):
+            output = context_summary["last_model_output"]
+            if len(output) > 2000:
+                output = output[:2000] + "\n...(内容已截断)"
+            prompt_parts.append(f"\n[最近输出摘要:]\n{output}")
         
         # 组合成最终的增强提示
         enhanced_prompt = "\n".join(prompt_parts)
@@ -2834,21 +3486,28 @@ class ContextAnalyzer:
 
         # 始终保留最近 3 轮对话（确保上下文连贯）
         tail_count = 6
-        tail = history[-tail_count:] if len(history) >= tail_count else history
+        tail_start_index = max(0, len(history) - tail_count)
+        
+        # 收集需要保留的索引
+        indices_to_keep = set()
+        
+        # 1. 关键词匹配的历史
+        for i, turn in enumerate(history):
+            content = (turn.get("parts") or [""])[0]
+            content_lower = content.lower()
+            if any(k in content_lower for k in keyword_set if k):
+                indices_to_keep.add(i)
+                # 同时保留该条的前一条（如果是User/Model配对）
+                if i > 0: indices_to_keep.add(i-1)
+        
+        # 2. 也是最重要的：保留尾部上下文
+        for i in range(tail_start_index, len(history)):
+            indices_to_keep.add(i)
 
-        if not relevant:
-            # 没有匹配时，保留最近 4 轮（最多 8 条）作为兜底上下文
-            fallback_count = 8
-            return history[-fallback_count:] if len(history) >= fallback_count else history
-
-        # 合并相关历史 + 尾部对话，保持顺序并去重
-        merged = []
-        seen = set()
-        for turn in relevant + tail:
-            key = f"{turn.get('role','')}-{(turn.get('parts') or [''])[0]}"
-            if key not in seen:
-                seen.add(key)
-                merged.append(turn)
+        # 按原始顺序重组
+        filtered_history = [history[i] for i in sorted(indices_to_keep)]
+        
+        return filtered_history
 
         # 只保留最近 keep_turns 轮
         return merged[-keep_turns * 2:]
@@ -3002,13 +3661,16 @@ class TaskOrchestrator:
     @classmethod
     async def _execute_ppt_multi_step(cls, user_input: str, context: dict, subtask: dict, progress_callback=None) -> dict:
         """执行多阶段PPT生成任务 (Plan-then-Execute)"""
+        from web.smart_feedback import SmartFeedback
+        fb = SmartFeedback(user_request=user_input, task_type="PPT", emit=lambda m, d: None, total_steps=3)
         
         def _report(msg: str, detail: str = ""):
             print(f"[PPT_PROGRESS] {msg} | {detail}")
             if progress_callback:
                 progress_callback(msg, detail)
         
-        _report("开始多阶段PPT生成流程...", "阶段 1/3: 智能规划")
+        m, d = fb.start("多阶段PPT生成")
+        _report(m, d)
         previous_data = context.get(f"step_{subtask['index']}_output", "")
         
         # 1. 规划阶段 (Planning Phase)
@@ -3019,7 +3681,7 @@ class TaskOrchestrator:
             planner = PPTContentPlanner(ai_client=client, model_name="gemini-2.5-flash")
             
             # 执行规划
-            _report("正在规划内容结构...", "调用 AI 生成大纲")
+            _report("正在规划内容结构...", "调用 AI 规划大纲")
             plan_result = await planner.plan_content_structure(user_input, search_results=None)
             
             # 提取大纲
@@ -3086,8 +3748,24 @@ class TaskOrchestrator:
             if not ppt_slides:
                 raise ValueError("规划器未生成有效幻灯片大纲")
 
-            # --- 2.5 验证阶段 (User Requirement: Model Verification) ---
-            _report("正在验证生成内容...", "阶段 2.5/3: 质量自检")
+            # --- 2.5 质量自检与内容清洗 ---
+            _report("正在进行质量自检与内容清洗...", "阶段 2.5/3: 质量门控")
+            try:
+                from web.file_quality_checker import FileQualityGate
+                qg_result = FileQualityGate.check_and_fix_ppt_outline(
+                    ppt_slides, user_request=user_input, progress_callback=_report
+                )
+                ppt_slides = qg_result['outline']
+                _qg_score = qg_result['quality']['score']
+                _qg_fixes = qg_result['fixes']
+                if _qg_fixes:
+                    _report(f"🧹 已清洗 {len(_qg_fixes)} 处内容问题", "")
+                _report(f"{'✅' if _qg_score >= 60 else '⚠️'} 质量评分: {_qg_score}/100",
+                        "; ".join(qg_result['quality']['issues'][:3]) if qg_result['quality']['issues'] else "质量良好")
+            except Exception as qg_err:
+                print(f"[PPT] ⚠️ 质量门控异常: {qg_err}")
+
+            # AI 验证
             try:
                 verify_prompt = (
                     f"请作为质检员检查生成的PPT内容是否符合用户需求。\n"
@@ -3100,9 +3778,9 @@ class TaskOrchestrator:
                     contents=verify_prompt
                 ))
                 if verify_resp and verify_resp.text:
-                    _report("✅ 验证通过", f"模型点评: {verify_resp.text.strip()[:60]}...")
+                    _report("✅ AI 验证通过", f"模型点评: {verify_resp.text.strip()[:60]}...")
             except Exception as v_err:
-                _report("⚠️ 验证跳过 (非致命)", str(v_err))
+                _report("⚠️ AI 验证跳过 (非致命)", str(v_err))
 
             # 2. 执行阶段 (Execution Phase) - 生成 PPT 文件
             _report("正在生成最终文件...", "阶段 3/3: 渲染与保存")
@@ -3175,14 +3853,38 @@ class TaskOrchestrator:
                 any(k in text_lower for k in ["深度", "详细", "研究", "全面", "技术", "报告", "综述", "whitepaper"]),
             ]
             is_complex = any(complex_flags)
-            
+
+            # -- Planning Layer (DocumentPlanner) --------------------------
+            _doc_plan = None
+            if is_complex:
+                try:
+                    from web.doc_planner import DocumentPlanner
+                    _planner = DocumentPlanner(ai_client=client, model_name="gemini-2.5-flash")
+                    _report("📋 规划文档结构...", "分析需求/分配章节")
+                    _doc_plan = await _planner.plan(user_input, previous_context=previous_data)
+                    if _doc_plan.success:
+                        _report(
+                            f"✅ 规划完成：{len(_doc_plan.sections)} 节 | {_doc_plan.doc_type.upper()}",
+                            _doc_plan.to_context_str()[:120]
+                        )
+                    else:
+                        _report("⚠️ 规划层失败，使用默认流程", _doc_plan.error[:60] if _doc_plan.error else "")
+                        _doc_plan = None
+                except Exception as _pe:
+                    print(f"[FILE_GEN] ⚠️ 规划层异常: {_pe}")
+                    _doc_plan = None
+
             # 检测目标格式（PPT、Excel、Word等）
             ppt_keywords = ["ppt", "幻灯片", "演示", "汇报", "presentation", "slide"]
             prefer_ppt = any(kw in user_input.lower() for kw in ppt_keywords)
             
             prefer_excel = ("excel" in user_input.lower() or "xlsx" in user_input.lower() or "表格" in user_input)
             prefer_pdf = "pdf" in user_input.lower()
-            
+            if _doc_plan:
+                prefer_ppt   = (_doc_plan.doc_type == "ppt")   or prefer_ppt
+                prefer_excel = (_doc_plan.doc_type == "excel") or prefer_excel
+                prefer_pdf   = (_doc_plan.doc_type == "pdf")   or prefer_pdf
+
             # 根据目标格式选择提示
             if prefer_ppt:
                 # 尝试使用新的多阶段生成流程 (Plan-then-Execute)
@@ -3219,14 +3921,19 @@ class TaskOrchestrator:
                     "每个要点包含具体信息，中文输出，只输出大纲。\n"
                 )
             else:
-                gen_prompt = (
-                    "你是Koto，一个专业的数据整理与报告生成助手。\n"
-                    "请基于用户需求和提供的数据，输出清晰、可直接放入文档的 Markdown 内容。\n"
-                    "如果是价格类信息，必须包含一个 Markdown 表格，字段建议为：时间、价格、变化、来源。\n"
-                    "输出要求：\n"
-                    "- 只输出内容，不要输出代码或 BEGIN_FILE 标记\n"
-                    "- 中文输出，结构清晰\n"
-                )
+                if _doc_plan and is_complex:
+                    # 使用规划层生成增强 prompt（含章节指引）
+                    from web.doc_planner import build_generation_prompt_from_plan
+                    gen_prompt = build_generation_prompt_from_plan(_doc_plan, user_input, previous_data)
+                else:
+                    gen_prompt = (
+                        "你是Koto，一个专业的数据整理与报告生成助手。\n"
+                        "请基于用户需求和提供的数据，输出清晰、可直接放入文档的 Markdown 内容。\n"
+                        "如果是价格类信息，必须包含一个 Markdown 表格，字段建议为：时间、价格、变化、来源。\n"
+                        "输出要求：\n"
+                        "- 只输出内容，不要输出代码或 BEGIN_FILE 标记\n"
+                        "- 中文输出，结构清晰\n"
+                    )
             
             full_input = (
                 f"用户原始需求: {context['original_input']}\n\n"
@@ -3248,7 +3955,7 @@ class TaskOrchestrator:
             # 调用模型生成内容
             model_id = SmartDispatcher.get_model_for_task("FILE_GEN", complexity="complex" if is_complex else "normal")
             
-            _report(f"正在生成内容...", f"模型: {model_id}")
+            _report(f"正在撰写内容...", f"模型: {model_id}")
             
             def _generate_text(prompt_text: str) -> str:
                 response = client.models.generate_content(
@@ -3261,9 +3968,50 @@ class TaskOrchestrator:
                     )
                 )
                 return response.text or ""
+
+            def _clean_filegen_text(text: str) -> str:
+                if not text:
+                    return text
+                cleaned = text
+
+                # Remove fenced code blocks but keep content
+                cleaned = re.sub(r"```[a-zA-Z0-9_-]*\n", "", cleaned)
+                cleaned = cleaned.replace("```", "")
+
+                # Strip markdown links to plain text
+                cleaned = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", cleaned)
+
+                # Remove bold/italic markers
+                cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned)
+                cleaned = re.sub(r"__(.+?)__", r"\1", cleaned)
+                cleaned = re.sub(r"\*(.+?)\*", r"\1", cleaned)
+                cleaned = re.sub(r"_(.+?)_", r"\1", cleaned)
+
+                # Remove inline code ticks
+                cleaned = cleaned.replace("`", "")
+
+                # Strip heading markers and blockquotes at line start
+                cleaned = re.sub(r"^\s{0,3}#{1,6}\s+", "", cleaned, flags=re.MULTILINE)
+                cleaned = re.sub(r"^\s*>\s?", "", cleaned, flags=re.MULTILINE)
+
+                # Remove horizontal rules
+                cleaned = re.sub(r"^\s*[-_*]{3,}\s*$", "", cleaned, flags=re.MULTILINE)
+
+                # Flatten list markers but keep structure via indentation
+                cleaned = re.sub(r"^\s*[-*+]\s+", "  ", cleaned, flags=re.MULTILINE)
+                cleaned = re.sub(r"^\s*\d+\.\s+", "  ", cleaned, flags=re.MULTILINE)
+
+                # Normalize extra blank lines
+                cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+                # Cleanup leftover marker pairs
+                cleaned = cleaned.replace("**", "").replace("__", "")
+
+                return cleaned
             
             text_out = _generate_text(full_input) or "(无输出)"
-            _report(f"内容生成完成", f"字数: {len(text_out)}")
+            text_out = _clean_filegen_text(text_out)
+            _report(f"内容撰写完成", f"共 {len(text_out)} 字")
             
             # 解析 Markdown 表格
             def _extract_markdown_table(md_text: str):
@@ -3363,24 +4111,51 @@ class TaskOrchestrator:
                     from web.ppt_generator import PPTGenerator
                     ppt_outline = _parse_ppt_outline(text_out)
                     
+                    # ── 质量门控 ──
+                    try:
+                        from web.file_quality_checker import FileQualityGate
+                        _qg = FileQualityGate.check_and_fix_ppt_outline(
+                            ppt_outline.get('slides', []), user_request=user_input, progress_callback=_report
+                        )
+                        ppt_outline['slides'] = _qg['outline']
+                    except Exception as _qge:
+                        print(f"[FILE_GEN] ⚠️ PPT 质量门控异常: {_qge}")
+                    
+
                     # 确定主题（通过关键词检测）
                     theme = "business"  # 默认商务主题
-                    if "tech" in user_input.lower() or "技术" in user_input:
+                    user_input_lower = user_input.lower()
+                    if "tech" in user_input_lower or "技术" in user_input_lower or "科技" in user_input_lower:
                         theme = "tech"
-                    elif "creative" in user_input.lower() or "创意" in user_input:
+                    elif "creative" in user_input_lower or "创意" in user_input_lower or "艺术" in user_input_lower:
                         theme = "creative"
+                    elif "simple" in user_input_lower or "minimal" in user_input_lower or "极简" in user_input_lower:
+                        theme = "minimal"
                     
-                    _report("正在生成PPT...", f"主题: {theme}")
+                    _report("正在生成PPT...", f"主题: {theme} (自动配图)")
                     
                     ppt_gen = PPTGenerator(theme=theme)
-                    filename = f"{ppt_outline.get('title', '演示文稿')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pptx"
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"{ppt_outline.get('title', 'Presentation')}_{timestamp}.pptx"
+                    # Max length for filename safety
+                    if len(filename) > 50:
+                        filename = f"Presentation_{timestamp}.pptx"
+                        
                     ppt_path = os.path.join(settings_manager.documents_dir, filename)
                     os.makedirs(settings_manager.documents_dir, exist_ok=True)
                     
+
+                    def _ppt_progress_wrapper(c, t, st, ty):
+                        try:
+                            _report(f"正在生成PPT ({c}/{t})", f"页面: {st[:10]}... [{ty}]")
+                        except: pass
+
                     ppt_gen.generate_from_outline(
                         title=ppt_outline.get('title', '演示'),
                         outline=ppt_outline.get('slides', []),
-                        output_path=ppt_path
+                        output_path=ppt_path,
+                        enable_ai_images=True,
+                        progress_callback=_ppt_progress_wrapper
                     )
                     
                     rel_path = os.path.relpath(ppt_path, WORKSPACE_DIR).replace("\\", "/")
@@ -3412,7 +4187,7 @@ class TaskOrchestrator:
                     )
                     text_out_retry = _generate_text(fix_prompt)
                     if text_out_retry:
-                        text_out = text_out_retry
+                        text_out = _clean_filegen_text(text_out_retry)
                         table_rows = _extract_markdown_table(text_out)
                 
                 if prefer_excel and table_rows:
@@ -3426,9 +4201,14 @@ class TaskOrchestrator:
                         ws = wb.active
                         ws.title = title[:31] if title else "Sheet1"
                         
-                        # 写入数据
+                        # 写入数据（清洗每个单元格内的 Markdown 符号）
+                        try:
+                            from web.file_quality_checker import strip_markdown_from_cell
+                            _strip_cell = strip_markdown_from_cell
+                        except Exception:
+                            _strip_cell = lambda x: x
                         for row in table_rows:
-                            ws.append(row)
+                            ws.append([_strip_cell(str(c)) if isinstance(c, str) else c for c in row])
                         
                         # --- 样式美化 ---
                         header_font = Font(name='Microsoft YaHei', size=11, bold=True, color='FFFFFF')
@@ -3493,6 +4273,19 @@ class TaskOrchestrator:
                 
                 # 保存为 DOCX（无表格或Excel失败时回退）
                 if not saved_files:
+                    # ── 导出检查层（Check Layer）：质量检查 + Markdown 符号去除（永久特性）──
+                    try:
+                        from web.file_quality_checker import FileQualityGate
+                        _dqg = FileQualityGate.check_and_fix_for_export(
+                            text_out, target_format="word",
+                            user_request=user_input, progress_callback=_report
+                        )
+                        text_out = _dqg['text']
+                        if _dqg.get('issues'):
+                            print(f"[FILE_GEN] 🔍 检查层: {', '.join(_dqg['issues'][:3])}")
+                    except Exception as _dqge:
+                        print(f"[FILE_GEN] ⚠️ 导出检查层异常: {_dqge}")
+                    
                     _report("正在生成Word文档...", "转换为 DOCX")
                     from web.document_generator import save_docx, save_pdf
                     saved_docx = save_docx(text_out, title=title, output_dir=settings_manager.documents_dir)
@@ -3545,23 +4338,21 @@ class TaskOrchestrator:
             images_dir = os.path.join(WORKSPACE_DIR, "images")
             os.makedirs(images_dir, exist_ok=True)
             
-            _report("启动图像生成...", "调用 Imagen 3 模型")
+            _report("启动图像生成...", "调用 Imagen 4 模型")
             
             for i in range(2):
                 try:
                     _report(f"正在生成第 {i+1}/2 张配图...", f"提示词: {prompt[:30]}...")
                     
                     # Run potentially blocking generation in thread
+                    fname = f"painter_{i}_{int(time.time()*1000)%1000000}.png"
+                    fpath = os.path.join(images_dir, fname)
                     res = await asyncio.to_thread(lambda: client.models.generate_images(
-                        model="imagen-4.0-generate-preview-06-06",
+                        model="imagen-4.0-generate-001",
                         prompt=prompt,
                         config=types.GenerateImagesConfig(number_of_images=1)
                     ))
-                    
-                    if res.generated_images:
-                        ts = int(time.time() * 1000) % 1000000
-                        fname = f"ppt_img_{i}_{ts}.png"
-                        fpath = os.path.join(images_dir, fname)
+                    if res and res.generated_images:
                         with open(fpath, "wb") as f:
                             f.write(res.generated_images[0].image.image_bytes)
                         image_paths.append(fpath)
@@ -3612,7 +4403,7 @@ class TaskOrchestrator:
             await asyncio.sleep(0.5) # Simulate quick think
             
             # Phase 2: Synthesis
-            _report("正在进行深度分析...", "调用 Gemini 1.5 Pro 进行综合")
+            _report("正在进行深度分析...", "优先 Deep Research Pro，失败自动回退")
             # Run in thread to not block event loop if sync
             research_text = await asyncio.to_thread(WebSearcher.deep_research_for_ppt, user_input, search_text)
             
@@ -3624,7 +4415,7 @@ class TaskOrchestrator:
                     "success": True,
                     "output": f"深度研究完成，获取 {len(research_text)} 字专业分析",
                     "content": research_text,
-                    "model_id": "gemini-1.5-pro"
+                    "model_id": MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025")
                 }
             else:
                 _report("⚠️ 研究产出为空", "回退到基础搜索结果")
@@ -3634,13 +4425,108 @@ class TaskOrchestrator:
                     "content": search_text
                 }
         except Exception as e:
-            _report("❌ 研究过程出错",Str(e))
+            _report("❌ 研究过程出错", str(e))
             return {
                 "success": False,
                 "output": "",
                 "error": str(e)
             }
-    
+
+    @classmethod
+    async def _execute_coder(cls, user_input: str, context: dict, progress_callback=None) -> dict:
+        """执行代码生成子任务 - 使用 gemini-3-pro-preview via Interactions API"""
+
+        def _report(msg: str, detail: str = ""):
+            print(f"[CODER] {msg} | {detail}")
+            if progress_callback:
+                progress_callback(msg, detail)
+
+        try:
+            model_id = MODEL_MAP.get("CODER", "gemini-3-pro-preview")
+            _report("启动代码生成...", f"模型: {model_id}")
+
+            # 注入前步搜索/研究结果（如有）
+            search_ctx = ""
+            for key in ("WEB_SEARCH_result", "RESEARCH_result", "search_result", "research_result"):
+                val = context.get(key)
+                if val:
+                    text = val.get("content") or val.get("output") or "" if isinstance(val, dict) else str(val)
+                    if text:
+                        search_ctx = text[:3000]
+                        break
+
+            full_prompt = user_input
+            if search_ctx:
+                full_prompt = f"参考信息:\n{search_ctx}\n\n任务: {user_input}"
+
+            sys_instr = (
+                "你是 Koto 代码专家。直接输出完整可运行代码，使用代码块（```语言）包裹，"
+                "不加废话前言。必要时简短说明运行方式（≤3行）。"
+            )
+            _report("正在生成代码...", "调用 Interactions API")
+
+            result_text = await asyncio.to_thread(
+                _call_interactions_api_sync, model_id, full_prompt, sys_instr, 90.0
+            )
+
+            if not result_text:
+                # 降级到 gemini-2.5-flash
+                _report("⚠️ 主模型超时，降级生成...", "gemini-2.5-flash")
+                resp = await asyncio.to_thread(lambda: client.models.generate_content(
+                    model=_INTERACTIONS_FALLBACK_MODEL,
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=sys_instr,
+                        temperature=0.3,
+                        max_output_tokens=4096,
+                    )
+                ))
+                result_text = resp.text or "(无输出)"
+                model_id = _INTERACTIONS_FALLBACK_MODEL
+
+            # 自动保存代码文件
+            saved = Utils.auto_save_files(result_text)
+            _report("✅ 代码生成完成", f"已保存 {len(saved)} 个文件" if saved else "未检测到文件标记")
+
+            return {
+                "success": True,
+                "output": result_text,
+                "content": result_text,
+                "saved_files": saved,
+                "model_id": model_id,
+            }
+        except Exception as e:
+            _report("❌ 代码生成失败", str(e))
+            return {"success": False, "output": "", "error": str(e)}
+
+    @classmethod
+    async def _execute_system(cls, user_input: str, context: dict, progress_callback=None) -> dict:
+        """执行系统操作子任务 - 调用 LocalExecutor"""
+
+        def _report(msg: str, detail: str = ""):
+            print(f"[SYSTEM] {msg} | {detail}")
+            if progress_callback:
+                progress_callback(msg, detail)
+
+        try:
+            _report("执行系统操作...", user_input[:40])
+            result = await asyncio.to_thread(LocalExecutor.execute, user_input)
+            success = result.get("success", False)
+            msg = result.get("message", "")
+            if success:
+                _report("✅ 系统操作完成", msg[:60])
+            else:
+                _report("⚠️ 系统操作失败", msg[:60])
+            return {
+                "success": success,
+                "output": msg,
+                "content": msg,
+                "model_id": "local-executor",
+            }
+        except Exception as e:
+            _report("❌ 系统操作异常", str(e))
+            return {"success": False, "output": "", "error": str(e)}
+
     @classmethod
     def _merge_results(cls, subtasks: list, context: dict) -> dict:
         """合并所有子任务的结果"""
@@ -3676,28 +4562,56 @@ class TaskOrchestrator:
     @classmethod
     async def _validate_quality(cls, user_input: str, combined_output: dict, context: dict) -> int:
         """
-        验证输出质量
-        
+        验证输出质量（语义评分版本）。
+        先用快速规则给基准分，再用 gemini-2.0-flash-lite 做语义评估。
         返回: 质量评分 (0-100)
         """
-        score = 50  # 基础分
-        
-        # 检查是否有错误
-        if context.get("errors"):
-            score -= 20
-        
-        # 检查是否有最终输出
-        if combined_output.get("final_output"):
-            score += 20
-        
-        # 检查步骤完成度
+        # ── 规则基准分 ──────────────────────────────────────────────
+        score = 40
         total_steps = len(combined_output.get("steps", []))
-        completed_steps = len([s for s in combined_output.get("steps", []) if s["status"] == "completed"])
+        completed_steps = len([
+            s for s in combined_output.get("steps", [])
+            if s.get("status") == "completed"
+        ])
         if total_steps > 0:
-            completion_rate = completed_steps / total_steps
-            score += int(completion_rate * 20)
-        
-        # 确保分数在 0-100 之间
+            score += int((completed_steps / total_steps) * 30)  # 最多 +30
+
+        final_output = combined_output.get("final_output", "")
+        if not final_output:
+            return max(0, min(100, score))  # 无输出直接返回规则分
+
+        # 有文件输出加分
+        has_files = any(
+            r.get("result", {}).get("saved_files")
+            for r in combined_output.get("steps", [])
+            if isinstance(r.get("result"), dict)
+        )
+        if has_files:
+            score += 10
+
+        # ── 语义评分（gemini-2.0-flash-lite，低成本）────────────────
+        try:
+            check_prompt = (
+                f"用户需求：{user_input[:300]}\n\n"
+                f"最终输出（前1500字）：{final_output[:1500]}\n\n"
+                "请评估输出是否满足了用户需求。只输出一个 0~30 的整数（30为完全满足）。"
+            )
+            resp = await asyncio.to_thread(lambda: client.models.generate_content(
+                model="gemini-2.0-flash-lite",
+                contents=check_prompt,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=8,
+                    temperature=0.0,
+                )
+            ))
+            text = (resp.text or "").strip()
+            m = re.search(r'\d+', text)
+            if m:
+                semantic_score = min(30, max(0, int(m.group())))
+                score += semantic_score
+        except Exception as e:
+            print(f"[VALIDATE_QUALITY] 语义评分失败，使用规则分: {e}")
+
         return max(0, min(100, score))
 
 
@@ -3720,6 +4634,15 @@ try:
     print("[INIT] SmartDispatcher configured successfully.")
 except Exception as e:
     print(f"[ERROR] Failed to configure SmartDispatcher: {e}")
+
+# ─── 后台启动动态模型路由器 ────────────────────────────────────────────────────
+# 不阻塞主线程启动；路由表更新后会自动覆盖静态默认值及 SmartDispatcher 配置
+import threading as _threading
+_threading.Thread(
+    target=_init_model_manager,
+    name="ModelManagerInit",
+    daemon=True
+).start()
 
 # === Ollama 后备路由 (可选) ===
 LOCAL_ROUTER_MODEL = "qwen3:8b"  # 升级: Qwen3 中英文能力远超旧模型
@@ -3806,29 +4729,23 @@ class Utils:
 
     @staticmethod
     def adapt_prompt_to_markdown(task_type: str, user_input: str, history: list = None) -> str:
-        """使用快速小模型将原始请求转为结构化 Markdown，便于大模型理解。"""
+        """使用本地模板将原始请求转为结构化 Markdown，便于大模型理解。
+        
+        注：已移除 flash-lite 二次润色调用（额外 API 费用 + ~300ms 延迟，收益不明显）。
+        PromptAdapter 的本地模板（base_md）已足够主模型理解。
+        """
         try:
             try:
                 from web.prompt_adapter import PromptAdapter
             except ImportError:
                 from prompt_adapter import PromptAdapter
 
-            def _generate_markdown(prompt_text: str) -> str:
-                response = client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
-                    contents=prompt_text,
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=700,
-                        temperature=0.2,
-                    )
-                )
-                return response.text or ""
-
+            # model_generate=None：仅使用本地关键词提取 + Markdown 模板，不发起额外 LLM 调用
             return PromptAdapter.adapt(
                 user_input=user_input,
                 task_type=task_type,
                 history=history,
-                model_generate=_generate_markdown,
+                model_generate=None,
             )
         except Exception as e:
             print(f"[PROMPT_ADAPTER] Failed: {e}")
@@ -3917,18 +4834,22 @@ class Utils:
                 pass
 
             try:
-                cmd = [sys.executable, "-m", "pip", "install", pkg]
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                )
-                if proc.returncode == 0:
-                    result["installed"].append(pkg)
-                else:
+                if getattr(sys, 'frozen', False):
+                    # 打包版无法安装新包，pip 在冻结环境下不可用
                     result["failed"].append(pkg)
+                else:
+                    cmd = [sys.executable, "-m", "pip", "install", pkg]
+                    proc = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                    )
+                    if proc.returncode == 0:
+                        result["installed"].append(pkg)
+                    else:
+                        result["failed"].append(pkg)
             except Exception:
                 result["failed"].append(pkg)
 
@@ -4289,50 +5210,132 @@ def get_memory_manager():
                     from web.memory_manager import MemoryManager
                 _memory_manager = MemoryManager()
                 print("[INIT] ⚠️  使用基础记忆管理器")
+
+        # 注入摘要与向量适配器（如果支持）
+        try:
+            def _memory_generate(prompt: str, temperature: float = 0.2, max_tokens: int = 300) -> str:
+                resp = client.models.generate_content(
+                    model="gemini-2.0-flash-lite",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=temperature,
+                        max_output_tokens=max_tokens,
+                    )
+                )
+                return resp.text or ""
+
+            def _memory_embed(texts: list) -> list:
+                safe_texts = [(t or "")[:1000] for t in texts]
+                resp = client.models.embed_content(
+                    model="text-embedding-004",
+                    contents=safe_texts
+                )
+                embeddings = []
+                if hasattr(resp, "embeddings"):
+                    for item in resp.embeddings:
+                        if hasattr(item, "values"):
+                            embeddings.append(list(item.values))
+                        elif hasattr(item, "embedding"):
+                            embeddings.append(list(item.embedding))
+                        elif isinstance(item, dict):
+                            embeddings.append(list(item.get("values") or item.get("embedding") or []))
+                elif hasattr(resp, "embedding"):
+                    embeddings.append(list(resp.embedding))
+                elif isinstance(resp, dict) and "embeddings" in resp:
+                    for item in resp.get("embeddings", []):
+                        embeddings.append(list(item.get("values") or item.get("embedding") or []))
+                return embeddings
+
+            if hasattr(_memory_manager, "set_llm_adapters"):
+                _memory_manager.set_llm_adapters(
+                    generate_fn=_memory_generate,
+                    embedding_fn=_memory_embed
+                )
+        except Exception as e:
+            print(f"[INIT] ⚠️  记忆适配器注入失败: {e}")
     return _memory_manager
 
 
-def _start_memory_extraction(user_msg: str, ai_msg: str, history=None):
-    """后台提取长期记忆，避免阻塞主对话流程"""
+def _start_memory_extraction(
+    user_msg: str,
+    ai_msg: str,
+    history=None,
+    task_type: str = "CHAT",
+    session_name: str = "default",
+):
+    """后台提取长期记忆（含 MemoryReflector 深度反思），不阻塞主对话流程"""
     try:
         from memory_integration import MemoryIntegration
     except ImportError:
         try:
             from web.memory_integration import MemoryIntegration
         except ImportError:
-            print("[MemoryIntegration] ⚠️  模块未找到，跳过自动记忆提取")
-            return
+            MemoryIntegration = None
 
-    if not MemoryIntegration.should_extract(user_msg, ai_msg):
-        return
-
-    def _worker():
+    def _llm_sync(prompt: str) -> str:
+        """Synchronous LLM call for reflection / summarization."""
         try:
-            memory_mgr = get_memory_manager()
-
-            class _LLMAdapter:
-                async def generate(self, prompt, temperature=0.1, max_tokens=500):
-                    resp = client.models.generate_content(
-                        model="gemini-2.0-flash-lite",
-                        contents=prompt,
-                        config=types.GenerateContentConfig(
-                            temperature=temperature,
-                            max_output_tokens=max_tokens,
-                        )
-                    )
-                    return resp.text or ""
-
-            result = asyncio.run(
-                MemoryIntegration.extract_and_apply(
-                    memory_mgr, user_msg, ai_msg, _LLMAdapter(), history
+            resp = client.models.generate_content(
+                model="gemini-2.0-flash-lite",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=600,
                 )
             )
-            if result.get("success"):
-                print("[MemoryIntegration] ✅ 自动记忆提取完成")
-            else:
-                print(f"[MemoryIntegration] ⚠️ 自动记忆提取失败: {result.get('error')}")
+            return resp.text or ""
+        except Exception:
+            return ""
+
+    def _worker():
+        # ── Existing MemoryIntegration (entity extraction) ────────────────
+        if MemoryIntegration and MemoryIntegration.should_extract(user_msg, ai_msg):
+            try:
+                memory_mgr = get_memory_manager()
+
+                class _LLMAdapter:
+                    async def generate(self, prompt, temperature=0.1, max_tokens=500):
+                        return _llm_sync(prompt)
+
+                result = asyncio.run(
+                    MemoryIntegration.extract_and_apply(
+                        memory_mgr, user_msg, ai_msg, _LLMAdapter(), history
+                    )
+                )
+                if result.get("success"):
+                    print("[MemoryIntegration] ✅ 自动记忆提取完成")
+                else:
+                    print(f"[MemoryIntegration] ⚠️ 提取失败: {result.get('error')}")
+            except Exception as e:
+                print(f"[MemoryIntegration] ❌ 异常: {e}")
+
+        # ── 2-B: MemoryReflector (deep structured reflection) ─────────────
+        try:
+            from app.core.memory.memory_reflector import MemoryReflector
+            MemoryReflector.reflect_async(
+                user_msg=user_msg,
+                ai_msg=ai_msg,
+                task_type=task_type,
+                session_name=session_name,
+                get_memory_fn=get_memory_manager,
+                llm_fn=_llm_sync,
+            )
         except Exception as e:
-            print(f"[MemoryIntegration] ❌ 自动记忆提取异常: {e}")
+            print(f"[MemoryReflector] ⚠️ 启动失败: {e}")
+
+        # ── 3: ShadowWatcher 影子追踪（零感知观察）────────────────────────────
+        try:
+            from app.core.monitoring.shadow_watcher import ShadowWatcher
+            ShadowWatcher.observe(user_msg, ai_msg, session_name)
+        except Exception as e:
+            print(f"[ShadowWatcher] ⚠️ 观察失败: {e}")
+
+        # ── 4: MacroRecorder 宏录制（重复工作流检测）────────────────────────
+        try:
+            from app.core.monitoring.macro_recorder import MacroRecorder
+            MacroRecorder.record_turn(user_msg, task_type or "CHAT", session_name)
+        except Exception as e:
+            print(f"[MacroRecorder] ⚠️ 记录失败: {e}")
 
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -4362,42 +5365,57 @@ class KotoBrain:
         "change", "modify", "edit", "background", "color",
     ]
     
-    def chat(self, history, user_input, file_data=None, model=None, auto_model=True):
+    def chat(self, history, user_input, file_data=None, model=None, auto_model=True, task_type: str = None):
         start_time = time.time()
         original_input = user_input
         # 支持模型选择和自动选择
+        _model_id_locked = False   # 如果已在路由中强制设置 model_id，跳过后续 SmartDispatcher 覆盖
         if model and not auto_model:
             model_id = model
             route_method = "Manual select"
-            target_key = "CHAT"
+            # 优先使用调用方传入的 task_type，避免重复路由
+            target_key = task_type or "CHAT"
         else:
             target_key = "CHAT"
             route_method = "Auto"
-            
+            model_id = None   # 先置空，下面按路由决定
+
             if file_data:
-                # 判断是图像编辑还是图像分析
-                user_lower = user_input.lower()
-                is_edit = any(kw in user_lower for kw in self.IMAGE_EDIT_KEYWORDS)
-                
-                if is_edit:
-                    target_key = "PAINTER"
-                    route_method = "Image Edit"
+                _fd_mime = (file_data.get("mime_type") or "application/octet-stream").lower()
+                _is_image_file = _fd_mime.startswith("image/")
+                if _is_image_file:
+                    # 图片文件：判断编辑 vs 分析
+                    user_lower = user_input.lower()
+                    is_edit = any(kw in user_lower for kw in self.IMAGE_EDIT_KEYWORDS)
+                    if is_edit:
+                        target_key = "PAINTER"
+                        route_method = "Image Edit"
+                    else:
+                        target_key = "VISION"
+                        route_method = "Image Analysis"
                 else:
-                    target_key = "VISION"
-                    route_method = "Image Analysis"
+                    # 非图片二进制文件（PDF/Word等）：路由为 CHAT，使用降级模型直接读取
+                    target_key = "CHAT"
+                    route_method = "📄 Binary-Doc-Read"
+                    # 强制使用支持 generate_content + 文件字节的降级模型（Interactions API 不支持文件附件）
+                    model_id = _INTERACTIONS_FALLBACK_MODEL
+                    _model_id_locked = True
             else:
                 # 使用智能路由器
                 target_key, route_method, _ = SmartDispatcher.analyze(user_input)
-            
-            model_id = SmartDispatcher.get_model_for_task(target_key, has_image=bool(file_data))
+
+            if not _model_id_locked:
+                model_id = SmartDispatcher.get_model_for_task(target_key, has_image=bool(file_data))
 
         # 使用小模型将请求转换为结构化 Markdown（仅在大模型处理时启用）
+        # ⚠️ 跳过条件：有文件附件时（file_data）、或输入很大（含嵌入文件内容）
+        _has_embedded_file_content = "=== 文件内容 ===" in user_input or len(user_input) > 3000
         model_input = user_input
-        if auto_model and not file_data and target_key not in ["SYSTEM", "FILE_OP", "PAINTER", "VISION"]:
+        if auto_model and not file_data and not _has_embedded_file_content and target_key not in ["SYSTEM", "FILE_OP", "PAINTER", "VISION"]:
+            # 仅使用本地模板重整（不传 model_generate，避免额外的 flash-lite API 调用）
             model_input = Utils.adapt_prompt_to_markdown(target_key, user_input, history=history)
             if model_input != user_input:
-                print("[PROMPT_ADAPTER] Applied Markdown prompt for model")
-        
+                print("[PROMPT_ADAPTER] Applied local Markdown template")
         result = {
             "task": target_key,
             "model": model_id,
@@ -4459,7 +5477,7 @@ class KotoBrain:
 ---END_FILE---"""
 
                     # 调用 Gemini 生成代码（带回退）
-                    edit_models = ["gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-2.5-flash", "gemini-2.0-flash"]
+                    edit_models = ["gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-2.5-flash"]
                     code_response = None
                     last_error = None
 
@@ -4496,13 +5514,28 @@ class KotoBrain:
                             f.write(code_content)
                         
                         print(f"[IMAGE_EDIT] Executing script: {temp_script}")
-                        exec_result = subprocess.run(
-                            [sys.executable, temp_script],
-                            capture_output=True,
-                            text=True,
-                            timeout=60,
-                            cwd=WORKSPACE_DIR
-                        )
+                        if getattr(sys, 'frozen', False):
+                            # 打包模式：sys.executable 是 Koto.exe，不能用来运行脚本，改为进程内 exec()
+                            import io as _io, contextlib as _ctx
+                            _out, _err, _rc = _io.StringIO(), _io.StringIO(), 0
+                            try:
+                                _prev = os.getcwd(); os.chdir(WORKSPACE_DIR)
+                                with _ctx.redirect_stdout(_out), _ctx.redirect_stderr(_err):
+                                    exec(open(temp_script, 'r', encoding='utf-8').read(), {"__file__": temp_script})
+                                os.chdir(_prev)
+                            except Exception as _ex:
+                                _err.write(str(_ex)); _rc = 1
+                            class _ImgR:
+                                returncode = _rc; stdout = _out.getvalue(); stderr = _err.getvalue()
+                            exec_result = _ImgR()
+                        else:
+                            exec_result = subprocess.run(
+                                [sys.executable, temp_script],
+                                capture_output=True,
+                                text=True,
+                                timeout=60,
+                                cwd=WORKSPACE_DIR
+                            )
                         
                         print(f"[IMAGE_EDIT] Script result: returncode={exec_result.returncode}")
                         if exec_result.stdout:
@@ -4610,14 +5643,14 @@ class KotoBrain:
                     result["total_time"] = time.time() - start_time
                     return result
                 else:
-                    # 纯图像生成使用 nano-banana-pro-preview
+                    # 纯图像生成使用 gemini-3.1-flash-image-preview
                     try:
                         print(f"[图像生成] 开始生成: {user_input[:50]}...")
                         response = client.models.generate_content(
-                            model="nano-banana-pro-preview",
+                            model="gemini-3.1-flash-image-preview",
                             contents=user_input,
                             config=types.GenerateContentConfig(
-                                response_modalities=["IMAGE"]
+                                response_modalities=["TEXT", "IMAGE"]
                             )
                         )
                         print(f"[图像生成] 响应成功，候选数: {len(response.candidates) if response.candidates else 0}")
@@ -4727,32 +5760,117 @@ class KotoBrain:
                     parts=[types.Part.from_text(text=p) for p in turn['parts']]
                 ))
             
+            # 根据任务类型选择系统提示：FILE_GEN 走文档生成提示，其余走通用助手提示
+            if target_key == "FILE_GEN":
+                _brain_sys_instruction = _get_system_instruction()
+            else:
+                _brain_sys_instruction = _get_chat_system_instruction(original_input)
+
             if file_data:
-                # 构建正确的 Part 格式
-                image_part = types.Part.from_bytes(
+                # 构建 Part 格式（适用于图片和 PDF/文档）
+                doc_part = types.Part.from_bytes(
                     data=file_data["data"],
                     mime_type=file_data["mime_type"]
                 )
-                response = client.models.generate_content(
-                    model=model_id,
-                    contents=[original_input, image_part],
-                    config=types.GenerateContentConfig(
-                        system_instruction=_get_system_instruction()
+                _fd_mime2 = (file_data.get("mime_type") or "").lower()
+                _is_image = _fd_mime2.startswith("image/")
+
+                if not _is_image:
+                    # PDF / 文档二进制：Interactions API 不支持文件附件
+                    # → 直接使用 gemini-2.5-flash（原生支持 generate_content + PDF bytes）
+                    _doc_model = _INTERACTIONS_FALLBACK_MODEL
+                    if model_id != _doc_model:
+                        print(f"[brain.chat] 非图片文件 ({_fd_mime2}): 降级模型 {model_id} → {_doc_model}")
+                        model_id = _doc_model
+                        result["model"] = model_id
+                    response = client.models.generate_content(
+                        model=model_id,
+                        contents=[original_input, doc_part],
+                        config=types.GenerateContentConfig(
+                            system_instruction=_brain_sys_instruction
+                        )
                     )
-                )
-                accumulated_text = response.text if response.text else ""
+                    accumulated_text = response.text if response.text else ""
+                elif model_id in _INTERACTIONS_ONLY_MODELS:
+                    # 图片文件 + gemini-3-preview 模型：走 Interactions API
+                    try:
+                        accumulated_text = _call_interactions_api_sync(
+                            model_id,
+                            original_input,
+                            sys_instruction=_brain_sys_instruction,
+                        )
+                        if not accumulated_text:
+                            raise ValueError("Interactions API 返回空响应")
+                    except Exception as _ia_err:
+                        print(f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+                        model_id = _INTERACTIONS_FALLBACK_MODEL
+                        result["model"] = model_id
+                        _fb_resp = client.models.generate_content(
+                            model=model_id,
+                            contents=[original_input, doc_part],
+                            config=types.GenerateContentConfig(system_instruction=_brain_sys_instruction)
+                        )
+                        accumulated_text = _fb_resp.text if _fb_resp.text else ""
+                else:
+                    # 图片文件 + 普通 generate_content 模型
+                    response = client.models.generate_content(
+                        model=model_id,
+                        contents=[original_input, doc_part],
+                        config=types.GenerateContentConfig(
+                            system_instruction=_brain_sys_instruction
+                        )
+                    )
+                    accumulated_text = response.text if response.text else ""
             else:
-                response = client.models.generate_content(
-                    model=model_id,
-                    contents=formatted_history + [types.Content(
-                        role="user",
-                        parts=[types.Part.from_text(text=model_input)]
-                    )],
-                    config=types.GenerateContentConfig(
-                        system_instruction=_get_system_instruction()
+                # gemini-3-preview 只支持 Interactions API，不支持 generate_content
+                if model_id in _INTERACTIONS_ONLY_MODELS:
+                    try:
+                        # 将历史记录折叠进 prompt（Interactions API 不支持多轮历史）
+                        history_prefix = ""
+                        if formatted_history:
+                            history_lines = []
+                            for turn in formatted_history[-6:]:   # 最近 3 轮
+                                role_label = "用户" if turn.role == "user" else "助手"
+                                turn_text = " ".join(
+                                    p.text for p in turn.parts if hasattr(p, "text") and p.text
+                                )
+                                if turn_text:
+                                    history_lines.append(f"{role_label}: {turn_text}")
+                            if history_lines:
+                                history_prefix = "[对话历史]\n" + "\n".join(history_lines) + "\n\n"
+                        full_prompt = history_prefix + model_input
+                        accumulated_text = _call_interactions_api_sync(
+                            model_id,
+                            full_prompt,
+                            sys_instruction=_brain_sys_instruction,
+                        )
+                        if not accumulated_text:
+                            raise ValueError("Interactions API 返回空响应")
+                    except Exception as _ia_err:
+                        print(f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+                        model_id = _INTERACTIONS_FALLBACK_MODEL
+                        result["model"] = model_id
+                        _fb_resp = client.models.generate_content(
+                            model=model_id,
+                            contents=formatted_history + [types.Content(
+                                role="user",
+                                parts=[types.Part.from_text(text=model_input)]
+                            )],
+                            config=types.GenerateContentConfig(system_instruction=_brain_sys_instruction)
+                        )
+                        accumulated_text = _fb_resp.text if _fb_resp.text else ""
+                else:
+                    response = client.models.generate_content(
+                        model=model_id,
+                        contents=formatted_history + [types.Content(
+                            role="user",
+                            parts=[types.Part.from_text(text=model_input)]
+                        )],
+                        config=types.GenerateContentConfig(
+                            system_instruction=_brain_sys_instruction
+                        )
                     )
-                )
-                accumulated_text = response.text if response.text else ""
+                    accumulated_text = response.text if response.text else ""
             
             first_token_latency = (time.time() - start_time) * 1000
             result["latency"] = first_token_latency
@@ -4771,7 +5889,37 @@ class KotoBrain:
             return result
             
         except Exception as e:
-            result["response"] = f"Error: {str(e)}"
+            err_str = str(e)
+            # 自动降级：如果模型返回"只支持 Interactions API"错误，用 2.0-flash 重试一次
+            if "Interactions API" in err_str and model_id not in (_INTERACTIONS_ONLY_MODELS | {_INTERACTIONS_FALLBACK_MODEL}):
+                print(f"[brain.chat] Interactions API 错误，自动降级 {model_id} → {_INTERACTIONS_FALLBACK_MODEL}")
+                try:
+                    model_id = _INTERACTIONS_FALLBACK_MODEL
+                    _fb = client.models.generate_content(
+                        model=model_id,
+                        contents=formatted_history + [types.Content(
+                            role="user",
+                            parts=[types.Part.from_text(text=model_input)]
+                        )] if not file_data else [original_input],
+                        config=types.GenerateContentConfig(system_instruction=_brain_sys_instruction)
+                    )
+                    result["response"] = _fb.text if _fb.text else ""
+                    result["model"] = model_id
+                    result["total_time"] = time.time() - start_time
+                    return result
+                except Exception as _fb_err:
+                    result["response"] = f"❌ 分析失败: {_fb_err}"
+            elif "API key not valid" in err_str or "INVALID_ARGUMENT" in err_str and "api key" in err_str.lower():
+                result["response"] = (
+                    "❌ **API 密钥无效**\n\n"
+                    "请检查您的 Gemini API 密钥：\n"
+                    "1. 前往 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) 获取有效密钥\n"
+                    "2. 在 Koto 设置页面更新 API 密钥\n"
+                    "3. 确保密钥所在项目已启用 Generative Language API\n\n"
+                    f"原始错误: `{err_str[:200]}`"
+                )
+            else:
+                result["response"] = f"❌ 发生错误: {err_str}"
             result["total_time"] = time.time() - start_time
             return result
 
@@ -4811,6 +5959,12 @@ def test_upload():
 def edit_ppt(session_id):
     """PPT 生成后编辑页面（P1 功能）"""
     return render_template('edit_ppt.html')
+
+@app.route('/skills')
+@app.route('/skill-marketplace')
+def skill_marketplace():
+    """Koto Skill 库 — GitHub Extension Marketplace 风格管理界面"""
+    return render_template('skill_marketplace.html')
 
 @app.route('/monitoring-dashboard')
 def monitoring_dashboard():
@@ -4862,7 +6016,8 @@ def chat():
     user_input = Utils.sanitize_string(user_input)
     
     # Load history
-    history = session_manager.load(f"{session_name}.json")
+    full_history = session_manager.load_full(f"{session_name}.json")
+    history = session_manager._trim_history(full_history)
     
     # 确定使用的模型
     if locked_model and locked_model != 'auto':
@@ -4954,31 +6109,36 @@ def chat_stream():
     
     user_input = Utils.sanitize_string(user_input)
 
-    # ⏳ 重复上一个任务 (Repeat Last Task)
-    repeat_patterns = [r'^重复.*任务', r'^再做一遍', r'^再来一次', r'^re(peat|do).*last.*task', r'^try.*again']
-    if any(re.search(p, user_input, re.IGNORECASE) for p in repeat_patterns):
-        try:
+    # 🧠 意图分析与重写 (Intent Analysis & Rewrite)
+    # 结合历史记忆和本地模型，理解用户的复杂指令（如“重复上个任务”、“把刚才那个改成...”）
+    try:
+        from app.core.routing.intent_analyzer import IntentAnalyzer
+        if IntentAnalyzer.should_analyze(user_input):
             full_hist = session_manager.load_full(f"{session_name}.json")
-            # 倒序查找最近的一条 user 消息
-            last_user_msg = None
-            for msg in reversed(full_hist):
-                if msg.get("role") == "user":
-                    content = (msg.get("parts") or [""])[0]
-                    # 避免无限循环：如果上一条也是“重复任务”，则继续往前找
-                    if not any(re.search(p, content, re.IGNORECASE) for p in repeat_patterns):
-                        last_user_msg = content
-                        break
-            
-            if last_user_msg:
-                print(f"[REPEAT] Found last user message: {last_user_msg[:50]}...")
-                user_input = last_user_msg # 替换当前输入为上一条任务
-                # 可以选择注入一个提示，告诉用户正在重试
-                # 但为了 context 连贯，直接替换最简单
-            else:
-                print("[REPEAT] Check failed: No valid previous user message found.")
-        except Exception as e:
-            print(f"[REPEAT] Error fetching history: {e}")
-    
+            rewritten_input = IntentAnalyzer.rewrite_intent(user_input, full_hist)
+            if rewritten_input and rewritten_input != user_input:
+                print(f"[STREAM] 🔄 意图重写: '{user_input}' -> '{rewritten_input}'")
+                user_input = rewritten_input
+    except Exception as e:
+        print(f"[STREAM] ⚠️ 意图分析失败: {e}")
+        # 降级到基础的正则匹配
+        repeat_patterns = [r'^重复.*任务', r'^再做一遍', r'^再来一次', r'^re(peat|do).*last.*task', r'^try.*again']
+        if any(re.search(p, user_input, re.IGNORECASE) for p in repeat_patterns):
+            try:
+                full_hist = session_manager.load_full(f"{session_name}.json")
+                last_user_msg = None
+                for msg in reversed(full_hist):
+                    if msg.get("role") == "user":
+                        content = (msg.get("parts") or [""])[0]
+                        if not any(re.search(p, content, re.IGNORECASE) for p in repeat_patterns):
+                            last_user_msg = content
+                            break
+                if last_user_msg:
+                    print(f"[REPEAT] Found last user message: {last_user_msg[:50]}...")
+                    user_input = last_user_msg
+            except Exception as hist_e:
+                print(f"[REPEAT] Error fetching history: {hist_e}")
+
     # ⚡ 快速路径：系统时间查询 - 直接返回，无需发送到LLM
     time_query_patterns = [
         r'当前.*时间|当前系统时间', r'现在.*几点|几点钟', r'几点|什么时间',
@@ -5024,7 +6184,25 @@ def chat_stream():
         system_instruction = _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION()  # 降级到新鲜生成的指令
     
     history = session_manager.load(f"{session_name}.json")
-    
+    full_history = session_manager.load_full(f"{session_name}.json")
+
+    # 🧠 2-A: ContextWindowManager — MemGPT-style page-out/in
+    _cw_paged_context = ""
+    try:
+        from app.core.memory.context_window_manager import ContextWindowManager as _CWM
+        _cw_out = _CWM.manage(
+            history=history,
+            query=user_input,
+            session_name=session_name,
+            get_memory_fn=get_memory_manager,
+        )
+        history = _cw_out["history"]
+        _cw_paged_context = _cw_out.get("paged_in_context", "")
+        if _cw_paged_context:
+            system_instruction += f"\n\n{_cw_paged_context}"
+    except Exception as _cw_err:
+        print(f"[CWM] ⚠️ 上下文管理器异常: {_cw_err}")
+
     # 🕵️‍♀️ 检测是否有最近上传的文件 (5分钟内)
     has_recent_upload = False
     recent_file_type = None
@@ -5052,22 +6230,180 @@ def chat_stream():
         route_method = "🔒 Manual"
         print(f"[STREAM] ✅ Using locked_task: '{task_type}'")
     else:
-        # 将文件信息传递给分析器
+        # 将文件信息传递给分析器（同时注入 [FILE_ATTACHED:ext] 前缀确保本地模型正确分类）
         context_override = {"has_file": has_recent_upload, "file_type": recent_file_type}
-        task_type, route_method, context_info = SmartDispatcher.analyze(user_input, history, file_context=context_override)
+        _routing_input = user_input
+        if has_recent_upload and recent_file_type:
+            _routing_input = f"[FILE_ATTACHED:{recent_file_type}] {user_input}"
+            print(f"[STREAM] 📎 文件上下文注入: {_routing_input[:80]}")
+        task_type, route_method, context_info = SmartDispatcher.analyze(_routing_input, history, file_context=context_override)
         print(f"[STREAM] Auto-detected task_type: '{task_type}', context: {context_info is not None}")
 
-        
+        # ── 安全兜底：未知 task_type → CHAT ──────────────────────────────────
+        _HANDLED_TASK_TYPES = {
+            "SYSTEM", "FILE_OP", "FILE_EDIT", "FILE_SEARCH", "DOC_ANNOTATE",
+            "WEB_SEARCH", "RESEARCH", "PAINTER", "FILE_GEN", "CODER", "CHAT",
+            "MULTI_STEP", "AGENT", "VISION"
+        }
+        if not task_type or task_type not in _HANDLED_TASK_TYPES:
+            print(f"[STREAM] ⚠️ 收到未知 task_type='{task_type}'，降级为 CHAT")
+            task_type = "CHAT"
+            route_method = "⬇️ Unknown→CHAT"
+
+        # ── MULTI_STEP 保护：无 is_multi_step_task 标记时降级 CHAT ──────────
+        if task_type == "MULTI_STEP" and (
+            not context_info or not context_info.get("is_multi_step_task")
+        ):
+            print(f"[STREAM] ⚠️ MULTI_STEP 无有效 context，降级为 CHAT")
+            task_type = "CHAT"
+            route_method = "⬇️ MULTI_STEP→CHAT"
+
+        # ── FILE_EDIT 保护：输入中无法识别文件路径时降级 CHAT ───────────────
+        # 避免短/普通聊天消息因携带文件上下文而被误分类到 FILE_EDIT
+        if task_type == "FILE_EDIT":
+            _fe_pat1 = re.search(r'(?:修改|编辑|改)\s+["\']?([^"\']{2,}?)["\']?\s+.+', user_input)
+            _fe_pat2 = re.search(r'(?:把|将)\s+["\']?([^"\']{2,}?)["\']?\s+(?:的|中的|里的)\s*.+', user_input)
+            if not _fe_pat1 and not _fe_pat2:
+                print(f"[STREAM] ⚠️ FILE_EDIT 输入无有效文件路径: '{user_input[:40]}' → 降级为 CHAT")
+                task_type = "CHAT"
+                route_method = "⬇️ FILE_EDIT→CHAT"
+
         # 如果有上下文信息，记录详情
         if context_info and context_info.get("is_continuation"):
             print(f"[STREAM] Context continuation: {context_info.get('related_task')}, confidence: {context_info.get('confidence')}")
-    
-    # === 处理复杂任务 (多步流程) ===
+
+    # ── Phase2: RouterDecision (classify_v2) ─────────────────────────────────
+    # 在 SmartDispatcher 已确定 task_type 的基础上，进一步获取 skill_id / forward 决策。
+    # 以非阻塞方式运行（超时保护），失败时不影响主流程。
+    _router_decision = None
+    try:
+        from app.core.routing.local_model_router import LocalModelRouter as _LMRv2
+        _router_decision = _LMRv2.classify_v2(user_input, hint=task_type, timeout=1.5)
+        if _router_decision and _router_decision.skill_id:
+            print(f"[STREAM] 🎯 RouterDecision skill_id={_router_decision.skill_id} "
+                  f"forward_to_cloud={_router_decision.forward_to_cloud} "
+                  f"confidence={_router_decision.confidence:.2f}")
+    except Exception as _rv2_err:
+        print(f"[STREAM] RouterDecision classify_v2 跳过: {_rv2_err}")
+
+    # ── 将任务专属补充指令追加到 system_instruction ────────────────────────
+    _addendum = _TASK_SYSTEM_ADDENDUMS.get(task_type, "")
+    if _addendum:
+        system_instruction = system_instruction + _addendum
+        print(f"[STREAM] 📌 任务专属指令已注入: {task_type}")
+
+    # ── 🔮 LangGraph 高级工作流路由（RESEARCH / FILE_GEN / MULTI_STEP）─────────
+    # resolve_workflow() 检测用户意图，决定是否用 WorkflowEngine 替代旧路径
+    _wf_route = "legacy"
+    if task_type in ("RESEARCH", "FILE_GEN", "MULTI_STEP"):
+        try:
+            _wf_route = SmartDispatcher.resolve_workflow(task_type, user_input)
+            if _wf_route != "legacy":
+                print(f"[STREAM] 🔮 LangGraph 工作流路由: {_wf_route}")
+        except Exception as _wf_err:
+            print(f"[STREAM] resolve_workflow 跳过: {_wf_err}")
+
+    if _wf_route in ("langgraph_research_doc", "langgraph_multi_agent_ppt"):
+        _wf_name = (
+            "research_and_document" if _wf_route == "langgraph_research_doc"
+            else "multi_agent_ppt"
+        )
+        _wf_label = "📚 研究+文档" if _wf_route == "langgraph_research_doc" else "🎞️ 多Agent PPT"
+
+        def generate_langgraph_workflow():
+            yield f"data: {json.dumps({'type': 'classification', 'task_type': 'LG_WORKFLOW', 'workflow': _wf_name, 'route_method': 'LangGraph', 'message': f'🎯 任务分类: {_wf_label} (LangGraph WorkflowEngine)'})}\n\n"
+            try:
+                from app.core.workflow.langgraph_workflow import WorkflowEngine
+                _engine = WorkflowEngine()
+                final_output = ""
+                for event in _engine.stream(
+                    workflow=_wf_name,
+                    user_input=user_input,
+                    session_id=session_name,
+                ):
+                    node = event.get("node", "")
+                    content = event.get("content", "")
+                    done = event.get("done", False)
+                    if node == "error":
+                        yield f"data: {json.dumps({'type': 'error', 'message': content})}\n\n"
+                        return
+                    if content:
+                        yield f"data: {json.dumps({'type': 'status' if not done else 'token', 'message': f'[{node}] {content}' if not done else None, 'content': content if done else None}, ensure_ascii=False)}\n\n"
+                    if done:
+                        final_output = content
+                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
+                try:
+                    session_manager.append_and_save(
+                        f"{session_name}.json", user_input, final_output or f"[{_wf_label}工作流完成]"
+                    )
+                except Exception:
+                    pass
+            except Exception as _wf_ex:
+                import traceback
+                print(f"[LG_WORKFLOW] ❌ 工作流失败:\n{traceback.format_exc()}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'工作流执行失败: {str(_wf_ex)}'})}\n\n"
+
+        return Response(generate_langgraph_workflow(), mimetype='text/event-stream')
+
+    # ─────────────────────────────────────────────────────────────────────────
     if task_type == "MULTI_STEP" and context_info and context_info.get("is_multi_step_task"):
         print(f"[STREAM] 🔄 检测到复杂任务，使用 TaskOrchestrator 执行多步流程")
         multi_step_info = context_info.get("multi_step_info", {})
         pattern = multi_step_info.get("pattern", "unknown")
-        
+
+        # === 🤖 MultiAgent 高质量通路（LangGraph：研究→写作→审核→修订）===
+        # 仅当 LangGraph 可用且路由决策为 langgraph_react（通用复杂任务）时触发
+        if _wf_route == "langgraph_react":
+            print(f"[STREAM] 🤖 MultiAgentOrchestrator 通路：RESEARCHER→WRITER→CRITIC→REVISE")
+            _ma_model = SmartDispatcher.get_model_for_task("MULTI_STEP")
+
+            def generate_multi_agent():
+                yield f"data: {json.dumps({'type': 'classification', 'task_type': 'MULTI_STEP', 'pattern': 'multi_agent', 'route_method': 'LangGraph MultiAgent', 'message': '🎯 任务分类: 🤖 多Agent高质量处理（研究→写作→审核→修订）'})}\n\n"
+                try:
+                    from app.core.agent.multi_agent import MultiAgentOrchestrator
+                    orch = MultiAgentOrchestrator.preset_content_pipeline(
+                        model_id=_ma_model,
+                        max_revisions=1,
+                    )
+                    _agent_labels = {
+                        "researcher": "📚 研究专员",
+                        "writer":     "✍️ 写作专员",
+                        "critic":     "🔍 审核专员",
+                        "revise":     "🔧 修订专员",
+                        "finalize":   "✅ 整合完成",
+                    }
+                    final_output = ""
+                    for event in orch.stream(user_input=user_input, session_id=session_name):
+                        agent_name = event.get("agent", "unknown")
+                        content = event.get("content", "")
+                        done = event.get("done", False)
+                        label = _agent_labels.get(agent_name, f"[{agent_name}]")
+
+                        if agent_name == "error":
+                            raise RuntimeError(content)
+
+                        if done:
+                            final_output = content
+                            yield f"data: {json.dumps({'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'type': 'status', 'message': f'{label} 处理中...'})}\n\n"
+
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
+                    try:
+                        session_manager.append_and_save(
+                            f"{session_name}.json", user_input,
+                            final_output or "[多Agent任务完成]"
+                        )
+                    except Exception:
+                        pass
+
+                except Exception as _ma_err:
+                    import traceback as _tb
+                    print(f"[MULTI_AGENT] ❌ MultiAgentOrchestrator 失败: {_tb.format_exc()}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'多Agent执行失败，请重试: {str(_ma_err)}'})}\n\n"
+
+            return Response(generate_multi_agent(), mimetype='text/event-stream')
+
         # === 文档工作流执行 ===
         if pattern == "document_workflow" and DocumentWorkflowExecutor:
             print(f"[STREAM] 📄 执行文档工作流")
@@ -5082,7 +6418,7 @@ def chat_stream():
                 for dir_path in upload_dirs:
                     if os.path.exists(dir_path):
                         docs = []
-                        for ext in [".docx", ".md", ".txt", ".json"]:
+                        for ext in [".docx", ".md", ".txt", ".json", ".doc", ".pdf", ".rtf", ".odt"]:
                             import glob
                             docs.extend(glob.glob(f"{dir_path}/**/*{ext}", recursive=True))
                         
@@ -5092,7 +6428,7 @@ def chat_stream():
                             break
                 
                 if not doc_path:
-                    yield f"data: {json.dumps({'type': 'error', 'message': '❌ 未找到可执行的文档文件（支持 .docx, .md, .txt, .json）'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'error', 'message': '❌ 未找到可执行的文档文件（支持 .docx, .doc, .pdf, .md, .txt, .rtf, .odt, .json）'})}\n\n"
                     return
                 
                 status_msg = f"📄 找到文档: {os.path.basename(doc_path)}\n"
@@ -5228,7 +6564,7 @@ def chat_stream():
             # 显示所有子任务
             status_msg = f"📋 任务分解:\n"
             for i, subtask in enumerate(subtasks):
-                status_msg += f"  {i+1}. {subtask['task_type']} - {subtask['description']}\n"
+                status_msg += f"  {i+1}. {subtask['description']}\n"
             status_msg += "\n"
             yield f"data: {json.dumps({'type': 'status', 'message': status_msg})}\n\n"
             
@@ -5240,168 +6576,166 @@ def chat_stream():
                 context = {"original_input": user_input, "user_input": user_input}
                 saved_files = []
                 
-                for i, subtask in enumerate(subtasks):
-                    # 发送任务特定的进度提示
-                    _step_icons = {
-                        "WEB_SEARCH": "🔍", "RESEARCH": "🔬", "PAINTER": "🎨",
-                        "FILE_GEN": "📄", "CODER": "💻"
-                    }
-                    _task_type = subtask["task_type"]
-                    _step_icon = _step_icons.get(_task_type, "⚙️")
-                    step_msg = f"{_step_icon} 步骤 {i+1}/{len(subtasks)}: {subtask['description']}"
-                    _detail = f"任务类型: {_task_type}"
-                    yield f"data: {json.dumps({'type': 'progress', 'message': step_msg, 'detail': _detail})}\n\n"
-                    
-                    step_input = subtask.get("input") or user_input
-                    
-                    # 使用队列接收来自后台线程的实时进度
-                    import queue
-                    import threading
-                    progress_queue = queue.Queue()
-                    
-                    def _progress_cb(msg, detail=""):
-                        progress_queue.put({"msg": msg, "detail": detail})
-                        
-                    task_result_holder = {"result": None}
-                    
-                    def _run_task_thread():
+                # ── 使用 PlanExecutor 执行（支持拓扑排序 + 依赖注入）──────────────
+                from app.core.routing.plan_executor import (
+                    PlanExecutor as _PlanExecutor,
+                    build_handlers_from_orchestrator as _build_handlers,
+                )
+
+                import queue as _queue_mod
+                import threading as _threading_mod
+
+                # 构建 handlers（将 TaskOrchestrator 各方法包装成 PlanExecutor 接口）
+                _handlers = _build_handlers(TaskOrchestrator, context)
+
+                # PlanExecutor 实例（拓扑排序 + ContextStore 传递）
+                _plan_exec = _PlanExecutor(
+                    steps=subtasks,
+                    user_input=user_input,
+                    handlers=_handlers,
+                    max_retry=1,
+                )
+
+                # 在后台线程运行 async executor，通过 queue 回传事件给 SSE 生成器
+                _event_queue = _queue_mod.Queue()
+                _plan_exception = {"err": None}
+
+                def _run_plan_executor():
+                    async def _inner():
                         try:
-                            # Running asyncio.run inside a thread is tricky if not handled well, but here it's a fresh thread.
-                            # We pass _progress_cb to updated methods.
-                            if subtask["task_type"] == "WEB_SEARCH":
-                                task_result_holder["result"] = asyncio.run(TaskOrchestrator._execute_web_search(step_input, context, progress_callback=_progress_cb))
-                            elif subtask["task_type"] == "FILE_GEN":
-                                # FILE_GEN likely already supports it or ignores extra args if using **kwargs in some versions, 
-                                # but based on context it takes it as 4th arg or kwarg.
-                                task_result_holder["result"] = asyncio.run(TaskOrchestrator._execute_file_gen(step_input, context, subtask, progress_callback=_progress_cb))
-                            elif subtask["task_type"] == "PAINTER":
-                                task_result_holder["result"] = asyncio.run(TaskOrchestrator._execute_painter(step_input, context, progress_callback=_progress_cb))
-                            elif subtask["task_type"] == "RESEARCH":
-                                task_result_holder["result"] = asyncio.run(TaskOrchestrator._execute_research(step_input, context, progress_callback=_progress_cb))
-                            else:
-                                # Fallback for unknown
-                                task_result_holder["result"] = {"success": False, "error": f"未知任务类型: {subtask['task_type']}"}
-                        except Exception as e:
-                            import traceback
-                            traceback.print_exc()
-                            task_result_holder["result"] = {"success": False, "error": str(e)}
+                            async for event in _plan_exec.execute():
+                                _event_queue.put(event)
+                        except Exception as _exc:
+                            _plan_exception["err"] = _exc
                         finally:
-                            progress_queue.put(None) # Signal done
+                            _event_queue.put(None)  # 结束信号
+                    asyncio.run(_inner())
 
-                    # 启动后台线程执行任务
-                    t = threading.Thread(target=_run_task_thread)
-                    t.start()
-                    
-                    # 主线程循环读取进度
-                    while True:
-                        try:
-                            item = progress_queue.get(timeout=0.1)
-                            if item is None:
-                                break
-                            # 发送进度SSE
-                            yield f"data: {json.dumps({'type': 'progress', 'message': item['msg'], 'detail': item['detail']})}\n\n"
-                        except queue.Empty:
-                            if not t.is_alive():
-                                break
-                                
-                    t.join()
-                    result = task_result_holder["result"]
-                    
-                    # 发送步骤完成进度
-                    if result.get("success"):
-                        _done_detail = result.get("output", "")[:60]
-                        yield f"data: {json.dumps({'type': 'progress', 'message': f'✅ 步骤 {i+1} 完成', 'detail': _done_detail})}\n\n"
-                    else:
-                        _err_detail = result.get("error", "未知错误")[:60]
-                        yield f"data: {json.dumps({'type': 'progress', 'message': f'⚠️ 步骤 {i+1} 遇到问题', 'detail': _err_detail})}\n\n"
-                    
-                    subtask["status"] = "completed" if result.get("success") else "failed"
-                    subtask["result"] = result
-                    
-                    context[f"{subtask['task_type']}_result"] = result
-                    context[f"step_{i+1}_output"] = result.get("output", result.get("content", ""))
-                    
-                    if result.get("model_id"):
-                        model_msg = f"🤖 使用模型: {result['model_id']}\n"
-                        yield f"data: {json.dumps({'type': 'status', 'message': model_msg})}\n\n"
-                    
-                    model_answer = result.get("content") or result.get("output")
-                    if model_answer:
-                        answer_msg = f"🧠 模型回答:\n{model_answer}\n\n"
-                        yield f"data: {json.dumps({'type': 'status', 'message': answer_msg})}\n\n"
-                    
-                    if result.get("saved_files"):
-                        saved_files.extend(result["saved_files"])
-                    step_results.append(result)
-                    
-                    execution_log.append(f"  ✅ 完成: {subtask['description']}")
-                
-                # 输出最终结果
-                final_output = TaskOrchestrator._merge_results(subtasks, context)
+                _exec_thread = _threading_mod.Thread(target=_run_plan_executor, daemon=True)
+                _exec_thread.start()
 
-                # 3. 结果验证 (User Requirement: Model Verification Feedback)
-                # Tell user we are verifying
-                yield f"data: {json.dumps({'type': 'status', 'message': '🔍 正在进行最终质量验证...'})}\n\n"
-                quality_score = asyncio.run(TaskOrchestrator._validate_quality(user_input, final_output, context))
-                yield f"data: {json.dumps({'type': 'status', 'message': f'✅ 质量验证完成，评分: {quality_score}/100'})}\n\n"
-                
-                separator = "=" * 50
-                output_text = f"\n{separator}\n"
-                output_text += f"✅ 多步任务完成\n"
-                output_text += f"质量评分: {quality_score}/100\n"
-                if saved_files:
-                    output_text += f"已保存文件:\n"
-                    # Add clickable links
-                    for p in saved_files:
-                        name = os.path.basename(p)
-                        # Check if path is absolute or relative
-                        link_path = p.replace("\\", "/")
-                        if not link_path.startswith("http"):
-                            # Assuming frontend can handle workspace relative paths or full paths exposed via virtual route
-                            # Just output markdown link
-                            output_text += f"- [{name}]({link_path})\n"
-                    output_text += f"\n📂 位置: `{settings_manager.documents_dir}`\n"
-                
-                errors_list = []
-                for subtask in subtasks:
-                    if subtask.get("status") == "failed" and subtask.get("result"):
-                        err = subtask["result"].get("error")
-                        if err:
-                            errors_list.append(err)
-                if errors_list:
-                    output_text += f"⚠️ 遇到的问题: {', '.join(errors_list)}\n"
-                
-                final_result = final_output.get('final_output', '(无输出)')
+                _plan_done_event = None
+                while True:
+                    try:
+                        evt = _event_queue.get(timeout=0.1)
+                    except _queue_mod.Empty:
+                        if not _exec_thread.is_alive():
+                            break
+                        continue
+
+                    if evt is None:
+                        break
+
+                    etype = evt.get("type", "")
+
+                    if etype == "progress":
+                        yield f"data: {json.dumps({'type': 'progress', 'message': evt.get('message', ''), 'detail': evt.get('detail', '')})}\n\n"
+
+                    elif etype == "step_done":
+                        step_idx = evt.get("step_index", 0)
+                        task_type_done = evt.get("task_type", "")
+                        success = evt.get("success", False)
+                        preview = evt.get("output_preview", "")
+                        if success:
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'步骤 {step_idx} 完成', 'detail': preview[:80]})}\n\n"
+                        else:
+                            err_msg = evt.get("error") or "执行失败"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'步骤 {step_idx} 遇到问题', 'detail': err_msg[:80]})}\n\n"
+                        # 回补 subtasks 状态（用于后续自检）
+                        for _st in subtasks:
+                            if str(_st.get("id")) == str(evt.get("step_id")):
+                                _st["status"] = "completed" if success else "failed"
+                                _st["result"] = {"success": success, "output": preview, "error": evt.get("error")}
+                                # 收集输出
+                                if success:
+                                    step_results.append({"success": success, "output": preview})
+                                    # 从 ContextStore 获取完整结果后更新 saved_files
+                                break
+
+                    elif etype == "status":
+                        yield f"data: {json.dumps({'type': 'status', 'message': evt.get('message', '')})}\n\n"
+
+                    elif etype == "plan_done":
+                        _plan_done_event = evt
+                        # 收集保存文件
+                        saved_files.extend(evt.get("saved_files") or [])
+                        # 同步 context 快照
+                        for k, v in (evt.get("context_snapshot") or {}).items():
+                            context[k] = v
+
+                _exec_thread.join()
+
+                if _plan_exception["err"]:
+                    raise _plan_exception["err"]
+
+                # ── 组装最终输出 ─────────────────────────────────────────────
+                final_result_text = (_plan_done_event or {}).get("final_output", "(无输出)")
+                # 也从 ContextStore 补全 saved_files（PlanExecutor 内部已汇总）
+                _pe_saved = (_plan_done_event or {}).get("saved_files") or []
+                for _pf in _pe_saved:
+                    if _pf not in saved_files:
+                        saved_files.append(_pf)
+
+                # 质量验证
+                yield f"data: {json.dumps({'type': 'status', 'message': '正在进行最终质量验证...'})}\n\n"
+                _combined_for_validate = {
+                    "final_output": final_result_text,
+                    "steps": [{"status": s.get("status", "completed"), "result": s.get("result")} for s in subtasks],
+                }
+                quality_score = asyncio.run(TaskOrchestrator._validate_quality(user_input, _combined_for_validate, context))
+                yield f"data: {json.dumps({'type': 'status', 'message': f'质量验证完成，评分: {quality_score}/100'})}\n\n"
+
                 # 复杂任务快速自检
-                check = Utils.quick_self_check("MULTI_STEP", user_input, final_result)
+                check = Utils.quick_self_check("MULTI_STEP", user_input, final_result_text)
                 if not check.get("pass") and check.get("fix_prompt"):
-                    status_msg = "🩺 自检未通过，正在修正最终输出...\n"
-                    yield f"data: {json.dumps({'type': 'status', 'message': status_msg})}\n\n"
-                    fix_resp = client.models.generate_content(
-                        model=SmartDispatcher.get_model_for_task("CHAT"),
-                        contents=check["fix_prompt"],
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_instruction,
-                            temperature=0.4,
-                            max_output_tokens=3000,
+                    yield f"data: {json.dumps({'type': 'status', 'message': '🩺 自检未通过，正在修正最终输出...'})}\n\n"
+                    try:
+                        fix_resp = client.models.generate_content(
+                            model=SmartDispatcher.get_model_for_task("MULTI_STEP"),
+                            contents=check["fix_prompt"],
+                            config=types.GenerateContentConfig(
+                                system_instruction=system_instruction,
+                                temperature=0.4,
+                                max_output_tokens=3000,
+                            )
                         )
-                    )
-                    corrected = fix_resp.text or final_result
-                    final_result = corrected
+                        final_result_text = fix_resp.text or final_result_text
+                    except Exception as _fix_err:
+                        print(f"[MULTI_STEP] ⚠️ 自检修正失败: {_fix_err}")
+
+                # LocalPlanner self_check
                 if use_local_planner:
                     from app.core.routing import LocalPlanner
                     plan_check = LocalPlanner.self_check(user_input, subtasks, step_results)
-                    status = plan_check.get("status", "partial")
-                    summary = plan_check.get("summary", "")
-                    next_actions = plan_check.get("next_actions", []) if isinstance(plan_check.get("next_actions", []), list) else []
-                    output_text += f"\n自检结论: {status}\n"
-                    if summary:
-                        output_text += f"说明: {summary}\n"
-                    if next_actions:
-                        output_text += f"建议后续: {', '.join(next_actions)}\n"
-                output_text += f"\n最终输出:\n{final_result}\n"
-                output_text += f"{separator}\n"
-                
+                    _lp_status = plan_check.get("status", "partial")
+                    _lp_summary = plan_check.get("summary", "")
+                    _lp_next = plan_check.get("next_actions", []) if isinstance(plan_check.get("next_actions", []), list) else []
+                    _lp_msg = f"自检结论: {_lp_status}"
+                    if _lp_summary:
+                        _lp_msg += f"\n说明: {_lp_summary}"
+                    if _lp_next:
+                        _lp_msg += f"\n建议后续: {', '.join(_lp_next)}"
+                    yield f"data: {json.dumps({'type': 'status', 'message': _lp_msg})}\n\n"
+
+                separator = "=" * 50
+                output_text = f"\n{separator}\n✅ 多步任务完成\n质量评分: {quality_score}/100\n"
+                if saved_files:
+                    output_text += "已保存文件:\n"
+                    for p in saved_files:
+                        name = os.path.basename(p)
+                        link_path = p.replace("\\", "/")
+                        output_text += f"- [{name}]({link_path})\n"
+                    output_text += f"\n📂 位置: `{settings_manager.documents_dir}`\n"
+
+                errors_list = [
+                    s["result"].get("error") for s in subtasks
+                    if s.get("status") == "failed" and isinstance(s.get("result"), dict) and s["result"].get("error")
+                ]
+                if errors_list:
+                    output_text += f"⚠️ 遇到的问题: {', '.join(errors_list)}\n"
+
+                output_text += f"\n最终输出:\n{final_result_text}\n{separator}\n"
+
                 yield f"data: {json.dumps({'type': 'token', 'content': output_text})}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': saved_files})}\n\n"
                 
@@ -5420,51 +6754,99 @@ def chat_stream():
         
         return Response(generate_multi_step(), mimetype='text/event-stream')
     
-    # === Agent 任务执行 ===
+    # === Agent 任务执行（LangGraphAgent ReAct，降级到 UnifiedAgent）===
     if task_type == "AGENT":
-        print(f"[STREAM] 🤖 执行 Agent 任务 (UnifiedAgent)")
-        
+        print(f"[STREAM] 🤖 执行 Agent 任务 (LangGraphAgent ReAct)")
+        # classify_v2 已识别出 skill_id，传给 Agent 实现 Skill 专属行为
+        _agent_skill_id = _router_decision.skill_id if _router_decision else None
+
         def generate_agent():
-            # 发送分类信息
-            yield f"data: {json.dumps({'type': 'classification', 'task_type': 'AGENT', 'route_method': route_method, 'message': '🎯 任务分类: 🤖 智能助手 (工具调用)'})}\n\n"
-            
-            # 使用 UnifiedAgent 替代旧 agent_loop
+            yield f"data: {json.dumps({'type': 'classification', 'task_type': 'AGENT', 'route_method': route_method, 'message': '🎯 任务分类: 🤖 智能助手 (LangGraph ReAct)'})}\n\n"
+
+            final_answer = ""
+            collected_steps = []
+
+            # ── 优先：LangGraphAgent（StateGraph + CheckpointSaver）────────────
+            _lg_ok = False
             try:
-                from app.core.agent.factory import create_agent
-                from app.core.agent.types import AgentStepType
-                _ua = create_agent(model_id=SmartDispatcher.get_model_for_task("AGENT"))
-                
-                collected_steps = []
-                final_answer = ""
-                for step in _ua.run(input_text=user_input, history=history):
-                    step_data = step.to_dict()
+                from app.core.agent.factory import create_langgraph_agent
+                _lg_agent = create_langgraph_agent(
+                    model_id=SmartDispatcher.get_model_for_task("AGENT"),
+                )
+                _lg_ok = True
+                for chunk in _lg_agent.stream(
+                    input_text=user_input,
+                    history=history,
+                    session_id=session_name,
+                    skill_id=_agent_skill_id,
+                    task_type="AGENT",
+                ):
+                    ctype = chunk.get("type", "token")
+                    content = chunk.get("content", "")
+                    if ctype == "answer":
+                        final_answer = content
+                        step_data = {"step_type": "ANSWER", "content": content, "tool": None}
+                    elif ctype == "tool_call":
+                        step_data = {"step_type": "TOOL_CALL", "content": f"调用工具: {content}", "tool": content, "args": chunk.get("args", {})}
+                    elif ctype == "tool_result":
+                        step_data = {"step_type": "TOOL_RESULT", "content": content, "tool": None}
+                    elif ctype == "token":
+                        step_data = {"step_type": "THINKING", "content": content, "tool": None}
+                    elif ctype == "error":
+                        raise RuntimeError(content)
+                    else:
+                        continue
                     collected_steps.append(step_data)
-                    if step.step_type == AgentStepType.ANSWER:
-                        final_answer = step.content or ""
                     yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
-                
-                if not final_answer and collected_steps:
-                    final_answer = collected_steps[-1].get('content', '')
-                task_payload = {
-                    'id': f'task_{int(time.time() * 1000)}',
-                    'status': 'success',
-                    'result': final_answer,
-                    'steps': collected_steps,
-                }
-                yield f"data: {json.dumps({'type': 'task_final', 'data': task_payload}, ensure_ascii=False)}\n\n"
-                
-                # 保存对话历史
+
+            except Exception as _lg_err:
+                print(f"[AGENT] LangGraphAgent 失败 ({_lg_err})，降级到 UnifiedAgent...")
+                _lg_ok = False
+
+            # ── 降级：UnifiedAgent（旧 while-loop 实现）────────────────────────
+            if not _lg_ok:
                 try:
-                    session_manager.append_and_save(f"{session_name}.json", user_input, final_answer or '[Agent 任务完成]')
-                except Exception:
-                    pass
-            
-            except Exception as e:
-                import traceback
-                error_detail = traceback.format_exc()
-                print(f"[AGENT] ❌ Agent 执行失败:\n{error_detail}")
-                yield f"data: {json.dumps({'type': 'error', 'message': f'Agent 执行失败: {str(e)}'})}\n\n"
-        
+                    from app.core.agent.factory import create_agent
+                    from app.core.agent.types import AgentStepType
+                    _ua = create_agent(model_id=SmartDispatcher.get_model_for_task("AGENT"))
+                    collected_steps = []
+                    final_answer = ""
+                    for step in _ua.run(
+                        input_text=user_input,
+                        history=history,
+                        session_id=session_name,
+                        skill_id=_agent_skill_id,
+                        task_type="AGENT",
+                    ):
+                        step_data = step.to_dict()
+                        collected_steps.append(step_data)
+                        if step.step_type == AgentStepType.ANSWER:
+                            final_answer = step.content or ""
+                        yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
+                    if not final_answer and collected_steps:
+                        final_answer = collected_steps[-1].get('content', '')
+                except Exception as e:
+                    import traceback
+                    print(f"[AGENT] ❌ UnifiedAgent 也失败:\n{traceback.format_exc()}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'Agent 执行失败: {str(e)}'})}\n\n"
+                    return
+
+            task_payload = {
+                'id': f'task_{int(time.time() * 1000)}',
+                'status': 'success',
+                'result': final_answer,
+                'steps': collected_steps,
+                'engine': 'langgraph' if _lg_ok else 'unified',
+            }
+            yield f"data: {json.dumps({'type': 'task_final', 'data': task_payload}, ensure_ascii=False)}\n\n"
+
+            try:
+                session_manager.append_and_save(
+                    f"{session_name}.json", user_input, final_answer or '[Agent 任务完成]'
+                )
+            except Exception:
+                pass
+
         return Response(generate_agent(), mimetype='text/event-stream')
     
     if locked_model and locked_model != 'auto':
@@ -5475,23 +6857,94 @@ def chat_stream():
         model_id = SmartDispatcher.get_model_for_task(task_type, complexity=_complexity)
     
     print(f"[STREAM] Final: task_type='{task_type}', model_id='{model_id}'\n")
-    
+
+    # 🎯 Skills 注入：将用户启用的 Skill 追加到 system_instruction
+    try:
+        from app.core.skills.skill_manager import SkillManager
+        _active_skills = SkillManager.get_active_skill_names(task_type=task_type)
+        if _active_skills:
+            print(f"[STREAM] 🎯 Active Skills ({task_type}): {', '.join(_active_skills)}")
+        system_instruction = SkillManager.inject_into_prompt(
+            system_instruction, task_type=task_type, user_input=user_input
+        )
+    except Exception as _sk_err:
+        print(f"[STREAM] ⚠️ Skills 注入失败: {_sk_err}")
+
+    # 📚 RAG 混合检索（向量 + BM25 + RRF 融合）
+    # _rag_context_block: 配送给 generate()、RESEARCH 、ToT 等各路径
+    _rag_context_block = ""
+    try:
+        from app.core.services.rag_service import get_rag_service
+        _rag_svc = get_rag_service()
+        if _rag_svc.stats().get("initialized"):
+            _rag_hits = _rag_svc.hybrid_retrieve(user_input, k=3, score_threshold=0.3)
+            if _rag_hits:
+                for _rc in _rag_hits:
+                    _src = os.path.basename(_rc.get("source", "unknown"))
+                    _rag_context_block += f"[{_src} | 相似度: {_rc.get('score', 0):.3f}]\n{_rc['content']}\n\n"
+                # 同时注入 system_instruction（供 ToT 、AGENT 路径使用）
+                _rag_sys_block = (
+                    "\n\n─────────────────────────────────────────"
+                    "\n## 📚 知识库参考内容（混合检索）\n" + _rag_context_block
+                )
+                system_instruction += _rag_sys_block
+                print(f"[STREAM] 📚 混合RAG: {len(_rag_hits)} 片段，top_score={_rag_hits[0].get('score', 0):.3f}")
+    except Exception as _rag_err:
+        print(f"[STREAM] ⚠️ RAG 注入跳过: {_rag_err}")
+
+    # 🕸️ Graph RAG — entity-expanded triple retrieval
+    try:
+        from app.core.services.graph_rag_service import GraphRAGService as _GRAGS
+        _graph_ctx = _GRAGS.retrieve(user_input, k=8)
+        if _graph_ctx:
+            _rag_context_block += "\n\n" + _graph_ctx
+            system_instruction += (
+                "\n\n─────────────────────────────────────────"
+                "\n" + _graph_ctx
+            )
+            print(f"[STREAM] 🕸️ Graph RAG: 注入知识图谱关联事实")
+    except Exception as _ge:
+        pass
+
     # 读取用户设置：是否显示思考过程
     _show_thinking = False
     try:
         _show_thinking = settings_manager.get('ai', 'show_thinking') == True
     except:
         pass
-    
+
     def generate():
         start_time = time.time()
         
-        def yield_thinking(message: str, phase: str = "thinking"):
-            """发送思考过程事件（仅当用户开启 show_thinking 时）"""
+        def _infer_analysis_source(message: str, phase: str = "thinking") -> str:
+            """推断分析来源：local / cloud / hybrid / system"""
+            msg = (message or "").lower()
+            phase_l = (phase or "").lower()
+
+            if any(k in msg for k in ["ollama", "本地模型", "qwen", "local"]):
+                return "local"
+            if any(k in msg for k in ["gemini", "deep-research", "云端", "cloud"]):
+                return "cloud"
+            if any(k in phase_l for k in ["routing", "context", "planning", "analyzing"]):
+                return "hybrid"
+            return "system"
+
+        def yield_thinking(message: str, phase: str = "thinking", source: str = None):
+            """发送思考过程事件（仅当用户开启 show_thinking 时），附带分析来源"""
             if not _show_thinking:
                 return ""
+
+            resolved_source = source or _infer_analysis_source(message, phase)
+            source_tag = {
+                "local": "[本地分析]",
+                "cloud": "[大模型分析]",
+                "hybrid": "[混合决策]",
+                "system": "[系统流程]",
+            }.get(resolved_source, "[系统流程]")
+
             elapsed = round(time.time() - start_time, 1)
-            return f"data: {json.dumps({'type': 'thinking', 'message': message, 'phase': phase, 'elapsed': elapsed}, ensure_ascii=False)}\n\n"
+            display_message = f"{source_tag} {message}"
+            return f"data: {json.dumps({'type': 'thinking', 'message': display_message, 'phase': phase, 'elapsed': elapsed, 'analysis_source': resolved_source}, ensure_ascii=False)}\n\n"
         
         # === 立即反馈任务分类信息 ===
         task_display_names = {
@@ -5526,20 +6979,21 @@ def chat_stream():
         yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'task_display': task_display, 'model': model_id, 'model_display': model_display, 'route_method': route_method, 'routing_list': routing_list, 'message': classification_msg})}\n\n"
         
         # 思考过程：任务路由分析
-        t = yield_thinking(f"分析用户意图 → 识别为 {task_display}", "routing")
+        t = yield_thinking(f"分析用户意图 → 识别为 {task_display}", "routing", "hybrid")
         if t: yield t
-        t = yield_thinking(f"路由方法: {route_method}，选择模型: {model_display}", "model")
+        model_source = "local" if any(k in (model_id or "").lower() for k in ["qwen", "llama", "ollama"]) else "cloud"
+        t = yield_thinking(f"路由方法: {route_method}，选择模型: {model_display}", "model", model_source)
         if t: yield t
         if routing_list:
-            steps_str = " → ".join([f"{r.get('method','?')}({r.get('confidence','?')})" for r in routing_list[:5]]) if isinstance(routing_list, list) else str(routing_list)
-            t = yield_thinking(f"路由决策链: {steps_str}", "routing")
+            steps_str = " → ".join([f"{r.get('task','?')}({r.get('score', 0):.2f})" if isinstance(r.get('score'), (int, float)) else f"{r.get('task','?')}({r.get('score','?')})" for r in routing_list[:5]]) if isinstance(routing_list, list) else str(routing_list)
+            t = yield_thinking(f"路由决策链: {steps_str}", "routing", "hybrid")
             if t: yield t
         
         # 如果有复杂度信息，也发送
         if context_info and context_info.get("complexity"):
             complexity_msg = f"📊 任务复杂度: {context_info['complexity']}"
             yield f"data: {json.dumps({'type': 'info', 'message': complexity_msg})}\n\n"
-            t = yield_thinking(f"任务复杂度评估: {context_info['complexity']}", "analyzing")
+            t = yield_thinking(f"任务复杂度评估: {context_info['complexity']}", "analyzing", "hybrid")
             if t: yield t
         
         # 如果有上下文，使用增强后的输入
@@ -5548,7 +7002,7 @@ def chat_stream():
             effective_input = context_info["enhanced_input"]
             print(f"[STREAM] Using enhanced input (length: {len(effective_input)})")
             yield f"data: {json.dumps({'type': 'info', 'message': '🔗 检测到延续任务，使用上下文增强'})}\n\n"
-            t = yield_thinking(f"检测到上下文延续，增强输入 ({len(effective_input)} 字符)", "context")
+            t = yield_thinking(f"检测到上下文延续，增强输入 ({len(effective_input)} 字符)", "context", "hybrid")
             if t: yield t
 
         # 使用快速小模型将请求转为结构化 Markdown（仅对大模型任务启用）
@@ -5557,7 +7011,7 @@ def chat_stream():
             if adapted_input != effective_input:
                 effective_input = adapted_input
                 yield f"data: {json.dumps({'type': 'info', 'message': '🧾 已将请求结构化为Markdown提示'})}\n\n"
-                t = yield_thinking("将用户请求结构化为 Markdown 格式以提升输出质量", "planning")
+                t = yield_thinking("将用户请求结构化为 Markdown 格式以提升输出质量", "planning", "hybrid")
                 if t: yield t
         
         # 重置中断标志（每次新请求都重置）
@@ -5568,7 +7022,10 @@ def chat_stream():
             return _interrupt_manager.is_interrupted(session_name)
         
         # 发送进度: 开始处理
-        yield f"data: {json.dumps({'type': 'progress', 'message': f'🚀 {task_type} 任务开始...', 'detail': get_model_display_name(model_id)})}\n\n"
+        from web.smart_feedback import SmartFeedback
+        _task_labels = SmartFeedback.TASK_LABELS
+        _tl = _task_labels.get(task_type, task_type)
+        yield f"data: {json.dumps({'type': 'progress', 'message': f'开始处理{_tl}任务', 'detail': get_model_display_name(model_id)})}\n\n"
         
         try:
             # 初始化模型追踪变量（用于日志记录）
@@ -5577,8 +7034,8 @@ def chat_stream():
             # === SYSTEM Mode (本地执行 - 即时) ===
             if task_type == "SYSTEM":
                 used_model = "LocalExecutor"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '🖥️ 正在分析系统指令...', 'detail': ''})}\n\n"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '⚡ 正在执行操作...', 'detail': ''})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在分析系统指令...', 'detail': ''})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在执行操作...', 'detail': ''})}\n\n"
                 
                 exec_result = LocalExecutor.execute(user_input)
                 response_text = exec_result["message"]
@@ -5619,8 +7076,8 @@ def chat_stream():
             # === FILE_OP Mode (文件操作 - 即时) ===
             if task_type == "FILE_OP":
                 used_model = "LocalExecutor"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '📂 正在分析文件操作...', 'detail': ''})}\n\n"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 正在访问文件系统...', 'detail': ''})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在分析文件操作...', 'detail': ''})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在访问文件系统...', 'detail': ''})}\n\n"
 
                 batch_manager = get_batch_ops_manager()
                 if batch_manager.is_batch_command(user_input):
@@ -5716,7 +7173,7 @@ def chat_stream():
                 used_model = model_id
                 t = yield_thinking("进入文件编辑模式，将理解用户指令并修改文件", "routing")
                 if t: yield t
-                yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在分析编辑指令...', 'detail': ''})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在分析编辑指令...', 'detail': ''})}\n\n"
                 
                 editor = get_file_editor()
                 
@@ -5735,7 +7192,7 @@ def chat_stream():
                     if t: yield t
                     
                     yield f"data: {json.dumps({'type': 'progress', 'message': f'🔍 目标文件: {os.path.basename(file_path)}', 'detail': ''})}\n\n"
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '✏️ 正在执行编辑...', 'detail': ''})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '正在执行编辑...', 'detail': ''})}\n\n"
                     
                     result = editor.smart_edit(file_path, instruction)
                     
@@ -5782,78 +7239,505 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                 return
             
-            # === FILE_SEARCH Mode (文件搜索 - 内容定位) ===
+            # === FILE_SEARCH Mode (文件搜索: 全盘扫描 + 工作区索引) ===
             if task_type == "FILE_SEARCH":
-                used_model = "FileIndexer (Local)"
-                t = yield_thinking("进入文件搜索模式，将在索引中查找匹配文件", "searching")
+                used_model = "FileScanner (Local)"
+                t = yield_thinking("进入文件搜索模式：全盘文件索引检索", "searching")
                 if t: yield t
-                yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 正在搜索文件...', 'detail': ''})}\n\n"
-                
-                indexer = get_file_indexer()
-                
-                # 提取搜索关键词
-                keywords = user_input.replace("找文件", "").replace("搜索", "").replace("查找", "")
-                keywords = keywords.replace("包含", "").replace("的文件", "").strip()
-                
-                t = yield_thinking(f"搜索关键词: {keywords}", "searching")
-                if t: yield t
-                
-                # 先尝试全文搜索
-                results = indexer.search(keywords, limit=10)
-                
-                if not results:
-                    # 如果没有结果，尝试内容相似度搜索
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '🔄 扩展搜索范围...', 'detail': ''})}\n\n"
-                    results = indexer.find_by_content(keywords, min_similarity=0.2)
-                
-                if results:
-                    response_text = f"🔍 找到 {len(results)} 个匹配文件:\n\n"
-                    
-                    for i, r in enumerate(results[:10], 1):
-                        file_name = r.get("file_name", "未知文件")
-                        file_path = r.get("file_path", "")
-                        snippet = r.get("match_snippet", "")
-                        score = r.get("score", 0)
-                        similarity = r.get("similarity")
-                        
-                        response_text += f"### {i}. {file_name}\n"
-                        response_text += f"📁 路径: `{file_path}`\n"
-                        
-                        if similarity:
-                            response_text += f"🎯 相似度: {similarity:.0%}\n"
-                        elif score:
-                            response_text += f"⭐ 匹配分: {score:.2f}\n"
-                        
-                        if snippet:
-                            snippet_clean = snippet.replace("**", "**`")[:200]
-                            response_text += f"📄 预览: {snippet_clean}...\n"
-                        
-                        response_text += "\n"
-                else:
-                    response_text = "❌ 未找到匹配文件\n\n"
-                    response_text += "💡 提示:\n"
-                    response_text += "- 确保文件已被索引（Koto 处理过的文件会自动索引）\n"
-                    response_text += "- 尝试使用更具体的关键词\n"
-                    response_text += f"- 当前索引文件数: {len(indexer.list_indexed_files(limit=1000))}"
-                
-                yield f"data: {json.dumps({'type': 'token', 'content': response_text})}\n\n"
-                
-                session_manager.append_and_save(
-                    f"{session_name}.json",
-                    user_input,
-                    response_text,
-                    task="FILE_SEARCH",
-                    model_name=used_model
+                yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 正在搜索文件...', 'detail': '全盘索引检索'}, ensure_ascii=False)}\n\n"
+
+                # ── 导入全盘扫描器 ─────────────────────────────────────────────
+                try:
+                    from web.file_scanner import FileScanner, extract_query_from_input, is_disk_search_intent
+                    _disk_scanner_ok = True
+                except Exception as _fse:
+                    print(f"[FILE_SEARCH] ⚠️ FileScanner 导入失败: {_fse}")
+                    _disk_scanner_ok = False
+
+                # 判断是否是全盘搜索意图
+                _is_disk = _disk_scanner_ok and is_disk_search_intent(user_input)
+
+                # ── 指定路径 + 扩展名列举/归纳（如"归纳 C:\Desktop 里的 .doc 文件"）──
+                import re as _re_pathscan
+                import time as _time_fmt
+                _explicit_path_m = _re_pathscan.search(
+                    r'([A-Za-z]:[\\][^\s\u4e00-\u9fa5]*)', user_input
                 )
-                
-                total_time = time.time() - start_time
-                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
-                return
+                if _explicit_path_m:
+                    from pathlib import Path as _ScanPath
+                    _scan_dir = _ScanPath(_explicit_path_m.group(1).rstrip('\\/. '))
+                    # 关键词 → 扩展名映射
+                    _KW_EXT_MAP = [
+                        (["word文件", "word文档", "word"], [".doc", ".docx"]),
+                        (["excel文件", "excel表格", "excel"], [".xls", ".xlsx"]),
+                        (["ppt文件", "ppt演示", "ppt", "幻灯片"], [".ppt", ".pptx"]),
+                        (["pdf文件", "pdf"], [".pdf"]),
+                        (["图片", "照片"], [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]),
+                        (["压缩包", "压缩文件"], [".zip", ".rar", ".7z"]),
+                    ]
+                    _ext_filters = []
+                    _user_lower = user_input.lower()
+                    for _kws, _exts in _KW_EXT_MAP:
+                        if any(k in _user_lower for k in _kws):
+                            _ext_filters = _exts[:]
+                            break
+                    if not _ext_filters:
+                        _ext_raw = _re_pathscan.findall(
+                            r'\.(docx?|xlsx?|pdf|txt|md|pptx?|csv|json|py|jpe?g|png|gif|mp[34]|zip|rar)',
+                            user_input, _re_pathscan.IGNORECASE
+                        )
+                        _ext_filters = list(dict.fromkeys('.' + e.lower() for e in _ext_raw))
+                    if _scan_dir.exists() and _scan_dir.is_dir():
+                        _ext_label = "、".join(_ext_filters) if _ext_filters else "所有类型"
+                        # ── 判断意图：归纳（物理整理）vs 搜索/列举（只读列表）──────
+                        _CATALOG_KWS = ["归纳", "归档", "归类"]
+                        _is_catalog_intent = any(k in user_input for k in _CATALOG_KWS)
+
+                        # ── 内容过滤意图（"哪几个是X"）优先于 flat list ──────────
+                        import re as _re_filter_intent
+                        _CONTENT_FILTER_KWS = [
+                            "哪几个是", "哪几份是", "有哪几个", "有几个是", "哪些是",
+                            "是企业", "是访谈", "是报告", "是合同", "是简历", "是方案",
+                            "是什么类型", "属于", "是什么文件", "哪几", "几个是", "几份是",
+                        ]
+                        _is_filter_intent = (
+                            not _is_catalog_intent and (
+                                any(k in user_input for k in _CONTENT_FILTER_KWS)
+                                or bool(_re_filter_intent.search(
+                                    r'哪[几个些].*是|是.*[报告合同简历方案访谈纪要计划]', user_input
+                                ))
+                            )
+                        )
+
+                        if _is_catalog_intent:
+                            # ═══ 归纳模式：FolderCatalogOrganizer 物理整理 ═══
+                            t = yield_thinking(f"启动文件夹归纳: {_scan_dir}，筛选: {_ext_label}", "searching")
+                            if t: yield t
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'🗂️ 正在归纳 {_scan_dir} 中的 {_ext_label} 文件...', 'detail': '仅处理当前目录，不进入子文件夹'}, ensure_ascii=False)}\n\n"
+                            try:
+                                try:
+                                    from web.folder_catalog_organizer import FolderCatalogOrganizer
+                                except ImportError:
+                                    from folder_catalog_organizer import FolderCatalogOrganizer
+                                _analyzer = get_file_analyzer()
+                                _organizer_inst = get_file_organizer()
+                                _engine = FolderCatalogOrganizer(get_organize_root(), _analyzer, _organizer_inst)
+                                _summary = _engine.organize_folder(
+                                    str(_scan_dir),
+                                    recursive=False,
+                                    ext_filters=_ext_filters if _ext_filters else None,
+                                )
+                                if _summary.get("success"):
+                                    _entries = _summary.get("entries", [])
+                                    _ok = [e for e in _entries if e.get("organized")]
+                                    _fail = [e for e in _entries if not e.get("organized")]
+                                    _organize_root_display = get_organize_root()
+                                    response_text = (
+                                        f"✅ 归纳完成！\n\n"
+                                        f"- 📂 来源目录: `{_scan_dir}`\n"
+                                        f"- 📁 整理到: `{_organize_root_display}`\n"
+                                        f"- ✔️ 已整理: **{len(_ok)}** 个文件\n"
+                                    )
+                                    if _fail:
+                                        response_text += f"- ⚠️ 失败: {len(_fail)} 个（{', '.join(e['file_name'] for e in _fail[:3])}{'...' if len(_fail) > 3 else ''}）\n"
+                                    if _summary.get("report_markdown"):
+                                        response_text += f"\n🧾 归纳清单已保存: `{_summary['report_markdown']}`"
+                                    # 显示分组结果
+                                    _groups: dict = {}
+                                    for _e in _ok:
+                                        _grp = _e.get("suggested_folder", "其他")
+                                        _groups.setdefault(_grp, []).append(_e["file_name"])
+                                    if _groups:
+                                        response_text += "\n\n### 📂 归纳分组\n"
+                                        for _grp, _names in _groups.items():
+                                            response_text += f"\n**{_grp}**\n"
+                                            for _n in _names:
+                                                response_text += f"- {_n}\n"
+                                else:
+                                    response_text = f"❌ 归纳失败: {_summary.get('error', '未知错误')}"
+                            except Exception as _oe:
+                                response_text = f"❌ 归纳异常: {str(_oe)}"
+                                print(f"[FILE_SEARCH] FolderCatalogOrganizer 异常: {_oe}")
+                        elif _is_filter_intent:
+                            # ═══ 内容过滤模式：Ollama 判断哪些文件符合描述 ═══
+                            # 从问句中提取过滤条件（去除路径和结构词）
+                            _criterion_raw = user_input
+                            _criterion_raw = _re_filter_intent.sub(
+                                r'[A-Za-z]:[\\][^\s\u4e00-\u9fa5]*', '', _criterion_raw
+                            ).strip()
+                            _criterion_raw = _re_filter_intent.sub(
+                                r'这个路径下|路径下|这个文件夹|文件夹下|下面|下有|哪几个|有哪几个'
+                                r'|有几个|哪些|哪几份|几个是|几份是|是的|这个|的文件|这条路径',
+                                '', _criterion_raw
+                            ).strip()
+                            _criterion = _criterion_raw.strip('？?。 ') or user_input.strip('？?。 ')
+                            t = yield_thinking(f"内容过滤: {_scan_dir} / 条件: {_criterion}", "searching")
+                            if t: yield t
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'🔎 正在逐一分析文件内容...', 'detail': f'过滤条件: {_criterion}'}, ensure_ascii=False)}\n\n"
+                            try:
+                                try:
+                                    from web.file_qa import filter_files_by_criterion as _ffc2
+                                except ImportError:
+                                    from file_qa import filter_files_by_criterion as _ffc2
+                                _filter_res = _ffc2(
+                                    criterion=_criterion,
+                                    directory=str(_scan_dir),
+                                    ext_filters=_ext_filters if _ext_filters else None,
+                                )
+                                if _filter_res.get("success"):
+                                    _matches2 = _filter_res.get("matches", [])
+                                    _scanned2 = _filter_res.get("total_scanned", 0)
+                                    if _matches2:
+                                        response_text = (
+                                            f"🔎 在 `{_scan_dir}` 扫描了 **{_scanned2}** 个文件，"
+                                            f"找到 **{len(_matches2)}** 个符合「{_criterion}」：\n\n"
+                                        )
+                                        for _mi, _mm in enumerate(_matches2, 1):
+                                            response_text += f"**{_mi}. `{_mm['file_name']}`**\n"
+                                            if _mm.get("reason"):
+                                                response_text += f"   _{_mm['reason']}_\n"
+                                            response_text += "\n"
+                                    else:
+                                        response_text = (
+                                            f"📭 在 `{_scan_dir}` 扫描了 **{_scanned2}** 个文件，"
+                                            f"未找到符合「{_criterion}」描述的文件。"
+                                        )
+                                else:
+                                    response_text = f"❌ {_filter_res.get('error', '过滤失败')}"
+                            except Exception as _fe3:
+                                response_text = f"❌ 内容过滤异常: {_fe3}"
+                        else:
+                            # ═══ 搜索/列举模式：只读，显示文件列表 ═══
+                            t = yield_thinking(f"扫描路径: {_scan_dir}（仅当前层），筛选: {_ext_label}", "searching")
+                            if t: yield t
+                            _file_list = []
+                            try:
+                                for _entry in _scan_dir.iterdir():
+                                    if not _entry.is_file():
+                                        continue
+                                    if _entry.name.startswith("~$"):
+                                        continue
+                                    if _ext_filters and _entry.suffix.lower() not in _ext_filters:
+                                        continue
+                                    try:
+                                        _stat = _entry.stat()
+                                        _sz = _stat.st_size
+                                        _sz_str = (
+                                            f"{_sz} B" if _sz < 1024 else
+                                            f"{_sz/1024:.1f} KB" if _sz < 1048576 else
+                                            f"{_sz/1048576:.1f} MB"
+                                        )
+                                        _file_list.append({
+                                            "name": _entry.name,
+                                            "size": _sz_str,
+                                            "mtime": _stat.st_mtime,
+                                            "mtime_str": _time_fmt.strftime('%Y-%m-%d %H:%M', _time_fmt.localtime(_stat.st_mtime)),
+                                        })
+                                    except (PermissionError, OSError):
+                                        pass
+                            except (PermissionError, OSError):
+                                pass
+                            _file_list.sort(key=lambda x: x["mtime"], reverse=True)
+                            if not _file_list:
+                                response_text = f"📁 在 `{_scan_dir}` 中未找到任何 **{_ext_label}** 文件。"
+                            else:
+                                response_text = f"📁 在 `{_scan_dir}` 中找到 **{len(_file_list)}** 个 **{_ext_label}** 文件：\n\n"
+                                response_text += "| # | 文件名 | 大小 | 修改时间 |\n| --- | --- | --- | --- |\n"
+                                for _i, _f in enumerate(_file_list[:100], 1):
+                                    response_text += f"| {_i} | `{_f['name']}` | {_f['size']} | {_f['mtime_str']} |\n"
+                                if len(_file_list) > 100:
+                                    response_text += f"\n*...共 {len(_file_list)} 个文件，仅显示前 100 个*"
+                        yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                        session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                        total_time = time.time() - start_time
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                        return
+
+                # ── 📁 文件夹监控（Watch Mode） ────────────────────────────────
+                _WATCH_START_KWS = ["监控文件夹", "监控目录", "监控这个文件夹", "开始监控", "自动归类"]
+                _WATCH_STOP_KWS  = ["停止监控", "取消监控", "关闭监控"]
+                _WATCH_LIST_KWS  = ["正在监控", "监控列表", "查看监控", "有哪些监控"]
+                _watch_path_m = _re_pathscan.search(r'([A-Za-z]:[\\][^\s\u4e00-\u9fa5]*)', user_input)
+                if any(k in user_input for k in _WATCH_START_KWS) and _watch_path_m:
+                    _wdir = _watch_path_m.group(1).rstrip('\\/. ')
+                    try:
+                        from web.file_watcher import get_file_watcher
+                    except ImportError:
+                        from file_watcher import get_file_watcher
+                    _watcher = get_file_watcher()
+                    _watcher.configure(get_file_analyzer(), get_file_organizer(), get_organize_root())
+                    _wres = _watcher.start_watch(_wdir)
+                    if _wres.get("success"):
+                        response_text = (
+                            f"👁️ **文件夹监控已启动！**\n\n"
+                            f"- 📂 监控目录: `{_wdir}`\n"
+                            f"- ⚡ 新文件落地后自动分析并归类到 `{get_organize_root()}`\n"
+                            f"- 🔕 说「**停止监控 {_wdir}**」可随时关闭\n\n"
+                            f"_支持格式: .doc/.docx/.pdf/.xlsx/.pptx/.txt/.csv/.zip 等_"
+                        )
+                    else:
+                        response_text = f"❌ 启动监控失败: {_wres.get('error', '未知错误')}"
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                if any(k in user_input for k in _WATCH_STOP_KWS) and _watch_path_m:
+                    _wdir = _watch_path_m.group(1).rstrip('\\/. ')
+                    try:
+                        from web.file_watcher import get_file_watcher
+                    except ImportError:
+                        from file_watcher import get_file_watcher
+                    _wres = get_file_watcher().stop_watch(_wdir)
+                    response_text = (
+                        f"⛔ 已停止监控 `{_wdir}`"
+                        if _wres.get("success") else
+                        f"⚠️ 停止失败: {_wres.get('error', '该目录未在监控中')}"
+                    )
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                if any(k in user_input for k in _WATCH_LIST_KWS):
+                    try:
+                        from web.file_watcher import get_file_watcher
+                    except ImportError:
+                        from file_watcher import get_file_watcher
+                    _watches = get_file_watcher().list_watches()
+                    if _watches:
+                        response_text = "👁️ **当前监控目录列表：**\n\n"
+                        for _w in _watches:
+                            _alive = "✅ 运行中" if _w["alive"] else "⚠️ 已停止"
+                            response_text += f"- `{_w['path']}` — {_alive}（自 {_w['started_at']}）\n"
+                    else:
+                        response_text = "📭 当前没有正在监控的文件夹。\n\n说「**监控文件夹 C:\\xxx**」可启动监控。"
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                # ── 📋 单文件关键字段提取（合同/发票/简历等） ──────────────────
+                _FIELDS_KWS = ["提取字段", "提取信息", "关键信息", "合同信息", "发票信息",
+                               "提取关键", "解读这个", "读一下这个", "分析这个文件", "文件内容"]
+                if any(k in user_input for k in _FIELDS_KWS) and _watch_path_m:
+                    _tgt_file = _watch_path_m.group(1).rstrip('\\/. ')
+                    from pathlib import Path as _FPath
+                    _fp = _FPath(_tgt_file)
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'📋 正在解读 {_fp.name}...', 'detail': '提取关键字段'}, ensure_ascii=False)}\n\n"
+                    try:
+                        try:
+                            from web.file_fields_extractor import extract_fields as _ef, fields_to_markdown as _fm
+                        except ImportError:
+                            from file_fields_extractor import extract_fields as _ef, fields_to_markdown as _fm
+                        _ana = get_file_analyzer()
+                        _content = _ana._extract_content(str(_fp))
+                        _fields = _ef(_fp.name, _content, _fp.suffix.lower())
+                        if _fields:
+                            response_text = "### 📋 文件关键信息\n\n" + _fm(_fields, _fp.name)
+                        else:
+                            response_text = f"⚠️ 无法提取字段（Ollama 可能未运行，或文件内容无法解析）\n文件: `{_fp.name}`"
+                    except Exception as _fe:
+                        response_text = f"❌ 提取失败: {_fe}"
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                # ── 🤖 跨文件问答（File Q&A） ──────────────────────────────────
+                _QA_KWS = ["哪个", "哪些", "有没有", "关于", "谁的", "最早", "最晚", "最高",
+                           "这几份", "这些文件", "文件里", "里面有没有", "它们", "汇总一下",
+                           "告诉我", "查一查", "对比"]
+                # 有问题词 + 有路径 → 跨文件问答
+                if any(k in user_input for k in _QA_KWS) and _watch_path_m:
+                    _qa_dir = _watch_path_m.group(1).rstrip('\\/. ')
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '🤖 正在阅读文件并思考...', 'detail': '跨文件问答'}, ensure_ascii=False)}\n\n"
+                    try:
+                        try:
+                            from web.file_qa import answer_file_question
+                        except ImportError:
+                            from file_qa import answer_file_question
+                        _qa_result = answer_file_question(
+                            question=user_input,
+                            search_dirs=[_qa_dir],
+                            top_k=6,
+                        )
+                        if _qa_result.get("success"):
+                            response_text = _qa_result["answer"]
+                            _srcs = _qa_result.get("sources", [])
+                            if _srcs:
+                                response_text += "\n\n---\n**参考文件：** " + "、".join(
+                                    f"`{s['file_name']}`" for s in _srcs
+                                )
+                        else:
+                            response_text = f"❌ {_qa_result.get('error', '问答失败')}"
+                    except Exception as _qe:
+                        response_text = f"❌ 问答异常: {_qe}"
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                if _is_disk:
+                    # 检测是否是"扫描"指令（而非搜索指令）
+                    _scan_cmd = any(k in user_input.lower() for k in
+                                    ["扫描我的电脑", "扫描电脑", "扫描磁盘", "扫描硬盘",
+                                     "全盘扫描", "开始扫描", "scan my", "start scan"])
+                    if _scan_cmd:
+                        scan_started = FileScanner.start_scan()
+                        if scan_started:
+                            response_text = (
+                                "🚀 全盘文件扫描已启动！\n\n"
+                                f"正在扫描以下磁盘分区：**{', '.join(FileScanner.get_drives())}**\n\n"
+                                "扫描在后台运行，不会影响您的使用。扫描完成后您可以通过对话：\n"
+                                "- 「帮我找一下 xxx 文件」\n"
+                                "- 「打开 我的简历」\n"
+                                "- 「找一下 2025年报告」\n\n"
+                                "首次扫描通常需要 **2-10 分钟**，之后结果会持久化。"
+                            )
+                        else:
+                            st = FileScanner.get_status()
+                            scanned = st.get("scanned", 0)
+                            indexed = st.get("indexed_count", FileScanner.stats()["total"])
+                            response_text = (
+                                f"⏳ 全盘扫描正在进行中...\n\n"
+                                f"- 已检查文件：**{scanned:,}**\n"
+                                f"- 已索引：**{indexed:,}**\n"
+                                f"- 当前目录：`{st.get('current_dir', '...')[:80]}`"
+                            )
+                        yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                        session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                        total_time = time.time() - start_time
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                        return
+
+                    # ── 全盘文件名模糊搜索 ──────────────────────────────────
+                    FileScanner.ensure_loaded()
+                    query = extract_query_from_input(user_input)
+                    t = yield_thinking(f"全盘搜索关键词: {query!r}，索引量: {FileScanner.stats()['total']:,}", "searching")
+                    if t: yield t
+
+                    if not FileScanner.is_indexed():
+                        # 没有索引 → 建议用户触发扫描
+                        response_text = (
+                            "⚠️ 全盘文件索引尚未建立。\n\n"
+                            "请说「**扫描我的电脑**」让 Koto 自动开始扫描，\n"
+                            "或点击侧边栏 **文件管理 > 开始全盘扫描**。\n\n"
+                            "首次扫描可能需要 2-10 分钟，完成后即可通过对话快速查找和打开任何文件。"
+                        )
+                        yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                        session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                        total_time = time.time() - start_time
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                        return
+
+                    disk_results = FileScanner.search(query, limit=12)
+
+                    if not disk_results:
+                        response_text = (
+                            f"❌ 未找到包含 **{query}** 的文件。\n\n"
+                            f"💡 建议：\n"
+                            f"- 检查关键词是否正确\n"
+                            f"- 如果文件较新，可以重新扫描（说「扫描我的电脑」）\n"
+                            f"- 当前索引 {FileScanner.stats()['total']:,} 个文件"
+                        )
+                        yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                        session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                        total_time = time.time() - start_time
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                        return
+
+                    # 判断是否直接打开（唯一高置信匹配）
+                    auto_open = (
+                        len(disk_results) == 1 and disk_results[0]["score"] >= 0.9
+                    ) or (
+                        len(disk_results) >= 1
+                        and disk_results[0]["score"] >= 0.95
+                        and (len(disk_results) < 2 or disk_results[1]["score"] < 0.7)
+                    )
+
+                    if auto_open:
+                        best = disk_results[0]
+                        open_result = FileScanner.open_file(best["path"])
+                        if open_result["success"]:
+                            response_text = (
+                                f"✅ 已为您打开文件：**{best['name']}**\n\n"
+                                f"📁 路径: `{best['path']}`\n"
+                                f"📂 分类: {best['category']}　大小: {best['size_str']}　修改: {best['mtime_str']}"
+                            )
+                        else:
+                            response_text = f"⚠️ 找到文件但打开失败: {open_result.get('error', '')}\n\n📁 路径: `{best['path']}`"
+                        yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                        session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                        total_time = time.time() - start_time
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                        return
+
+                    # 多结果 → 发送 file_picker 事件（前端渲染选择卡片）
+                    picker_event = {
+                        "type": "file_picker",
+                        "query": query,
+                        "count": len(disk_results),
+                        "files": disk_results[:12],
+                        "auto_opened": False,
+                    }
+                    yield f"data: {json.dumps(picker_event, ensure_ascii=False)}\n\n"
+
+                    response_text = f"🔍 找到 {len(disk_results)} 个匹配 **{query}** 的文件，请点击选择要打开的文件："
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                else:
+                    # ── 工作区内容索引搜索（原有逻辑）────────────────────────
+                    indexer = get_file_indexer()
+                    keywords = user_input.replace("找文件", "").replace("搜索", "").replace("查找", "")
+                    keywords = keywords.replace("包含", "").replace("的文件", "").strip()
+                    t = yield_thinking(f"工作区关键词搜索: {keywords}", "searching")
+                    if t: yield t
+                    results = indexer.search(keywords, limit=10)
+                    if not results:
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '🔄 扩展搜索范围...', 'detail': ''}, ensure_ascii=False)}\n\n"
+                        results = indexer.find_by_content(keywords, min_similarity=0.2)
+                    if results:
+                        response_text = f"🔍 找到 {len(results)} 个匹配文件:\n\n"
+                        for i, r in enumerate(results[:10], 1):
+                            file_name = r.get("file_name", "未知文件")
+                            file_path = r.get("file_path", "")
+                            snippet = r.get("match_snippet", "")
+                            score = r.get("score", 0)
+                            similarity = r.get("similarity")
+                            response_text += f"### {i}. {file_name}\n📁 路径: `{file_path}`\n"
+                            if similarity:
+                                response_text += f"🎯 相似度: {similarity:.0%}\n"
+                            elif score:
+                                response_text += f"⭐ 匹配分: {score:.2f}\n"
+                            if snippet:
+                                response_text += f"📄 预览: {snippet[:200]}...\n"
+                            response_text += "\n"
+                    else:
+                        response_text = (
+                            "❌ 未找到匹配文件\n\n💡 提示:\n"
+                            "- 若要搜索电脑上所有文件，请说「帮我找一下 xxx 文件」\n"
+                            f"- 当前工作区索引文件数: {len(indexer.list_indexed_files(limit=1000))}"
+                        )
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
             
             # === DOC_ANNOTATE Mode (文档标注/润色 - 流式反馈) ===
             if task_type == "DOC_ANNOTATE":
-                used_model = model_id if model_id else "gemini-3-flash-preview"
-                t = yield_thinking(f"进入文档标注模式，将使用 {model_id or 'gemini-3-flash-preview'} 分析文档", "routing")
+                used_model = model_id if model_id else "gemini-3.1-pro-preview"
+                t = yield_thinking(f"进入文档标注模式，将使用 {model_id or 'gemini-3.1-pro-preview'} 分析文档", "routing")
                 if t: yield t
                 print(f"[STREAM] 📄 执行 DOC_ANNOTATE 任务")
                 
@@ -5868,16 +7752,38 @@ def chat_stream():
                     if os.path.exists(dir_path):
                         import glob
                         docs = []
-                        for ext in [".docx", ".docxm"]:
+                        for ext in [".docx", ".docxm", ".doc", ".pdf", ".txt", ".md", ".rtf", ".odt"]:
                             docs.extend(glob.glob(f"{dir_path}/**/*{ext}", recursive=True))
                         if docs:
                             doc_path = max(docs, key=os.path.getmtime)
                             break
                 
                 if not doc_path or not os.path.exists(doc_path):
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '❌ 未找到 Word 文档', 'detail': '请上传 .docx 文件'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '❌ 未找到文档', 'detail': '请上传 .docx/.doc/.pdf/.txt/.md/.rtf 文件'})}\n\n"
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
                     return
+                
+                # 非 .docx 自动转换（输出复制到标准文档目录，避免输出到 temp 目录）
+                _dw_ext = os.path.splitext(doc_path)[1].lower()
+                _stream_docs_dir = settings_manager.documents_dir
+                os.makedirs(_stream_docs_dir, exist_ok=True)
+                if _dw_ext != '.docx':
+                    try:
+                        from web.doc_converter import convert_to_docx
+                        import tempfile as _tmpdw
+                        _dw_conv_dir = _tmpdw.mkdtemp(prefix="koto_dw_")
+                        _dw_conv_path, _ = convert_to_docx(doc_path, output_dir=_dw_conv_dir)
+                        # 复制转换后文件到标准文档目录，确保输出也在该目录
+                        _dw_conv_basename = os.path.basename(_dw_conv_path)
+                        _dw_conv_in_docs = os.path.join(_stream_docs_dir, _dw_conv_basename)
+                        import shutil as _dw_shutil
+                        _dw_shutil.copy2(_dw_conv_path, _dw_conv_in_docs)
+                        doc_path = _dw_conv_in_docs
+                        print(f"[DocWorkflow] 转换 {_dw_ext} → .docx 并复制到文档目录: {doc_path}")
+                    except Exception as _dw_conv_err:
+                        yield f"data: {json.dumps({'type': 'error', 'message': f'文档转换失败: {_dw_conv_err}'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
+                        return
                 
                 # Step 1: 读取文档信息
                 yield f"data: {json.dumps({'type': 'progress', 'stage': 'init_reading', 'message': '📖 正在读取文档...', 'detail': os.path.basename(doc_path)})}\n\n"
@@ -6014,11 +7920,13 @@ def chat_stream():
             # === WEB_SEARCH Mode (联网搜索 - 实时信息) ===
             if task_type == "WEB_SEARCH":
                 used_model = "gemini-2.5-flash (Google Search)"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '🌐 正在连接互联网...', 'detail': ''})}\n\n"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 正在搜索实时信息...', 'detail': 'Google Search'})}\n\n"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '📊 正在整理搜索结果...', 'detail': ''})}\n\n"
-                
-                search_result = WebSearcher.search_with_grounding(user_input)
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在连接互联网搜索...', 'detail': ''})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在搜索实时信息...', 'detail': 'Google Search'})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '正在整理搜索结果...', 'detail': ''})}\n\n"
+
+                # 优先使用本地/AI路由器生成的 skill_prompt，实现「模型理解意图 → 生成执行指令」
+                _skill_prompt = (context_info or {}).get("skill_prompt")
+                search_result = WebSearcher.search_with_grounding(user_input, skill_prompt=_skill_prompt)
                 response_text = search_result["response"]
                 
                 if Utils.is_failure_output(response_text) or "搜索失败" in response_text:
@@ -6063,13 +7971,112 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                 return
             
+            # === 🌳 Tree of Thought Mode (RESEARCH / FILE_GEN 并行多路推理选优) ===
+            # 触发条件：legacy 路由 + RESEARCH/FILE_GEN + 非 Deep-Research-Pro + ToT 未被用户禁用
+            _tot_enabled = (
+                _wf_route == "legacy"
+                and task_type in ("RESEARCH", "FILE_GEN")
+                and len(str(effective_input)) >= 20
+                and not str(model_id or "").startswith("deep-research-pro-preview")
+                and settings_manager.get("ai", "use_tree_of_thought") is not False
+            )
+
+            if _tot_enabled:
+                _tot_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash-preview-05-20")
+                _tot_n     = 2 if task_type == "FILE_GEN" else 3   # FILE_GEN 用 2 路，RESEARCH 用 3 路
+                _tot_label = "📄 文档生成" if task_type == "FILE_GEN" else "🔬 深度研究"
+                yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'route_method': 'TreeOfThought', 'message': f'🌳 Tree of Thought 启动：{_tot_n} 条并行推理分支 ({_tot_label})'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': f'🌳 Tree of Thought 启动 ({_tot_n} 分支并行推理)...', 'detail': f'模型: {_tot_model}'})}\n\n"
+
+                try:
+                    from app.core.agent.tree_of_thought import create_tot
+                    _tot = create_tot(task_type=task_type, n_branches=_tot_n, model_id=_tot_model)
+                    _tot_final = ""
+                    _tot_winner_id = None
+
+                    for _evt in _tot.stream(
+                        user_input=effective_input,
+                        task_type=task_type,
+                        system_instruction=system_instruction,
+                    ):
+                        _stage = _evt.get("stage", "")
+
+                        if _stage == "expand":
+                            _bid    = _evt.get("branch_id", "?")
+                            _blabel = _evt.get("label", "")
+                            _bstatus = _evt.get("status", "")
+                            if _bstatus == "generating":
+                                yield f"data: {json.dumps({'type': 'progress', 'message': f'🌿 分支 {_bid}「{_blabel}」生成中...', 'detail': ''})}\n\n"
+                            elif _bstatus == "done":
+                                _elapsed = _evt.get("elapsed", "")
+                                yield f"data: {json.dumps({'type': 'progress', 'message': f'✅ 分支 {_bid}「{_blabel}」完成 ({_elapsed}s)', 'detail': _evt.get('preview', '')[:60]})}\n\n"
+                            elif _bstatus == "error":
+                                yield f"data: {json.dumps({'type': 'progress', 'message': f'⚠️ 分支 {_bid} 失败', 'detail': _evt.get('error', '')[:80]})}\n\n"
+
+                        elif _stage == "evaluate":
+                            _bstatus = _evt.get("status", "")
+                            if _bstatus == "scoring":
+                                yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 Critic 正在评估各分支质量...', 'detail': ''})}\n\n"
+                            else:
+                                _bid   = _evt.get("branch_id", "?")
+                                _score = _evt.get("score", 0)
+                                _crit  = _evt.get("critique", "")
+                                yield f"data: {json.dumps({'type': 'progress', 'message': f'📊 分支 {_bid} 得分 {_score:.1f} — {_crit}', 'detail': ''}, ensure_ascii=False)}\n\n"
+
+                        elif _stage == "select":
+                            _tot_winner_id = _evt.get("winner_id")
+                            _tot_score     = _evt.get("score", 0)
+                            _wlabel        = _evt.get("winner_label", "")
+                            _reason        = _evt.get("reason", "")
+                            _tot_final     = _evt.get("content", "")
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'🏆 最优分支: {_tot_winner_id}「{_wlabel}」(得分 {_tot_score:.1f})', 'detail': _reason}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'token', 'content': _tot_final}, ensure_ascii=False)}\n\n"
+
+                        elif _stage == "error":
+                            _errmsg = _evt.get("message", "未知错误")
+                            print(f"[ToT] ❌ 错误: {_errmsg}")
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'⚠️ Tree of Thought 遇到问题，切换至标准模式: {_errmsg[:100]}', 'detail': ''}, ensure_ascii=False)}\n\n"
+                            _tot_enabled_fallback = True
+                            _tot_final = ""
+                            break
+                    else:
+                        _tot_enabled_fallback = False
+
+                    if _tot_final:
+                        try:
+                            session_manager.append_and_save(
+                                f"{session_name}.json",
+                                user_input,
+                                _tot_final[:6000],
+                                task=task_type,
+                                model_name=_tot_model,
+                            )
+                        except Exception:
+                            pass
+                        total_time = time.time() - start_time
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time, 'tot_winner': _tot_winner_id})}\n\n"
+                        return
+
+                    # ToT 失败 → 降级到下方标准 RESEARCH/FILE_GEN 逻辑
+                    print(f"[ToT] ⚠️ 未获得有效输出，降级至标准路径")
+
+                except ImportError:
+                    print("[ToT] ⚠️ tree_of_thought 模块未找到，降级至标准路径")
+                except Exception as _tot_err:
+                    import traceback as _ttb
+                    print(f"[ToT] ❌ 异常: {_ttb.format_exc()}")
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ Tree of Thought 异常，切换至标准模式', 'detail': str(_tot_err)[:100]})}\n\n"
+            # ──────────────────────────────────────────────────────────────────
+
             # === RESEARCH Mode (深度研究 - 流式响应优先) ===
             if task_type == "RESEARCH":
-                used_model = model_id if model_id else "gemini-3-pro"
-                t = yield_thinking(f"进入深度研究模式，使用 {model_id or 'gemini-3-pro'} 进行专业级分析", "analyzing")
+                research_model = model_id or MODEL_MAP.get("RESEARCH", "gemini-3-pro-preview")
+                used_model = research_model
+                t = yield_thinking(f"进入深度研究模式，使用 {research_model} 进行专业级分析", "analyzing")
                 if t: yield t
                 newline = '\n'
-                yield f"data: {json.dumps({'type': 'progress', 'message': '🔬 启动深度研究模式...', 'detail': '使用Gemini 3.0 Pro进行流式分析'})}{newline}{newline}"
+                _detail = "使用 Interactions API 深度研究" if research_model.startswith("deep-research-pro-preview") else f"使用 {research_model} 进行流式分析"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '🔬 启动深度研究模式...', 'detail': _detail})}{newline}{newline}"
                 
                 # 构建深度研究的system instruction
                 research_instruction = """你是一位专业的研究助手，擅长深度分析复杂技术话题。请按照以下结构提供全面深入的研究报告：
@@ -6115,69 +8122,85 @@ def chat_stream():
 - 保持客观中立的分析态度
 - 内容全面且有深度
 - 适当使用图表和示例说明"""
+
+                # 注入 skill_prompt（模型对用户意图的理解）
+                _research_skill = (context_info or {}).get("skill_prompt")
+                if _research_skill:
+                    research_instruction += f"\n\n[用户期望的输出重点] {_research_skill}"
+                # 将知识库检索内容注入研究指令（若有）
+                if _rag_context_block:
+                    research_instruction += f"\n\n[📚 知识库参考资料]\n{_rag_context_block}"
                 
                 collected_text = []
                 
                 try:
-                    # 使用Gemini 3.0 Pro进行流式生成
                     newline = '\n'
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '📊 正在进行深度分析...', 'detail': 'Gemini 3.0 Pro 正在思考，可能需要30-90秒'})}{newline}{newline}"
-                    
-                    response_stream = client.models.generate_content_stream(
-                        model="gemini-3-pro-preview",
-                        contents=effective_input,
-                        config=types.GenerateContentConfig(
-                            system_instruction=research_instruction,
-                            temperature=0.7,
-                            max_output_tokens=8000,  # 允许更长的输出
-                            top_p=0.95,
+                    if research_model.startswith("deep-research-pro-preview"):
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '📊 正在进行深度分析...', 'detail': 'Deep Research 正在检索与综合，可能需要较长时间'})}{newline}{newline}"
+                        deep_text = WebSearcher.deep_research_for_ppt(effective_input, "")
+                        if not deep_text:
+                            raise RuntimeError("Deep Research 未返回有效内容")
+                        collected_text.append(deep_text)
+                        yield f"data: {json.dumps({'type': 'token', 'content': deep_text})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '📊 正在进行深度分析...', 'detail': f'{research_model} 正在思考，可能需要30-90秒'})}{newline}{newline}"
+
+                        response_stream = client.models.generate_content_stream(
+                            model=research_model,
+                            contents=effective_input,
+                            config=types.GenerateContentConfig(
+                                system_instruction=research_instruction,
+                                temperature=0.7,
+                                max_output_tokens=8000,  # 允许更长的输出
+                                top_p=0.95,
+                            )
                         )
-                    )
                     
-                    chunk_count = 0
-                    heartbeat_interval = 5  # 每5秒发送一次心跳
-                    first_chunk_received = False
-                    
-                    # 使用保活包装器处理流式响应
-                    for item_type, item_data in stream_with_keepalive(response_stream, start_time, 
-                                                                       keepalive_interval=heartbeat_interval,
-                                                                       max_wait_first_token=90):  # 最多等待90秒
-                        # 检查中断
-                        if interrupted():
-                            print(f"[RESEARCH] 用户中断研究")
-                            newline = '\n'
-                            interrupt_msg = f'{newline}{newline}⏹️ 研究已被用户中断'
-                            yield f"data: {json.dumps({'type': 'token', 'content': interrupt_msg})}{newline}{newline}"
-                            break
-                        
-                        if item_type == 'heartbeat':
-                            # 发送心跳保持连接
-                            elapsed = item_data
-                            if first_chunk_received:
-                                char_count = len(''.join(collected_text))
-                                yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在生成中...', 'detail': f'已生成 {char_count} 字符，耗时 {elapsed}s'})}\n\n"
-                            else:
-                                yield f"data: {json.dumps({'type': 'progress', 'message': '🧠 模型正在深度思考...', 'detail': f'已等待 {elapsed}s，请耐心等待'})}\n\n"
-                        
-                        elif item_type == 'timeout':
-                            # 等待超时
-                            yield f"data: {json.dumps({'type': 'token', 'content': f'⚠️ {item_data}，模型响应时间过长，请稍后重试'})}\n\n"
-                            break
-                        
-                        elif item_type == 'chunk':
-                            chunk = item_data
-                            if chunk.text:
-                                if not first_chunk_received:
-                                    first_chunk_received = True
-                                    print(f"[RESEARCH] 收到第一个响应块，耗时 {time.time() - start_time:.1f}s")
-                                
-                                collected_text.append(chunk.text)
-                                yield f"data: {json.dumps({'type': 'token', 'content': chunk.text})}\n\n"
-                                chunk_count += 1
-                                
-                                # 每50个chunk显示一次进度日志
-                                if chunk_count % 50 == 0:
-                                    print(f"[RESEARCH] 已生成 {chunk_count} 个chunk, {len(''.join(collected_text))} 字符")
+                    if not research_model.startswith("deep-research-pro-preview"):
+                        chunk_count = 0
+                        heartbeat_interval = 5  # 每5秒发送一次心跳
+                        first_chunk_received = False
+
+                        # 使用保活包装器处理流式响应
+                        for item_type, item_data in stream_with_keepalive(response_stream, start_time,
+                                                                           keepalive_interval=heartbeat_interval,
+                                                                           max_wait_first_token=90):  # 最多等待90秒
+                            # 检查中断
+                            if interrupted():
+                                print(f"[RESEARCH] 用户中断研究")
+                                newline = '\n'
+                                interrupt_msg = f'{newline}{newline}⏹️ 研究已被用户中断'
+                                yield f"data: {json.dumps({'type': 'token', 'content': interrupt_msg})}{newline}{newline}"
+                                break
+
+                            if item_type == 'heartbeat':
+                                # 发送心跳保持连接
+                                elapsed = item_data
+                                if first_chunk_received:
+                                    char_count = len(''.join(collected_text))
+                                    yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在生成中...', 'detail': f'已生成 {char_count} 字符，耗时 {elapsed}s'})}\n\n"
+                                else:
+                                    yield f"data: {json.dumps({'type': 'progress', 'message': '🧠 模型正在深度思考...', 'detail': f'已等待 {elapsed}s，请耐心等待'})}\n\n"
+
+                            elif item_type == 'timeout':
+                                # 等待超时
+                                yield f"data: {json.dumps({'type': 'token', 'content': f'⚠️ {item_data}，模型响应时间过长，请稍后重试'})}\n\n"
+                                break
+
+                            elif item_type == 'chunk':
+                                chunk = item_data
+                                if chunk.text:
+                                    if not first_chunk_received:
+                                        first_chunk_received = True
+                                        print(f"[RESEARCH] 收到第一个响应块，耗时 {time.time() - start_time:.1f}s")
+
+                                    collected_text.append(chunk.text)
+                                    yield f"data: {json.dumps({'type': 'token', 'content': chunk.text})}\n\n"
+                                    chunk_count += 1
+
+                                    # 每50个chunk显示一次进度日志
+                                    if chunk_count % 50 == 0:
+                                        print(f"[RESEARCH] 已生成 {chunk_count} 个chunk, {len(''.join(collected_text))} 字符")
                     
                     final_text = ''.join(collected_text)
                     print(f"[RESEARCH] ✅ 研究完成，共 {len(final_text)} 字符")
@@ -6200,10 +8223,10 @@ def chat_stream():
                         # API过载，尝试使用Flash版本
                         try:
                             newline = '\n'
-                            yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 服务繁忙，切换到Gemini 3.0 Flash...', 'detail': ''})}{newline}{newline}"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 服务繁忙，切换到 Gemini 2.5 Flash...', 'detail': ''})}{newline}{newline}"
                             
                             response_stream = client.models.generate_content_stream(
-                                model="gemini-3-flash-preview",
+                                model="gemini-2.5-flash",
                                 contents=effective_input,
                                 config=types.GenerateContentConfig(
                                     system_instruction=research_instruction,
@@ -6258,10 +8281,10 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}{newline}{newline}"
                 return
             
-            # === PAINTER Mode (图像生成 - Nano Banana 优先，Imagen 4.0 备用) ===
+            # === PAINTER Mode (图像生成 - Gemini 3.1 Flash Image 优先，Imagen 4.0 备用) ===
             if task_type == "PAINTER":
-                used_model = "Nano Banana (Imagen 4.0 fallback)"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '🎨 正在理解你的创作请求...', 'detail': ''})}\n\n"
+                used_model = "Gemini 3.1 Flash Image (Imagen 4.0 fallback)"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '🎨 正在理解你的创作请求...', 'detail': '', 'progress': 5, 'stage': 'paint_prepare'})}\n\n"
                 
                 # 使用上下文增强的输入（如果有）
                 if context_info and context_info.get("is_continuation") and context_info.get("enhanced_input"):
@@ -6270,7 +8293,7 @@ def chat_stream():
                 else:
                     image_prompt = effective_input
                 
-                yield f"data: {json.dumps({'type': 'progress', 'message': '🖌️ Nano Banana 正在生成图像...', 'detail': '请耐心等待'})}\n\n"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '🖌️ Gemini 3.1 Flash Image 正在生成图像...', 'detail': '请耐心等待', 'progress': 20, 'stage': 'paint_generate'})}\n\n"
                 
                 max_retries = 2
                 use_fallback = False
@@ -6285,15 +8308,15 @@ def chat_stream():
                             return
                         
                         if attempt > 0:
-                            yield f"data: {json.dumps({'type': 'progress', 'message': f'🔄 第 {attempt} 次重试...', 'detail': ''})}\n\n"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'🔄 第 {attempt} 次重试...', 'detail': '', 'progress': 25, 'stage': 'paint_retry'})}\n\n"
                             time.sleep(2)
                         
                         # 选择模型
                         if use_fallback:
                             model_name = "Imagen 4.0"
-                            yield f"data: {json.dumps({'type': 'progress', 'message': '🔄 切换到 Imagen 4.0...', 'detail': ''})}\n\n"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': '🔄 切换到 Imagen 4.0...', 'detail': '', 'progress': 30, 'stage': 'paint_fallback'})}\n\n"
                         else:
-                            model_name = "Nano Banana"
+                            model_name = "Gemini 3.1 Flash Image"
                         
                         # 使用后台线程执行请求，主线程发送心跳
                         import queue
@@ -6304,15 +8327,15 @@ def chat_stream():
                             try:
                                 if use_fallback:
                                     result = client.models.generate_images(
-                                        model="imagen-4.0-generate-preview-06-06",
+                                        model="imagen-4.0-fast-generate-001",
                                         prompt=image_prompt,
                                         config=types.GenerateImagesConfig(number_of_images=1)
                                     )
                                 else:
                                     result = client.models.generate_content(
-                                        model="nano-banana-pro-preview",
+                                        model="gemini-3.1-flash-image-preview",
                                         contents=image_prompt,
-                                        config=types.GenerateContentConfig(response_modalities=["IMAGE"])
+                                        config=types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"])
                                     )
                                 result_queue.put(('success', result))
                             except Exception as e:
@@ -6321,17 +8344,30 @@ def chat_stream():
                         thread = threading.Thread(target=worker, daemon=True)
                         thread.start()
                         
-                        timeout_seconds = 90
+                        # Per-model timeout: 120s for gemini-3.1-flash-image (takes ~65s), 90s for imagen fallback
+                        timeout_seconds = 120 if not use_fallback else 90
+                        attempt_start = time.time()
+                        timed_out = False
                         response = None
                         
                         while True:
-                            elapsed = time.time() - start_time
+                            attempt_elapsed = time.time() - attempt_start
                             
-                            if elapsed > timeout_seconds:
-                                yield f"data: {json.dumps({'type': 'token', 'content': f'⚠️ 图像生成超时 ({int(elapsed)}s)，请稍后重试'})}\n\n"
-                                total_time = time.time() - start_time
-                                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
-                                return
+                            if attempt_elapsed > timeout_seconds:
+                                timed_out = True
+                                if not use_fallback:
+                                    # Primary model timed out — switch to imagen
+                                    print(f"[PAINTER] Gemini 3.1 Flash Image 超时 ({int(attempt_elapsed)}s)，切换到 Imagen")
+                                    use_fallback = True
+                                    yield f"data: {json.dumps({'type': 'progress', 'message': '⏱️ 模型响应超时，切换到 Imagen...', 'detail': '', 'progress': 28, 'stage': 'paint_fallback'})}\n\n"
+                                    break
+                                else:
+                                    # Imagen also timed out
+                                    elapsed = time.time() - start_time
+                                    yield f"data: {json.dumps({'type': 'token', 'content': f'⚠️ 图像生成超时 ({int(elapsed)}s)，请稍后重试'})}\n\n"
+                                    total_time = time.time() - start_time
+                                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                                    return
                             
                             if interrupted():
                                 yield f"data: {json.dumps({'type': 'token', 'content': '⏹️ 图像生成已中断'})}\n\n"
@@ -6347,10 +8383,14 @@ def chat_stream():
                                 else:
                                     raise data
                             except queue.Empty:
-                                yield f"data: {json.dumps({'type': 'progress', 'message': f'🎨 {model_name} 生成中...', 'detail': f'{int(elapsed)}s'})}\n\n"
+                                progress_guess = min(85, 30 + int((attempt_elapsed / timeout_seconds) * 55))
+                                yield f"data: {json.dumps({'type': 'progress', 'message': f'🎨 {model_name} 生成中...', 'detail': f'{int(attempt_elapsed)}s', 'progress': progress_guess, 'stage': 'paint_running'})}\n\n"
+                        
+                        if timed_out:
+                            continue  # outer for-loop: retry with use_fallback=True (imagen timeout already returned above)
                         
                         # 处理响应
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '💾 正在保存图片...', 'detail': ''})}\n\n"
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '💾 正在保存图片...', 'detail': '', 'progress': 90, 'stage': 'paint_save'})}\n\n"
                         
                         if use_fallback:
                             if response.generated_images:
@@ -6389,12 +8429,14 @@ def chat_stream():
                                         img_filename = Utils.save_image_part(part)
                                         if img_filename:
                                             images.append(img_filename)
-                                            print(f"[PAINTER] Nano Banana 已保存: {img_filename}")
+                                            print(f"[PAINTER] Gemini 3.1 Flash Image 已保存: {img_filename}")
                         
                         if images:
                             save_path = settings_manager.images_dir
                             msg = f"✨ 图片已生成! (使用 {model_name})\n🖼️ 保存位置: {save_path}"
                             yield f"data: {json.dumps({'type': 'token', 'content': msg})}\n\n"
+
+                            yield f"data: {json.dumps({'type': 'progress', 'message': '✅ 图像生成完成', 'detail': f'{len(images)} 张', 'progress': 100, 'stage': 'complete'})}\n\n"
                             
                             # 先保存历史记录（包含图片路径），再发送 done
                             session_manager.append_and_save(
@@ -6415,10 +8457,12 @@ def chat_stream():
                                 
                     except Exception as img_err:
                         error_msg = str(img_err)
-                        print(f"[PAINTER] 尝试 {attempt+1} 失败: {error_msg[:200]}")
+                        model_label = 'Imagen' if use_fallback else 'Gemini-3.1-Flash-Image'
+                        print(f"[PAINTER] {model_label} 尝试 {attempt+1} 失败 ({type(img_err).__name__}): {error_msg[:300]}")
                         
-                        if not use_fallback and ("503" in error_msg or "overloaded" in error_msg.lower() or 
-                                                 "unavailable" in error_msg.lower() or "400" in error_msg):
+                        # Fall back to imagen on ANY non-safety error when using primary model
+                        if not use_fallback and "safety" not in error_msg.lower() and "blocked" not in error_msg.lower():
+                            print(f"[PAINTER] Gemini 3.1 Flash Image 失败，切换到 Imagen: {error_msg[:200]}")
                             use_fallback = True
                             continue
                         
@@ -6444,6 +8488,8 @@ def chat_stream():
                 if t: yield t
                 print(f"[FILE_GEN] ===== Starting file generation =====")
                 print(f"[FILE_GEN] Model: {model_id}, User input: {user_input[:100]}...")
+
+                yield f"data: {json.dumps({'type': 'progress', 'message': '🧾 准备生成文档...', 'detail': get_model_display_name(model_id), 'progress': 5, 'stage': 'filegen_prepare'})}\n\n"
                 
                 response_text = ""
                 generated_files = []
@@ -6466,7 +8512,7 @@ def chat_stream():
                 
                 if is_convert_request:
                     # 直接转换模式 - 不需要调用模型，直接生成文档
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在将内容转换为文档...', 'detail': ''})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在将内容转换为文档...', 'detail': '', 'progress': 30, 'stage': 'filegen_convert'})}\n\n"
                     
                     try:
                         from web.document_generator import save_docx, save_pdf
@@ -6488,11 +8534,11 @@ def chat_stream():
                         user_lower = user_input.lower()
                         
                         if "pdf" in user_lower:
-                            yield f"data: {json.dumps({'type': 'progress', 'message': '📄 正在生成 PDF...', 'detail': ''})}\n\n"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': '📄 正在生成 PDF...', 'detail': '', 'progress': 60, 'stage': 'filegen_save'})}\n\n"
                             saved_path = save_pdf(source_content, title=title, output_dir=docs_dir)
                             file_type = "PDF"
                         else:
-                            yield f"data: {json.dumps({'type': 'progress', 'message': '📄 正在生成 Word 文档...', 'detail': ''})}\n\n"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': '📄 正在生成 Word 文档...', 'detail': '', 'progress': 60, 'stage': 'filegen_save'})}\n\n"
                             saved_path = save_docx(source_content, title=title, output_dir=docs_dir)
                             file_type = "Word"
                         
@@ -6501,6 +8547,8 @@ def chat_stream():
                         
                         success_msg = f"✅ **{file_type} 文档生成成功！**\n\n📁 文件: **{os.path.basename(saved_path)}**\n📍 位置: `{docs_dir}`"
                         yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
+
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '✅ 文档转换完成', 'detail': file_type, 'progress': 100, 'stage': 'complete'})}\n\n"
                         
                         print(f"[FILE_GEN] ✅ 直接转换成功: {rel_path}")
                         
@@ -6525,7 +8573,22 @@ def chat_stream():
                 if is_ppt_request:
                     # =============== PPT 专用生成流程 ===============
                     print(f"[FILE_GEN] 🎯 检测到 PPT 生成请求")
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '🎨 正在生成演示文稿...', 'detail': '正在规划内容结构'})}\n\n"
+                    
+                    # ── 初始化智能反馈 ──
+                    from web.smart_feedback import SmartFeedback
+                    def _fb_emit(msg, detail=""):
+                        print(f"[SmartFB] {msg} | {detail}")
+                    fb = SmartFeedback.for_ppt(user_input, emit=_fb_emit)
+                    
+                    def _fb_sse(msg_detail_tuple):
+                        """将 SmartFeedback 返回的 (msg, detail) 转为 SSE 数据行"""
+                        msg, detail = msg_detail_tuple
+                        progress_pct = 0
+                        if getattr(fb, 'total_steps', None) and getattr(fb, 'current_step', 0) > 0:
+                            progress_pct = min(95, int((fb.current_step / fb.total_steps) * 100))
+                        return f"data: {json.dumps({'type': 'progress', 'message': msg, 'detail': detail, 'progress': progress_pct})}\n\n"
+                    
+                    yield _fb_sse(fb.start())
                     
                     try:
                         # ──────── Session: 创建 PPT 编辑会话 ────────
@@ -6605,13 +8668,13 @@ def chat_stream():
                                     break
                         
                         if _needs_search:
-                            yield f"data: {json.dumps({'type': 'progress', 'message': '🔍 正在搜索最新信息...', 'detail': '确保内容准确和时效性'})}\n\n"
+                            yield _fb_sse(fb.search_start())
                             try:
                                 search_result = WebSearcher.search_with_grounding(user_input)
                                 if search_result.get("success") and search_result.get("response"):
                                     search_context = search_result["response"]
                                     print(f"[FILE_GEN/PPT] ✅ 搜索完成, 获取 {len(search_context)} 字符参考信息")
-                                    yield f"data: {json.dumps({'type': 'progress', 'message': '✅ 搜索完成，正在整合信息...', 'detail': ''})}\n\n"
+                                    yield _fb_sse(fb.search_done(char_count=len(search_context)))
                                 else:
                                     print(f"[FILE_GEN/PPT] ⚠️ 搜索无结果或失败")
                             except Exception as search_err:
@@ -6632,11 +8695,11 @@ def chat_stream():
                         )
                         
                         if _is_complex:
-                            yield f"data: {json.dumps({'type': 'progress', 'message': '🔬 检测到复杂主题，启动深度研究...', 'detail': '使用 Gemini Pro 进行专业分析'})}\n\n"
+                            yield _fb_sse(fb.research_start())
                             try:
                                 research_context = WebSearcher.deep_research_for_ppt(user_input, search_context)
                                 if research_context:
-                                    yield f"data: {json.dumps({'type': 'progress', 'message': f'✅ 深度研究完成，获取 {len(research_context)} 字参考', 'detail': '正在整合研究成果...'})}\n\n"
+                                    yield _fb_sse(fb.research_done(char_count=len(research_context)))
                                 else:
                                     print(f"[FILE_GEN/PPT] ⚠️ 深度研究未返回结果")
                             except Exception as res_err:
@@ -6773,10 +8836,10 @@ def chat_stream():
                         if context_info and context_info.get("is_continuation") and context_info.get("enhanced_input"):
                             ppt_outline_prompt += f"\n\n历史上下文参考资料:\n{context_info['enhanced_input'][:3000]}"
                         
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在生成内容大纲...', 'detail': ''})}\n\n"
+                        yield _fb_sse(fb.ppt_planning("调用 AI 生成内容大纲"))
                         
                         outline_response = None
-                        outline_models = ["gemini-2.5-flash", model_id, "gemini-2.0-flash"]
+                        outline_models = ["gemini-2.5-flash", model_id, "gemini-3-flash-preview"]
                         # 根据目标页数调整 token 限额：20页大纲需要更多空间
                         _outline_tokens = 16384 if (_target_pages and _target_pages >= 15) else 8192
                         for om in outline_models:
@@ -6941,11 +9004,38 @@ def chat_stream():
                         if slide_count == 0:
                             raise Exception("大纲解析失败，未提取到幻灯片内容")
                         
+                        # ──────── Quality Gate: 大纲质量自检与内容清洗 ────────
+                        try:
+                            from web.file_quality_checker import FileQualityGate
+                            def _quality_progress(msg, detail=""):
+                                pass  # 内部用，下面统一发 SSE
+                            qg_result = FileQualityGate.check_and_fix_ppt_outline(
+                                ppt_data["slides"], user_request=user_input, progress_callback=_quality_progress
+                            )
+                            ppt_data["slides"] = qg_result['outline']
+                            _qg_score = qg_result['quality']['score']
+                            _qg_fixes = qg_result['fixes']
+                            _qg_issues = qg_result['quality']['issues']
+
+                            # 报告清洗结果
+                            if _qg_fixes:
+                                yield _fb_sse(fb.info(f"🧹 已自动清洗 {len(_qg_fixes)} 处内容问题", "移除 Markdown 残留和 AI 对话痕迹"))
+                                print(f"[FILE_GEN/PPT] 🧹 质量清洗: {len(_qg_fixes)} 处修复")
+                            
+                            # 报告质量评分
+                            yield _fb_sse(fb.ppt_quality_check(_qg_score, issues=_qg_issues, fixes=_qg_fixes))
+                            print(f"[FILE_GEN/PPT] 📊 质量评分: {_qg_score}/100, action={qg_result['action']}")
+                            
+                            # 更新 slide_count（清洗可能移除空白 slide）
+                            slide_count = len(ppt_data["slides"])
+                        except Exception as qg_err:
+                            print(f"[FILE_GEN/PPT] ⚠️ 质量门控异常（不影响生成）: {qg_err}")
+                        
                         # ──────── Step 2.1: 用户指定页数时调整幻灯片数量 ────────
                         _max_slides = _target_pages  # 只有用户明确指定时才生效
                         if _max_slides and slide_count > _max_slides:
                             print(f"[FILE_GEN/PPT] ⚠️ 页数超限 ({slide_count} > {_max_slides})，执行智能精简...")
-                            yield f"data: {json.dumps({'type': 'progress', 'message': f'✂️ 精简页面: {slide_count} → {_max_slides} 页', 'detail': '合并相似内容，保留核心信息'})}\n\n"
+                            yield _fb_sse(fb.info(f"✂️ 精简页面: {slide_count} → {_max_slides} 页", "合并相似内容，保留核心信息"))
                             
                             slides = ppt_data["slides"]
                             # 策略: 1) 合并相邻的详细页为概览页  2) 去掉多余过渡页  3) 截断尾部
@@ -6991,7 +9081,15 @@ def chat_stream():
                             slide_count = len(slides)
                             print(f"[FILE_GEN/PPT] 精简后: {slide_count} 页")
                         
-                        yield f"data: {json.dumps({'type': 'progress', 'message': f'📊 大纲就绪: {slide_count} 页幻灯片', 'detail': ppt_data['title']})}\n\n"
+                        # 生成版式摘要
+                        _type_map_display = {"detail": "详细", "overview": "概览", "highlight": "亮点", "divider": "过渡", "comparison": "对比"}
+                        _tc = {}
+                        for _s in ppt_data["slides"]:
+                            _t = _s.get("type", "detail")
+                            _tc[_t] = _tc.get(_t, 0) + 1
+                        _ts = "×".join(f"{_type_map_display.get(k,k)}{v}" for k, v in _tc.items())
+                        
+                        yield _fb_sse(fb.ppt_outline_ready(slide_count, title=ppt_data['title'], type_summary=_ts))
                         
                         # ──────── Step 2.2: 内容充实（逐页扩写） ────────
                         # 检查内容是否单薄（平均每页要点少于 3 个或要点太短）
@@ -7018,7 +9116,7 @@ def chat_stream():
                                     _thin_slides.append(si)
                         
                         if _thin_slides:
-                            yield f"data: {json.dumps({'type': 'progress', 'message': f'📝 正在充实 {len(_thin_slides)} 页内容...', 'detail': '确保每页都有丰富详实的信息'})}\n\n"
+                            yield _fb_sse(fb.ppt_enriching(len(_thin_slides)))
                             
                             # 构建批量充实 prompt（一次性处理所有薄弱页面）
                             _enrich_prompt = (
@@ -7100,7 +9198,7 @@ def chat_stream():
                                             _applied += 1
                                     
                                     if _applied > 0:
-                                        yield f"data: {json.dumps({'type': 'progress', 'message': f'✅ 已充实 {_applied} 页内容', 'detail': ''})}\n\n"
+                                        yield _fb_sse(fb.ppt_enriched(_applied))
                                         print(f"[FILE_GEN/PPT] ✅ 内容充实完成: {_applied}/{len(_thin_slides)} 页")
                                     else:
                                         print(f"[FILE_GEN/PPT] ⚠️ 内容充实解析成功但未应用")
@@ -7109,7 +9207,7 @@ def chat_stream():
                             except Exception as enrich_err:
                                 print(f"[FILE_GEN/PPT] ⚠️ 内容充实异常（不影响生成）: {enrich_err}")
                         
-                        # ──────── Step 2.5: 为幻灯片生成配图（Nano Banana 优先） ────────
+                        # ──────── Step 2.5: 为幻灯片生成配图（Gemini 3.1 Flash Image 优先） ────────
                         ppt_images = []
                         # 对详细页配图（概览/对比/过渡/亮点页不适合插图）
                         img_candidate_slides = [(i, s) for i, s in enumerate(ppt_data["slides"]) 
@@ -7117,7 +9215,7 @@ def chat_stream():
                         
                         if img_candidate_slides:
                             _n_images = min(4, max(2, len(img_candidate_slides) // 2 + 1))
-                            yield f"data: {json.dumps({'type': 'progress', 'message': '🖼️ Nano Banana 正在生成配图...', 'detail': f'为 {_n_images} 个重点页面生成专业插图'})}\n\n"
+                            yield _fb_sse(fb.ppt_images(_n_images))
                             try:
                                 slide_titles_for_img = [s.get("title", "") for _, s in img_candidate_slides]
                                 img_results = WebSearcher.generate_ppt_images(
@@ -7134,15 +9232,15 @@ def chat_stream():
                                         ppt_images.append(img_info["image_path"])
                                 
                                 if ppt_images:
-                                    yield f"data: {json.dumps({'type': 'progress', 'message': f'✅ 已生成 {len(ppt_images)} 张配图', 'detail': ''})}\n\n"
+                                    yield _fb_sse(fb.ppt_images_done(len(ppt_images)))
                                 else:
-                                    yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 配图生成未成功，继续使用纯文本', 'detail': ''})}\n\n"
+                                    yield _fb_sse(fb.ppt_images_done(0))
                             except Exception as img_err:
                                 print(f"[FILE_GEN/PPT] ⚠️ 配图生成异常: {img_err}")
-                                yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 配图跳过，不影响PPT生成', 'detail': ''})}\n\n"
+                                yield _fb_sse(fb.warn("配图跳过，不影响PPT生成"))
                         
                         # ──────── Step 3: 生成 PPT 文件(含逐页进度) ────────
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '🎨 开始渲染 PPT 文件...', 'detail': ''})}\n\n"
+                        yield _fb_sse(fb.ppt_rendering(slide_count))
                         
                         from web.ppt_generator import PPTGenerator
                         
@@ -7179,9 +9277,22 @@ def chat_stream():
                         # 发送逐页进度（回调已经收集完毕）
                         for cur, total, stitle, stype in _slide_progress_msgs:
                             if stitle:
-                                yield f"data: {json.dumps({'type': 'progress', 'message': f'📄 渲染 {cur}/{total}: {stitle}', 'detail': stype})}\n\n"
+                                yield _fb_sse(fb.ppt_slide_progress(cur, total, stitle, stype))
                         
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '✅ PPT 渲染完成，正在保存...', 'detail': ''})}\n\n"
+                        yield _fb_sse(fb.substep("PPT 渲染完成，正在保存"))
+                        
+                        # ──────── Post-Render Quality Check: 检查渲染后的 PPTX 文件 ────────
+                        try:
+                            from web.file_quality_checker import FileQualityGate
+                            _post_check = FileQualityGate.post_check_pptx(ppt_path)
+                            if _post_check.get('issues'):
+                                _pc_score = _post_check['score']
+                                yield _fb_sse(fb.ppt_quality_check(_pc_score, issues=_post_check['issues']))
+                                print(f"[FILE_GEN/PPT] 📊 文件后检: {_pc_score}/100, issues={_post_check['issues']}")
+                            else:
+                                yield _fb_sse(fb.info("✅ 文件质量验证通过"))
+                        except Exception as pc_err:
+                            print(f"[FILE_GEN/PPT] ⚠️ 文件后检异常: {pc_err}")
                         
                         rel_path = os.path.relpath(ppt_path, WORKSPACE_DIR).replace("\\", "/")
                         generated_files.append(rel_path)
@@ -7322,7 +9433,7 @@ def chat_stream():
                         model_id,
                         "gemini-3-pro-preview",
                         "gemini-2.5-flash",
-                        "gemini-2.0-flash",
+                        "gemini-3-flash-preview",
                     ]))
 
                     _doc_collected = []  # 收集所有流式文本块
@@ -7367,9 +9478,9 @@ def chat_stream():
                                     _elapsed = item_data
                                     _char_count = sum(len(c) for c in _doc_collected)
                                     if _first_chunk:
-                                        yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在撰写文档...', 'detail': f'已生成 {_char_count} 字符，耗时 {_elapsed}s'})}\n\n"
+                                        yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在撰写文档...', 'detail': f'已生成 {_char_count} 字符，耗时 {_elapsed}s', 'stage': 'generating'})}\n\n"
                                     else:
-                                        yield f"data: {json.dumps({'type': 'progress', 'message': '🧠 模型正在组织内容...', 'detail': f'已等待 {_elapsed}s，请耐心等待'})}\n\n"
+                                        yield f"data: {json.dumps({'type': 'progress', 'message': '🧠 模型正在组织内容...', 'detail': f'已等待 {_elapsed}s，请耐心等待', 'stage': 'api_calling'})}\n\n"
 
                                 elif item_type == 'timeout':
                                     print(f"[FILE_GEN/DOC] ⚠️ {current_model} 等待首token超时: {item_data}")
@@ -7403,6 +9514,20 @@ def chat_stream():
                     if not response_text or response_text.startswith("❌"):
                         yield f"data: {json.dumps({'type': 'token', 'content': response_text or '❌ 所有模型都不可用，请稍后重试'})}\n\n"
                     else:
+                        # ── 文档质量自检与清洗 ──
+                        try:
+                            from web.file_quality_checker import FileQualityGate
+                            _doc_qg = FileQualityGate.check_and_fix_document(response_text, user_request=user_input)
+                            response_text = _doc_qg['text']
+                            _doc_score = _doc_qg['quality']['score']
+                            _doc_fixes = _doc_qg['fixes']
+                            if _doc_fixes:
+                                yield f"data: {json.dumps({'type': 'progress', 'message': f'🧹 已清洗 {len(_doc_fixes)} 处内容问题', 'detail': '移除AI对话痕迹'})}\n\n"
+                            _dq_emoji = "✅" if _doc_score >= 75 else "⚠️"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'{_dq_emoji} 文档质量检查: {_doc_score}/100', 'detail': '; '.join(_doc_qg['quality']['issues'][:2]) if _doc_qg['quality']['issues'] else '质量良好'})}\n\n"
+                        except Exception as _dqg_err:
+                            print(f"[FILE_GEN/DOC] ⚠️ 质量门控异常: {_dqg_err}")
+                        
                         # 直接保存文档
                         yield f"data: {json.dumps({'type': 'progress', 'message': f'📝 正在保存 {_doc_type} 文档...', 'detail': ''})}\n\n"
                         try:
@@ -7445,7 +9570,7 @@ def chat_stream():
                     model_id,  # 主模型
                     "gemini-3-pro-preview",  # 备用1 (更强的推理)
                     "gemini-2.5-flash",  # 备用2
-                    "gemini-2.0-flash",  # 备用3
+                    "gemini-3-flash-preview",  # 备用3
                 ]
                 
                 # 使用线程 + 超时来调用API（带重试）
@@ -7598,14 +9723,29 @@ def chat_stream():
                         yield f"data: {json.dumps({'type': 'progress', 'message': '⚙️ 正在执行脚本生成文件...', 'detail': ''})}\n\n"
                         
                         try:
-                            result = subprocess.run(
-                                [sys.executable, temp_script],
-                                capture_output=True,
-                                text=True,
-                                timeout=60,
-                                cwd=WORKSPACE_DIR,
-                                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                            )
+                            if getattr(sys, 'frozen', False):
+                                # 打包模式：进程内 exec() 执行，避免启动新 Koto 窗口
+                                import io as _io, contextlib as _ctx
+                                _out, _err, _rc = _io.StringIO(), _io.StringIO(), 0
+                                try:
+                                    _prev = os.getcwd(); os.chdir(WORKSPACE_DIR)
+                                    with _ctx.redirect_stdout(_out), _ctx.redirect_stderr(_err):
+                                        exec(open(temp_script, 'r', encoding='utf-8').read(), {"__file__": temp_script})
+                                    os.chdir(_prev)
+                                except Exception as _ex:
+                                    _err.write(str(_ex)); _rc = 1
+                                class _FgR:
+                                    returncode = _rc; stdout = _out.getvalue(); stderr = _err.getvalue()
+                                result = _FgR()
+                            else:
+                                result = subprocess.run(
+                                    [sys.executable, temp_script],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=60,
+                                    cwd=WORKSPACE_DIR,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                                )
                             print(f"[FILE_GEN] Script exit code: {result.returncode}")
                             print(f"[FILE_GEN] Script stdout: {result.stdout}")
                             print(f"[FILE_GEN] Script stderr: {result.stderr}")
@@ -7727,17 +9867,33 @@ def chat_stream():
 
             # 注入长期记忆上下文
             _memory_manager = get_memory_manager()
-            memory_context = _memory_manager.get_context_string(user_input)
+
+            # 更新对话摘要（滑动窗口外）
+            if full_history and len(full_history) > 20:
+                def _summarize():
+                    return _memory_manager.get_or_update_summary(session_name, full_history)
+
+                _, err, timed_out = run_with_timeout(_summarize, 6)
+                if timed_out:
+                    print("[MEMORY] 摘要更新超时，已跳过")
+                elif err:
+                    print(f"[MEMORY] 摘要更新失败: {err}")
+
+            memory_context = _memory_manager.get_context_string(
+                user_input,
+                session_name=session_name,
+                history=full_history
+            )
             if memory_context:
                 use_instruction += f"\n\n{memory_context}"
                 print(f"[MEMORY] 注入了 {len(memory_context)} 字符的记忆上下文")
-                t = yield_thinking(f"从长期记忆中检索到 {len(memory_context)} 字符的相关上下文并注入", "context")
+                t = yield_thinking(f"从长期记忆中检索到 {len(memory_context)} 字符的相关上下文并注入", "context", "local")
                 if t: yield t
 
             # 根据任务类型提供差异化进度提示
             if task_type == "CODER":
                 used_model = model_id
-                t = yield_thinking(f"进入代码生成模式，使用 {model_id} 进行代码分析与生成", "generating")
+                t = yield_thinking(f"进入代码生成模式，使用 {model_id} 进行代码分析与生成", "generating", "cloud")
                 if t: yield t
                 yield f"data: {json.dumps({'type': 'progress', 'message': '💻 正在分析代码需求...', 'detail': f'使用 {model_id}'})}\n\n"
                 
@@ -7747,7 +9903,7 @@ def chat_stream():
 
             elif task_type == "CHAT":
                 used_model = model_id
-                t = yield_thinking(f"进入对话模式，使用 {model_id} 生成回复", "generating")
+                t = yield_thinking(f"进入对话模式，使用 {model_id} 生成回复", "generating", "cloud")
                 if t: yield t
                 yield f"data: {json.dumps({'type': 'progress', 'message': '💬 Koto 正在思考...', 'detail': '请稍候'})}\n\n"
 
@@ -7760,7 +9916,7 @@ def chat_stream():
                     )
                     if local_stream is not None:
                         print(f"[CHAT] ⚡ 使用本地模型快速响应: {LocalModelRouter._response_model}")
-                        t = yield_thinking(f"检测到简单查询，切换到本地模型 {LocalModelRouter._response_model} 快速响应", "model")
+                        t = yield_thinking(f"检测到简单查询，切换到本地模型 {LocalModelRouter._response_model} 快速响应", "model", "local")
                         if t: yield t
                         yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'task_display': '💬 对话', 'model': f'🏠 {LocalModelRouter._response_model} (本地)', 'message': f'🎯 任务分类: 💬 对话 (方法: 🏠 {LocalModelRouter._response_model} 本地快速通道)'})}\n\n"
                         local_full_text = ""
@@ -7788,23 +9944,28 @@ def chat_stream():
                         else:
                             # 本地模型失败 → 静默降级到云模型
                             print(f"[CHAT] 本地模型输出为空，降级到云模型")
-                            t = yield_thinking(f"本地模型输出为空，降级到云端模型 {model_id}", "model")
+                            t = yield_thinking(f"本地模型输出为空，降级到云端模型 {model_id}", "model", "hybrid")
                             if t: yield t
                             yield f"data: {json.dumps({'type': 'progress', 'message': '☁️ 切换到云端模型...', 'detail': model_id})}\n\n"
             elif task_type == "RESEARCH":
                 yield f"data: {json.dumps({'type': 'progress', 'message': '🔬 正在进行深度分析...', 'detail': f'使用 {model_id}'})}\n\n"
             else:
                 yield f"data: {json.dumps({'type': 'progress', 'message': '💭 Koto 正在思考...', 'detail': '请稍候'})}\n\n"
+
+            # 注入 skill_prompt（路由器对用户意图的格式期望）
+            _task_skill = (context_info or {}).get("skill_prompt")
+            if _task_skill:
+                use_instruction += f"\n\n[响应要求] {_task_skill}"
             
             # 构建历史记录（非延续任务时过滤无关历史）
             if context_info and context_info.get("is_continuation"):
                 history_for_model = history
-                t = yield_thinking(f"检测到上下文延续，保留全部 {len(history)} 轮对话历史", "context")
+                t = yield_thinking(f"检测到上下文延续，保留全部 {len(history)} 轮对话历史", "context", "hybrid")
                 if t: yield t
             else:
                 history_for_model = ContextAnalyzer.filter_history(user_input, history)
                 if len(history_for_model) != len(history):
-                    t = yield_thinking(f"过滤对话历史: {len(history)} 轮 → {len(history_for_model)} 轮相关记录", "context")
+                    t = yield_thinking(f"过滤对话历史: {len(history)} 轮 → {len(history_for_model)} 轮相关记录", "context", "hybrid")
                     if t: yield t
 
             formatted_history = []
@@ -7816,13 +9977,38 @@ def chat_stream():
             
             t = yield_thinking(f"准备调用 {model_id} API，发送 {len(formatted_history)+1} 条消息", "generating")
             if t: yield t
-            
+
+            # ── 并联本地模型：生成执行计划（与云端模型并发，填充首包延迟死区）──
+            # 本地模型 ~200-400ms 生成 3-5 个步骤；云端首包通常需 1-5s
+            # 两者并发执行，步骤在首包前或首次心跳时流出，零额外延迟
+            import concurrent.futures as _cf
+            _plan_future = None
+            try:
+                from app.core.routing import LocalModelRouter as _LMR_plan
+                if _LMR_plan.is_ollama_available() and _LMR_plan._initialized:
+                    _plan_exec = _cf.ThreadPoolExecutor(max_workers=1, thread_name_prefix='koto_plan')
+                    _plan_future = _plan_exec.submit(_LMR_plan.generate_plan, user_input, task_type)
+                    _plan_exec.shutdown(wait=False)  # 不阻塞，后台跑
+            except Exception:
+                _plan_future = None
+
+            # 将 RAG 上下文作为用户消息前缀（与系统指令分离，提升事实准确性）
+            if _rag_context_block:
+                _rag_augmented_input = (
+                    f"[📚 知识库参考内容（请以此为事实依据）]\n"
+                    f"{_rag_context_block}"
+                    f"────────────────────────────────────────────\n"
+                    f"[用户问题]\n{effective_input}"
+                )
+            else:
+                _rag_augmented_input = effective_input
+
             # 使用流式响应
             response = client.models.generate_content_stream(
                 model=model_id,
                 contents=formatted_history + [types.Content(
                     role="user",
-                    parts=[types.Part.from_text(text=effective_input)]
+                    parts=[types.Part.from_text(text=_rag_augmented_input)]
                 )],
                 config=types.GenerateContentConfig(
                     system_instruction=use_instruction
@@ -7833,6 +10019,7 @@ def chat_stream():
             chunk_count = 0
             heartbeat_interval = 5  # 每5秒发送一次心跳
             first_chunk_received = False
+            _plan_flushed = False  # 本地执行计划是否已流出
             
             try:
                 # 使用保活包装器处理流式响应
@@ -7847,10 +10034,26 @@ def chat_stream():
                         yield f"data: {json.dumps({'type': 'token', 'content': interrupt_msg})}\n\n"
                         break
                     
+                    # ── 执行计划：尝试在心跳时非阻塞刷出（填充首包前的空白）──
+                    if not _plan_flushed and _plan_future is not None:
+                        try:
+                            _steps = _plan_future.result(timeout=0.05)
+                            if _steps:
+                                for _s in _steps:
+                                    _pt = yield_thinking(f"📋 {_s}", "planning", "local")
+                                    if _pt: yield _pt
+                            _plan_flushed = True
+                            _plan_future = None
+                        except _cf.TimeoutError:
+                            pass  # 还没好，下次检查
+                        except Exception:
+                            _plan_flushed = True
+                            _plan_future = None
+
                     if item_type == 'heartbeat':
                         elapsed = item_data
                         if first_chunk_received:
-                            # 根据任务类型差异化心跳
+                            # 根据任务类型差异化心跳（已收到首包，正在流式输出）
                             char_count = len(full_text)
                             if task_type == "CODER":
                                 hb_msg = f'💻 代码生成中... 已输出 {char_count} 字符'
@@ -7858,25 +10061,26 @@ def chat_stream():
                                 hb_msg = f'🔬 深度分析中... 已输出 {char_count} 字符'
                             else:
                                 hb_msg = '💭 正在生成...'
-                            yield f"data: {json.dumps({'type': 'progress', 'message': hb_msg, 'detail': f'{elapsed}s'})}\n\n"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': hb_msg, 'detail': f'{elapsed}s', 'stage': 'generating'})}\n\n"
                         else:
+                            # 等待首包（api_calling 阶段，前端显示旋转 spinner）
                             if task_type == "CODER":
                                 hb_msg = '💻 代码分析中，请稍候...'
                             elif task_type == "RESEARCH":
                                 hb_msg = '🔬 深度思考中，请耐心等待...'
                             else:
                                 hb_msg = '🧠 模型思考中...'
-                            yield f"data: {json.dumps({'type': 'progress', 'message': hb_msg, 'detail': f'已等待 {elapsed}s'})}\n\n"
+                            yield f"data: {json.dumps({'type': 'progress', 'message': hb_msg, 'detail': f'已等待 {elapsed}s', 'stage': 'api_calling'})}\n\n"
                     
                     elif item_type == 'timeout':
                         if task_type == "CODER" and not full_text:
                             yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 首包超时，切换到快速模型...', 'detail': ''})}\n\n"
                             try:
                                 fallback_resp = client.models.generate_content(
-                                    model="gemini-3-flash-preview",
+                                    model="gemini-2.5-flash",
                                     contents=formatted_history + [types.Content(
                                         role="user",
-                                        parts=[types.Part.from_text(text=effective_input)]
+                                        parts=[types.Part.from_text(text=_rag_augmented_input)]
                                     )],
                                     config=types.GenerateContentConfig(
                                         system_instruction=use_instruction,
@@ -7900,6 +10104,18 @@ def chat_stream():
                             if not first_chunk_received:
                                 first_chunk_received = True
                                 print(f"[CHAT] 收到第一个响应，耗时 {time.time() - start_time:.1f}s")
+                                # 首包到达：最后一次机会刷出执行计划（等最多 0.5s）
+                                if not _plan_flushed and _plan_future is not None:
+                                    try:
+                                        _steps = _plan_future.result(timeout=0.5)
+                                        if _steps:
+                                            for _s in _steps:
+                                                _pt = yield_thinking(f"📋 {_s}", "planning", "local")
+                                                if _pt: yield _pt
+                                    except Exception:
+                                        pass
+                                    _plan_flushed = True
+                                    _plan_future = None
                             
                             full_text += chunk.text
                             chunk_count += 1
@@ -8003,11 +10219,23 @@ def chat_stream():
                 f"{session_name}.json", user_input, full_text,
                 task=task_type, model_name=model_id, saved_files=saved_files
             )
-            if task_type == "CHAT":
-                _start_memory_extraction(user_input, full_text, history_for_model)
-            
+            # 2-B: Memory reflection for all supported task types
+            _reflect_types = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT"}
+            if task_type in _reflect_types:
+                _start_memory_extraction(
+                    user_input, full_text, history_for_model,
+                    task_type=task_type, session_name=session_name,
+                )
+
+            # 计算 msg_id 并包含在 done 事件中，使前端能提交用户评分
+            try:
+                from app.core.learning.rating_store import RatingStore as _RS
+                _done_msg_id = _RS.make_msg_id(session_name, user_input)
+            except Exception:
+                _done_msg_id = ""
+
             total_time = time.time() - start_time
-            yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': saved_files, 'total_time': total_time})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': saved_files, 'total_time': total_time, 'msg_id': _done_msg_id})}\n\n"
             
         except Exception as e:
             error_str = str(e)
@@ -8016,6 +10244,52 @@ def chat_stream():
             # 地区限制错误
             if "location is not supported" in error_str.lower() or "failed_precondition" in error_str.lower():
                 error_response = "❌ 地区限制\n\n您所在的地区不支持 Gemini API。\n\n💡 解决方案:\n1. 在 `config/gemini_config.env` 配置中转服务 `GEMINI_API_BASE`\n2. 或使用支持的代理服务"
+            elif "API key not valid" in error_str or ("INVALID_ARGUMENT" in error_str and "api key" in error_str.lower()):
+                error_response = (
+                    "❌ **API 密钥无效**\n\n"
+                    "请检查您的 Gemini API 密钥：\n"
+                    "1. 前往 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) 获取有效密钥\n"
+                    "2. 在 Koto 设置页面更新 API 密钥（设置 → API 配置）\n"
+                    "3. 确保密钥所在 Google 项目已启用 Generative Language API\n\n"
+                    f"原始错误: `{error_str[:150]}`"
+                )
+            elif ("server disconnected" in error_str.lower() or "disconnected without" in error_str.lower()
+                  or "connection reset" in error_str.lower() or "connection aborted" in error_str.lower()):
+                error_response = (
+                    "❌ **服务器连接中断**\n\n"
+                    "与 Gemini API 的连接被意外断开，这通常是临时性问题。\n\n"
+                    "💡 建议：\n"
+                    "1. 稍等片刻后重新发送消息\n"
+                    "2. 检查您的网络连接稳定性\n"
+                    "3. 如果使用代理，请确认代理连接正常\n"
+                    "4. 如问题持续，可尝试切换到其他模型"
+                )
+            elif ("resource_exhausted" in error_str.lower() or "quota" in error_str.lower()
+                  or "rate limit" in error_str.lower() or "429" in error_str):
+                error_response = (
+                    "❌ **API 配额超限**\n\n"
+                    "当前 API 密钥的请求频率或配额已达上限。\n\n"
+                    "💡 建议：\n"
+                    "1. 稍等 1-2 分钟后重试\n"
+                    "2. 在设置中切换到其他 API 密钥\n"
+                    "3. 或升级您的 Google AI Studio 计划"
+                )
+            elif ("unavailable" in error_str.lower() or "503" in error_str
+                  or "service unavailable" in error_str.lower()):
+                error_response = (
+                    "❌ **Gemini 服务暂时不可用**\n\n"
+                    "Gemini API 服务器当前无法响应，可能正在维护中。\n\n"
+                    "💡 建议：稍等片刻后重试，或访问 [status.google.com](https://status.google.com) 查看服务状态"
+                )
+            elif "deadline_exceeded" in error_str.lower() or "timed out" in error_str.lower():
+                error_response = (
+                    "❌ **请求超时**\n\n"
+                    "模型响应时间过长，请求已超时。\n\n"
+                    "💡 建议：\n"
+                    "1. 尝试缩短您的问题或分步骤提问\n"
+                    "2. 切换到响应更快的模型（如 gemini-2.5-flash）\n"
+                    "3. 检查网络连接质量"
+                )
             else:
                 error_response = f"❌ 发生错误: {error_str[:200]}"
             
@@ -8031,8 +10305,34 @@ def chat_stream():
             yield f"data: {json.dumps({'type': 'token', 'content': error_response})}\n\n"
             total_time = time.time() - start_time
             yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
-    
-    response = Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+    def _safe_generate():
+        """
+        generate() 外层安全包装器：
+        确保无论 generate() 内部以何种方式结束，前端都能收到 'done' 事件，
+        避免因任务识别失败/早期异常导致对话界面永远挂起。
+        """
+        _sent_done = False
+        try:
+            for _chunk in generate():
+                if isinstance(_chunk, (str, bytes)):
+                    _chunk_str = _chunk if isinstance(_chunk, str) else _chunk.decode('utf-8', errors='replace')
+                    if '"type": "done"' in _chunk_str or "'type': 'done'" in _chunk_str:
+                        _sent_done = True
+                yield _chunk
+        except Exception as _sg_err:
+            print(f"[STREAM] ⚠️ _safe_generate caught exception: {_sg_err}")
+            import traceback
+            traceback.print_exc()
+            if not _sent_done:
+                _err_msg = f"❌ 流式响应异常终止: {str(_sg_err)[:200]}"
+                yield f"data: {json.dumps({'type': 'token', 'content': _err_msg})}\n\n"
+        finally:
+            if not _sent_done:
+                print(f"[STREAM] ⚠️ generate() 未发送 done 事件，触发兜底 done (task_type={task_type})")
+                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0, 'fallback_done': True})}\n\n"
+
+    response = Response(stream_with_context(_safe_generate()), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'  # 禁用 nginx 缓冲
     response.headers['Connection'] = 'keep-alive'
@@ -8444,6 +10744,31 @@ def chat_with_file():
                 except Exception as _kb_err:
                     print(f"[KB] Indexing trigger failed: {_kb_err}")
 
+                # 1-B. 注册到 FileRegistry（统一文件元数据中心）
+                try:
+                    def _bg_register_file(_fpath, _sid):
+                        try:
+                            from app.core.file.file_registry import get_file_registry
+                            _reg = get_file_registry()
+                            _reg.register(
+                                _fpath,
+                                source="upload",
+                                session_id=_sid,
+                                extract_content=True,
+                            )
+                            print(f"[FileRegistry] ✅ 已注册上传文件: {os.path.basename(_fpath)}")
+                        except Exception as _re:
+                            print(f"[FileRegistry] ⚠️ 注册失败（非致命）: {_re}")
+                    import threading as _thr
+                    _reg_thread = _thr.Thread(
+                        target=_bg_register_file,
+                        args=(filepath, session_name),
+                        daemon=True,
+                    )
+                    _reg_thread.start()
+                except Exception as _rge:
+                    print(f"[FileRegistry] ⚠️ 启动注册线程失败: {_rge}")
+
                 # 2. Continue with standard chat formatting
                 formatted_message, file_data = _processor.format_result_for_chat(_file_raw, user_input)
 
@@ -8458,29 +10783,27 @@ def chat_with_file():
                         route_method = "🖼️ Image Edit" if is_edit else "👁️ Image Analysis"
                         print(f"[FILE UPLOAD] 图片任务直通路由: {task_type} (方法: {route_method})")
                     else:
-                        use_annotation = _should_use_annotation_system(user_input, has_file=True) and file_ext in [".doc", ".docx"]
-                        use_analysis = _is_analysis_request(user_input)
+                        _ann_exts = {".doc", ".docx", ".pdf", ".txt", ".md", ".markdown", ".rtf", ".odt"}
+                        use_annotation = _should_use_annotation_system(user_input, has_file=True) and file_ext in _ann_exts
 
                         if use_annotation:
                             task_type = "DOC_ANNOTATE"
                             route_method = "📌 Annotation-Strict"
-                        elif use_analysis:
-                            task_type = "RESEARCH"
-                            route_method = "🔬 Analysis"
+                        elif _is_explicit_file_gen_request(user_input):
+                            # 用户明确要生成新文件，直接路由，无需模型分类
+                            task_type = "FILE_GEN"
+                            route_method = "📄 Explicit-Gen"
                         else:
+                            # ★ 主路径：让本地模型做语义路由
+                            # 传入 [FILE_ATTACHED:ext] 标记，模型通过训练好的规则判断
+                            # CHAT=读文件回答  RESEARCH=深入研究  FILE_GEN=生成新文档
+                            _dispatch_q = (user_input or "").strip() or "请分析这份文件的内容"
+                            _dispatch_input = f"[FILE_ATTACHED:{file_ext or '.file'}] {_dispatch_q}"
                             task_analysis, route_method, context_info = SmartDispatcher.analyze(
-                                formatted_message,
+                                _dispatch_input,
                                 history=history
                             )
                             task_type = task_analysis
-
-                        if task_type == "CHAT":
-                            task_type = "FILE_GEN"
-                            route_method = "📄 Upload-Default"
-
-                if task_type == "DOC_ANNOTATE":
-                    task_type = "FILE_GEN"
-                    route_method = "📄 Batch-Upload-Default"
 
                 if locked_model != 'auto':
                     model_to_use = locked_model
@@ -8517,6 +10840,45 @@ def chat_with_file():
                     print(f"[FILE UPLOAD] 纯归档模式: {filename}，跳过AI分析")
                     result["response"] = ""
                     result["task"] = "FILE_ORGANIZE"
+                elif task_type == "DOC_ANNOTATE":
+                    # 批量/多文件模式下的标注：同步运行标注管道
+                    print(f"[FILE UPLOAD] 批量 DOC_ANNOTATE 模式: {filename}")
+                    try:
+                        from web.document_feedback import DocumentFeedbackSystem
+                        _batch_docs_dir = settings_manager.documents_dir
+                        os.makedirs(_batch_docs_dir, exist_ok=True)
+                        # 如需转换先转换
+                        _batch_filepath = filepath
+                        _batch_file_ext = file_ext
+                        if _batch_file_ext != '.docx':
+                            try:
+                                from web.doc_converter import convert_to_docx as _btc
+                                import tempfile as _bttmp
+                                _bt_tmp = _bttmp.mkdtemp(prefix="koto_bt_")
+                                _bt_conv, _ = _btc(_batch_filepath, output_dir=_bt_tmp)
+                                _bt_dest = os.path.join(_batch_docs_dir, os.path.basename(_bt_conv))
+                                import shutil as _bt_sh
+                                _bt_sh.copy2(_bt_conv, _bt_dest)
+                                _batch_filepath = _bt_dest
+                            except Exception as _bt_err:
+                                print(f"[BATCH DOC_ANNOTATE] 转换失败: {_bt_err}")
+                        _batch_target = os.path.join(_batch_docs_dir, os.path.basename(_batch_filepath))
+                        if os.path.abspath(_batch_filepath) != os.path.abspath(_batch_target):
+                            import shutil as _bsh
+                            _bsh.copy2(_batch_filepath, _batch_target)
+                        _bt_feedback = DocumentFeedbackSystem(gemini_client=client)
+                        _bt_final = None
+                        for _bt_evt in _bt_feedback.full_annotation_loop_streaming(_batch_target, user_input):
+                            if _bt_evt.get('stage') == 'complete':
+                                _bt_final = _bt_evt.get('result', {})
+                        if _bt_final and _bt_final.get('success'):
+                            _bt_revised = _bt_final.get('revised_file', '')
+                            result["response"] = f"✅ 文档标注完成: {os.path.basename(_bt_revised)}"
+                            result["saved_files"] = [_bt_revised] if _bt_revised else []
+                        else:
+                            result["response"] = f"❌ 批量标注失败: {(_bt_final or {}).get('message', '未知错误')}"
+                    except Exception as _bt_exc:
+                        result["response"] = f"❌ 批量标注异常: {_bt_exc}"
                 else:
                     print(f"[FILE UPLOAD] 处理文件: {filename}, 使用 brain.chat")
                     brain_result = brain.chat(
@@ -8846,37 +11208,28 @@ def chat_with_file():
                 print(f"[FILE UPLOAD] 图片任务直通路由: {task_type} (方法: {route_method})")
             else:
                 # 文档上传：严格检测标注意图（必须明确要求在原文上标记）
-                use_annotation = _should_use_annotation_system(user_input, has_file=True) and file_ext in [".doc", ".docx"]
-                # 纯分析请求（不含生成/改善意图）走 RESEARCH
-                use_analysis = _is_analysis_request(user_input)
-                
-                # 🎯 PPT 生成请求显式检测（P0 关键路由）
-                ppt_keywords = ["ppt", "幻灯片", "演示", "汇报", "presentation", "slide", "deck"]
-                prefer_ppt = any(kw in user_input.lower() for kw in ppt_keywords)
+                _ann_exts = {".doc", ".docx", ".pdf", ".txt", ".md", ".markdown", ".rtf", ".odt"}
+                use_annotation = _should_use_annotation_system(user_input, has_file=True) and file_ext in _ann_exts
 
                 if use_annotation:
                     task_type = "DOC_ANNOTATE"
                     route_method = "📌 Annotation-Strict"
-                elif use_analysis:
-                    task_type = "RESEARCH"
-                    route_method = "🔬 Analysis"
-                elif prefer_ppt:
-                    # 🎯 PPT 生成路由（新增 P0 功能）
+                elif _is_explicit_file_gen_request(user_input):
+                    # 用户明确要生成新文件，直接路由，无需模型分类
                     task_type = "FILE_GEN"
-                    route_method = "📊 PPT-from-File"
-                    print(f"[FILE UPLOAD] 🎯 检测到 PPT 生成请求，启用 FILE_GEN + PPT 模式")
+                    route_method = "📄 Explicit-Gen"
+                    print(f"[FILE UPLOAD] 🎯 检测到明确文件生成请求，启用 FILE_GEN 模式")
                 else:
-                    # 如果用户没有锁定任务，智能判断
+                    # ★ 主路径：让本地模型做语义路由
+                    # 传入 [FILE_ATTACHED:ext] 标记，模型通过训练好的规则判断
+                    # CHAT=读文件回答  RESEARCH=深入研究  FILE_GEN=生成新文档
+                    _dispatch_q = (user_input or "").strip() or "请分析这份文件的内容"
+                    _dispatch_input = f"[FILE_ATTACHED:{file_ext or '.file'}] {_dispatch_q}"
                     task_analysis, route_method, context_info = SmartDispatcher.analyze(
-                        formatted_message,
+                        _dispatch_input,
                         history=history
                     )
                     task_type = task_analysis
-
-                # 上传文件的请求不应归类为 CHAT
-                if task_type == "CHAT":
-                    task_type = "FILE_GEN"
-                    route_method = "📄 Upload-Default"
 
                 print(f"[FILE UPLOAD] 智能路由选择任务类型: {task_type} (方法: {route_method})")
         
@@ -8890,7 +11243,9 @@ def chat_with_file():
                 complexity = context_info["complexity"]
             
             if task_type == "DOC_ANNOTATE":
-                model_to_use = "gemini-3-pro-preview"
+                # 文档标注需要强模型：优先使用 gemini-3.1-pro-preview（如可用），回退 gemini-2.5-pro
+                # 注意：gemini-3-pro-preview / gemini-3-flash-preview 仅支持 Interactions API，不能用于 generate_content
+                model_to_use = "gemini-3.1-pro-preview"
             elif task_type == "FILE_GEN":
                 model_to_use = SmartDispatcher.get_model_for_task(
                     task_type,
@@ -8904,7 +11259,12 @@ def chat_with_file():
                 )
         
         print(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
-        
+
+        # 安全兜底：locked_task 预设时 prefer_ppt 可能未定义
+        if 'prefer_ppt' not in locals():
+            _ppt_kws = ["ppt", "幻灯片", "演示", "汇报", "presentation", "slide", "deck"]
+            prefer_ppt = any(kw in (user_input or "").lower() for kw in _ppt_kws)
+
         # 如果是文本类文件，按任务类型处理
         result = {
             "task": "FILE_GEN" if task_type == "DOC_ANNOTATE" else task_type,
@@ -8927,30 +11287,123 @@ def chat_with_file():
                 shutil.copy2(source_path, target_path)
 
             # 使用流式SSE返回进度，让前端能实时显示
+            # 捕获闭包变量（防止generator延迟执行时变量已改变）
+            _ann_target_path = target_path
+            _ann_filename = filename
+            _ann_file_ext = file_ext
+            _ann_route_method = route_method
+            _ann_model = model_to_use
+            _ann_session = session_name
+            _ann_user_input = user_input
+            _ann_client = client
+            _ann_docs_dir = docs_dir  # 确保转换后的文件和输出都保存到标准目录
+
             def generate_doc_annotate_stream():
                 import time as _time
                 _start = _time.time()
-                task_id = f"doc_annotate_{session_name}_{int(_start * 1000)}"
+                task_id = f"doc_annotate_{_ann_session}_{int(_start * 1000)}"
+
+                # Local mutable copies of closure vars (Python makes vars local if assigned anywhere
+                # in the function, so we cannot reassign _ann_* directly without UnboundLocalError)
+                _loc_target_path = _ann_target_path
+                _loc_filename = _ann_filename
+                _loc_file_ext = _ann_file_ext
+
+                # ── 非 .docx 格式自动转换 ──────────────────────────────────────
+                # 对 .doc / .pdf / .txt / .md / .rtf / .odt 先转换为 .docx 再进标注
+                _converted_warning = ""
+                _classif_sent = False
+                if _loc_file_ext != '.docx':
+                    yield f"data: {json.dumps({'type': 'classification', 'task_type': 'DOC_ANNOTATE', 'route_method': _ann_route_method, 'model': _ann_model, 'task_id': task_id, 'message': '📄 DOC_ANNOTATE'})}\n\n"
+                    _classif_sent = True
+                    yield f"data: {json.dumps({'type': 'progress', 'stage': 'converting', 'message': f'🔄 正在将 {_loc_file_ext} 转换为可编辑 .docx...', 'detail': _loc_filename, 'progress': 3})}\n\n"
+                    try:
+                        from web.doc_converter import convert_to_docx, needs_conversion
+                        if needs_conversion(_loc_file_ext):
+                            import tempfile as _tmpmod
+                            _conv_dir = _tmpmod.mkdtemp(prefix="koto_conv_")
+                            _conv_path, _converted_warning = convert_to_docx(_loc_target_path, output_dir=_conv_dir)
+                            # 将转换后的 .docx 复制到标准文档目录，确保输出也在该目录
+                            _conv_basename = os.path.basename(_conv_path)
+                            _conv_in_docs = os.path.join(_ann_docs_dir, _conv_basename)
+                            import shutil as _shutil_conv
+                            _shutil_conv.copy2(_conv_path, _conv_in_docs)
+                            _loc_target_path = _conv_in_docs  # 用 docs_dir 路径，输出也会在此
+                            _loc_filename = _conv_basename
+                            _loc_file_ext = '.docx'
+                            print(f"[DocConvert] ✅ 转换并复制到文档目录 → {_loc_target_path}")
+                        else:
+                            yield f"data: {json.dumps({'type': 'error', 'message': f'不支持的格式：{_loc_file_ext}'})}\n\n"
+                            return
+                    except Exception as _conv_err:
+                        err_msg = f"❌ 格式转换失败：{_conv_err}"
+                        yield f"data: {json.dumps({'type': 'token', 'content': err_msg})}\n\n"
+                        _elapsed = _time.time() - _start
+                        session_manager.update_last_model_response(f"{_ann_session}.json", err_msg)
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed})}\n\n"
+                        return
+                # ─────────────────────────────────────────────────────────────
                 
                 try:
                     from web.document_feedback import DocumentFeedbackSystem
-                    feedback_system = DocumentFeedbackSystem(gemini_client=client)
+                    feedback_system = DocumentFeedbackSystem(gemini_client=_ann_client)
                     
-                    # 发送分类信息
-                    yield f"data: {json.dumps({'type': 'classification', 'task_type': 'DOC_ANNOTATE', 'route_method': route_method, 'model': model_to_use, 'task_id': task_id, 'message': '📄 DOC_ANNOTATE'})}\n\n"
+                    # 发送分类信息（若上方转换块已发送则跳过重复）
+                    if not _classif_sent:
+                        yield f"data: {json.dumps({'type': 'classification', 'task_type': 'DOC_ANNOTATE', 'route_method': _ann_route_method, 'model': _ann_model, 'task_id': task_id, 'message': '📄 DOC_ANNOTATE'})}\n\n"
+                    if _converted_warning:
+                        yield f"data: {json.dumps({'type': 'info', 'message': _converted_warning})}\n\n"
                     
                     # 发送初始进度
-                    yield f"data: {json.dumps({'type': 'progress', 'stage': 'init_reading', 'message': '📖 正在读取文档...', 'detail': filename, 'progress': 5})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'stage': 'init_reading', 'message': '📖 正在读取文档...', 'detail': _loc_filename, 'progress': 5})}\n\n"
+                    
+                    # ── 转换质量检查：如果段落数过多或内容为乱码，拒绝标注 ──────
+                    try:
+                        from docx import Document as _QDoc
+                        _qd = _QDoc(_loc_target_path)
+                        _q_paras = [p.text for p in _qd.paragraphs if p.text.strip()]
+                        _max_para_limit = 500
+                        # 乱码检测：短垃圾段落比例 > 60% 或 字母比例过低
+                        _q_short = sum(1 for p in _q_paras if len(p) < 15)
+                        _q_short_ratio = _q_short / max(len(_q_paras), 1)
+                        _q_alpha_ratio = (
+                            sum(sum(1 for c in p if c.isalpha()) / max(len(p), 1) for p in _q_paras[:200])
+                            / max(min(len(_q_paras), 200), 1)
+                        )
+                        _is_garbage = (
+                            len(_q_paras) > _max_para_limit and _q_short_ratio > 0.5
+                        ) or (
+                            len(_q_paras) > 200 and _q_short_ratio > 0.7
+                        )
+                        if _is_garbage:
+                            _q_err = (
+                                f"❌ **文件转换质量过低**，检测到 {len(_q_paras):,} 个段落"
+                                f"（{_q_short_ratio:.0%} 为乱码短行），内容无法识别。\n\n"
+                                "**原因**：`.doc` 格式使用了旧版二进制结构，无法自动解析。\n\n"
+                                "**解决方法**：\n"
+                                "1. 用 **Microsoft Word** 打开 `.doc` 文件\n"
+                                "2. 点击【文件】→【另存为】\n"
+                                "3. 选择格式 **Word 文档 (*.docx)**\n"
+                                "4. 重新上传 `.docx` 文件"
+                            )
+                            session_manager.update_last_model_response(f"{_ann_session}.json", _q_err)
+                            yield f"data: {json.dumps({'type': 'token', 'content': _q_err})}\n\n"
+                            _elapsed = _time.time() - _start
+                            yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed})}\n\n"
+                            return
+                    except Exception:
+                        pass  # 检查失败时继续正常流程
+                    # ──────────────────────────────────────────────────────────
                     
                     revised_file = None
                     final_result = None
                     
                     for progress_event in feedback_system.full_annotation_loop_streaming(
-                        target_path,
-                        user_input,
+                        _loc_target_path,
+                        _ann_user_input,
                         task_id=task_id,
-                        model_id=model_to_use,
-                        cancel_check=lambda: _interrupt_manager.is_interrupted(session_name)
+                        model_id=_ann_model,
+                        cancel_check=lambda: _interrupt_manager.is_interrupted(_ann_session)
                     ):
                         stage = progress_event.get('stage', 'unknown')
                         progress = progress_event.get('progress', 0)
@@ -8961,7 +11414,7 @@ def chat_with_file():
                             yield f"data: {json.dumps({'type': 'info', 'message': '⏸️ 任务已取消'})}\n\n"
                             _elapsed = _time.time() - _start
                             # 保存取消记录
-                            session_manager.update_last_model_response(f"{session_name}.json", "⏸️ 文档标注任务已取消")
+                            session_manager.update_last_model_response(f"{_ann_session}.json", "⏸️ 文档标注任务已取消")
                             yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed, 'cancelled': True})}\n\n"
                             return
                         
@@ -8978,10 +11431,17 @@ def chat_with_file():
                         failed = final_result.get('failed', 0)
                         total = final_result.get('total', applied + failed)
                         
+                        # ── 兜底检测 ───────────────────────────────────────────
+                        _fb_used     = final_result.get('fallback_used', False)
+                        _fb_partial  = final_result.get('partial_fallback', False)
+                        _fb_err      = final_result.get('last_api_error', '')
+                        _fb_chunks   = final_result.get('fallback_chunk_count', 0)
+                        _ai_chunks   = final_result.get('ai_chunk_count', 0)
+                        
                         # 读取文档信息
                         try:
                             from docx import Document as _Doc
-                            _d = _Doc(target_path)
+                            _d = _Doc(_loc_target_path)
                             _total_paras = len([p for p in _d.paragraphs if p.text.strip()])
                             _total_chars = sum(len(p.text) for p in _d.paragraphs)
                         except Exception:
@@ -8989,6 +11449,14 @@ def chat_with_file():
                             _total_chars = 0
                         
                         density = (applied / _total_chars * 1000) if _total_chars > 0 else 0
+                        
+                        # ── 构建模型行 / 兜底警告 ─────────────────────────────
+                        if _fb_used:
+                            model_display = f"`{_ann_model}` ⚠️ **（AI未成功，已用本地规则兜底）**"
+                        elif _fb_partial:
+                            model_display = f"`{_ann_model}` ⚠️ **（{_fb_chunks}段兜底 / {_ai_chunks}段AI）**"
+                        else:
+                            model_display = f"`{_ann_model}`"
                         
                         summary_lines = [
                             "## ✅ 文档修改完成！",
@@ -8999,14 +11467,39 @@ def chat_with_file():
                             f"- 总计分析: {total} 处",
                             "",
                             "### 📋 文档信息",
-                            f"- 文件名: `{filename}`",
+                            f"- 文件名: `{_loc_filename}`",
                             f"- 段落数: {_total_paras} 段",
                             f"- 字数: {_total_chars} 字",
                             f"- 修改密度: **{density:.1f}** 处/千字",
                             "",
-                            f"### 📄 模型: `{model_to_use}`",
+                            f"### 📄 模型: {model_display}",
                             "",
                             f"### 📝 输出文件: `{os.path.basename(revised_file) if revised_file else '待生成'}`",
+                        ]
+                        
+                        # ── 当使用兜底时，插入显眼的警告块 ──────────────────
+                        if _fb_used or _fb_partial:
+                            fb_label = "全部分段" if _fb_used else f"{_fb_chunks}/{_fb_chunks+_ai_chunks} 分段"
+                            summary_lines += [
+                                "",
+                                "---",
+                                "### ⚠️ 质量警告：本次使用了本地规则兜底",
+                                "",
+                                f"**问题**: Gemini API 在 {fb_label} 中调用失败，系统自动降级为基于正则规则的本地标注。",
+                                "本地兜底标注质量**明显低于** AI 分析，主要覆盖被动句、名词化、冗余连接词等固定模式，",
+                                "无法理解上下文语义。",
+                                "",
+                                f"**错误信息**: `{_fb_err[:120] if _fb_err else '（无详细错误日志）'}`",
+                                "",
+                                "**建议排查**:",
+                                "1. 检查 Koto 后台控制台，找 `[DocumentFeedback] ❌` 或 `⚠️` 开头的日志行",
+                                "2. 确认 API Key 有效：`config/gemini_config.env` → `GEMINI_API_KEY`",
+                                "3. 确认 `gemini-2.5-pro` 对您的账号可用（部分账号受访问限制）",
+                                "4. 重试一次，如仍失败可换用 `gemini-2.5-flash`",
+                                "---",
+                            ]
+                        
+                        summary_lines += [
                             "",
                             "### 💡 使用方法",
                             "1. 用 Microsoft Word 打开输出文件",
@@ -9019,8 +11512,8 @@ def chat_with_file():
                         yield f"data: {json.dumps({'type': 'token', 'content': summary_msg})}\n\n"
                         
                         session_manager.update_last_model_response(
-                            f"{session_name}.json", summary_msg,
-                            task="DOC_ANNOTATE", model_name=model_to_use,
+                            f"{_ann_session}.json", summary_msg,
+                            task="DOC_ANNOTATE", model_name=_ann_model,
                             saved_files=[revised_file] if revised_file else []
                         )
                         
@@ -9028,7 +11521,7 @@ def chat_with_file():
                     else:
                         err_msg = final_result.get('message', '未知错误') if final_result else '处理失败'
                         # 保存失败记录
-                        session_manager.update_last_model_response(f"{session_name}.json", f"❌ 文档标注失败: {err_msg}")
+                        session_manager.update_last_model_response(f"{_ann_session}.json", f"❌ 文档标注失败: {err_msg}")
                         yield f"data: {json.dumps({'type': 'error', 'message': '❌ ' + err_msg})}\n\n"
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed})}\n\n"
                 
@@ -9036,11 +11529,12 @@ def chat_with_file():
                     import traceback
                     traceback.print_exc()
                     # 保存异常记录
-                    session_manager.update_last_model_response(f"{session_name}.json", f"❌ 标注系统错误: {str(e)[:200]}")
+                    session_manager.update_last_model_response(f"{_ann_session}.json", f"❌ 标注系统错误: {str(e)[:200]}")
                     yield f"data: {json.dumps({'type': 'error', 'message': '❌ 标注系统错误: ' + str(e)[:200]})}\n\n"
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
             
-            return Response(generate_doc_annotate_stream(), mimetype='text/event-stream')
+            return Response(stream_with_context(generate_doc_annotate_stream()), mimetype='text/event-stream',
+                           headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no', 'Connection': 'keep-alive'})
 
         # 🎯 FILE_GEN + PPT 生成（P0 新增）
         elif task_type == "FILE_GEN" and prefer_ppt:
@@ -9178,108 +11672,196 @@ def chat_with_file():
                      yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
 
             return Response(stream_with_context(generate_ppt_file_stream()), mimetype='text/event-stream')
-        
-            analysis_prompt = (
-                "你是Koto，一个专业的文档分析助手。\n"
-                "请基于用户上传的原始文件内容，按以下结构生成高质量总结：\n\n"
-                "# 摘要\n"
-                "- 用3-5条要点概述核心信息\n\n"
-                "# 详细分析\n"
-                "## 背景与上下文\n"
-                "## 关键观点与要点\n"
-                "## 数据与证据\n"
-                "## 结论与建议\n\n"
-                "要求：\n"
-                "- 用中文输出，条理清晰，避免冗长\n"
-                "- 不要输出任何代码或BEGIN_FILE标记\n"
-                "- 使用标题和项目符号组织内容\n"
-            )
 
-            full_input = formatted_message + "\n\n" + analysis_prompt
-            print(f"[FILE UPLOAD] 调用模型: {model_to_use}")
-            
-            response = client.models.generate_content(
-                model=model_to_use,
-                contents=full_input,
-                config=types.GenerateContentConfig(
-                    system_instruction=_get_filegen_brief_instruction(),
-                    temperature=0.7,
-                    max_output_tokens=4000,
-                )
-            )
-            text_out = response.text or "(无输出)"
-            print(f"[FILE UPLOAD] 模型返回长度: {len(text_out)} 字符")
+        elif task_type in ["FILE_GEN", "RESEARCH", "CHAT"]:
+            # ── 文本类文件分析（SSE 流式，修复原 blocking brain.chat 卡死问题）──
+            _captured_context = context_info  # closure capture
+            _captured_model   = model_to_use
+            _captured_task    = task_type
 
-            # Save DOCX and optionally PDF
-            title = _build_analysis_title(user_input, filename, is_binary=False)
-            cleaned_text = _strip_code_blocks(text_out)
-            saved_docx = save_docx(cleaned_text, title=title, output_dir=settings_manager.documents_dir)
-            docx_rel = os.path.relpath(saved_docx, WORKSPACE_DIR).replace("\\", "/")
-            result["saved_files"].append(docx_rel)
-            print(f"[FILE UPLOAD] ✅ 已保存 DOCX: {docx_rel}")
-            
-            # Also save as PDF if user wants both formats
-            if user_input and any(kw in user_input.lower() for kw in ['pdf', '两种格式', 'both']):
+            def generate_file_analysis_stream():
+                import time as _time
+                _start = _time.time()
                 try:
-                    saved_pdf = save_pdf(cleaned_text, title=title, output_dir=settings_manager.documents_dir)
-                    pdf_rel = os.path.relpath(saved_pdf, WORKSPACE_DIR).replace("\\", "/")
-                    result["saved_files"].append(pdf_rel)
-                    print(f"[FILE UPLOAD] ✅ 已保存 PDF: {pdf_rel}")
-                except Exception as pdf_err:
-                    print(f"[FILE UPLOAD] ⚠️ PDF保存失败: {pdf_err}")
-            
-            result["response"] = (
-                "✅ 文档分析完成并已保存\n\n"
-                f"📄 生成文件: {', '.join([os.path.basename(f) for f in result['saved_files']])}\n"
-                f"📂 位置: `{settings_manager.documents_dir}`\n\n"
-                f"💡 提示: 文件已自动保存到 workspace/documents 目录"
-            )
+                    _skill = (_captured_context or {}).get("skill_prompt")
+
+                    # 根据任务类型选择 system instruction
+                    if _captured_task == "RESEARCH":
+                        _sys = (
+                            "你是一位专业的文档分析助手，擅长深度解读各类文件（商业计划书、研究报告、技术文档等）。\n"
+                            "请仔细阅读用户提供的文件内容，并按以下结构输出分析报告：\n\n"
+                            "## 核心摘要\n- 用 3-5 条要点概括文件核心内容\n\n"
+                            "## 详细解读\n### 背景与目标\n### 关键内容分析\n### 数据与证据\n\n"
+                            "## 结论与建议\n- 综合评判与可行性/价值判断\n\n"
+                            "要求：用中文，条理清晰，避免冗余，不输出代码块标记。"
+                        )
+                    elif _captured_task == "CHAT":
+                        # 用户上传文件+提问 → 读取分析文件，不生成新文件模板
+                        _sys = (
+                            "你是一位专业的文档阅读与分析助手。用户上传了一份文件并提出了问题，"
+                            "请认真阅读文件的完整内容，用中文给出详细、准确的分析和回答。\n"
+                            "注意：\n"
+                            "- 直接回答用户的具体问题，不要生成新文档模板\n"
+                            "- 引用文件中的具体数据和信息支撑你的判断\n"
+                            "- 如涉及投资价值/风险，结合文件内容给出有依据的评估\n"
+                            "- 用清晰的结构输出，避免空泛表述"
+                        )
+                    else:
+                        _sys = _get_filegen_brief_instruction()
+
+                    if _skill:
+                        _sys += f"\n\n[分析重点] {_skill}"
+
+                    # ── 二进制文件（PDF/Word等）+ CHAT/RESEARCH：传字节流给模型直接读取 ──
+                    # 如果有 file_data（非图片二进制），强制使用支持 generate_content 的模型
+                    # 并将 PDF 字节附加到请求中，而不是依赖提取的文本
+                    _stream_model = _captured_model
+                    _stream_contents = formatted_message  # 默认：文本消息
+                    _has_binary_doc = (
+                        file_data is not None
+                        and not (file_data.get("mime_type") or "").lower().startswith("image/")
+                    )
+                    if _has_binary_doc and _captured_task in ("CHAT", "RESEARCH"):
+                        # 强制降级到支持文件字节的模型（Interactions API 不支持附件字节）
+                        _stream_model = _INTERACTIONS_FALLBACK_MODEL
+                        try:
+                            _doc_part = types.Part.from_bytes(
+                                data=file_data["data"],
+                                mime_type=file_data.get("mime_type", "application/pdf")
+                            )
+                            _stream_contents = [formatted_message, _doc_part]
+                            print(f"[FILE STREAM] 📄 Binary-Doc-Read: model={_stream_model}, bytes={len(file_data['data'])}")
+                        except Exception as _bp_err:
+                            print(f"[FILE STREAM] ⚠️ 无法创建 doc_part，回退到文本模式: {_bp_err}")
+                            _stream_contents = formatted_message
+
+                    yield f"data: {json.dumps({'type': 'classification', 'task_type': _captured_task, 'model': _stream_model, 'message': f'📄 正在分析: {filename}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '📂 文件内容已就绪', 'stage': 'file_ready_complete', 'progress': 15})}\n\n"
+                    _task_display = {'FILE_GEN': '📝 文件生成', 'RESEARCH': '🔬 深度分析', 'CHAT': '💬 对话分析'}.get(_captured_task, _captured_task)
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'🎯 任务类型: {_task_display}', 'stage': 'routing_complete', 'progress': 25})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'⚡ 正在请求 {_stream_model}，请稍候...', 'stage': 'api_calling', 'progress': 35})}\n\n"
+
+                    response_stream = client.models.generate_content_stream(
+                        model=_stream_model,
+                        contents=_stream_contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=_sys,
+                            temperature=0.7,
+                            max_output_tokens=8000,
+                        )
+                    )
+
+                    full_text = ""
+                    _first_token = True
+                    for _chunk in response_stream:
+                        _t = getattr(_chunk, 'text', None)
+                        if _t:
+                            if _first_token:
+                                yield f"data: {json.dumps({'type': 'progress', 'message': '✍️ 模型正在生成回复...', 'stage': 'generating_complete', 'progress': 55})}\n\n"
+                                _first_token = False
+                            full_text += _t
+                            yield f"data: {json.dumps({'type': 'token', 'content': _t})}\n\n"
+
+                    _elapsed = round(_time.time() - _start, 2)
+                    _saved_files = []
+
+                    # 自动保存为 DOCX
+                    if full_text and len(full_text) > 50:
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '💾 正在保存文档...', 'stage': 'saving', 'progress': 90})}\n\n"
+                        try:
+                            _title   = _build_analysis_title(user_input, filename, is_binary=False)
+                            _cleaned = _strip_code_blocks(full_text)
+                            _docx    = save_docx(_cleaned, title=_title, output_dir=settings_manager.documents_dir)
+                            _docx_rel = os.path.relpath(_docx, WORKSPACE_DIR).replace("\\", "/")
+                            _saved_files.append(_docx_rel)
+                            print(f"[FILE UPLOAD] ✅ 分析已保存 DOCX: {_docx_rel}")
+                            # 按需同时保存 PDF
+                            if any(kw in (user_input or "").lower() for kw in ['pdf', '两种格式', 'both']):
+                                try:
+                                    _pdf = save_pdf(_cleaned, title=_title, output_dir=settings_manager.documents_dir)
+                                    _saved_files.append(os.path.relpath(_pdf, WORKSPACE_DIR).replace("\\", "/"))
+                                except Exception:
+                                    pass
+                        except Exception as _de:
+                            print(f"[FILE UPLOAD] ⚠️ 保存 DOCX 失败: {_de}")
+
+                    session_manager.update_last_model_response(
+                        f"{session_name}.json", full_text,
+                        task=_captured_task, model_name=_captured_model, saved_files=_saved_files
+                    )
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': _saved_files, 'total_time': _elapsed})}\n\n"
+
+                except Exception as _e:
+                    import traceback as _tb
+                    _tb.print_exc()
+                    _emsg = str(_e)[:200]
+                    session_manager.update_last_model_response(f"{session_name}.json", f"❌ 分析失败: {_emsg}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'❌ 分析失败: {_emsg}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0})}\n\n"
+
+            return Response(stream_with_context(generate_file_analysis_stream()), mimetype='text/event-stream')
+
         else:
-            # Binary (image/PDF) → let brain handle vision and optionally save analysis as DOCX
-            print(f"[FILE UPLOAD] 二进制文件，使用 brain.chat 进行视觉分析")
-            brain_result = brain.chat(
-                history=history,
-                user_input=formatted_message,
-                file_data=file_data,
-                model=model_to_use,
-                auto_model=(locked_model == 'auto')
-            )
-            result.update(brain_result)
-            # If model returned text, save a DOCX analysis too
-            if brain_result.get("response") and len(brain_result["response"]) > 50:
+            # ── 图片 / 二进制文件：视觉分析（SSE 流式包装）──
+            _captured_fdata   = file_data
+            _captured_model_v = model_to_use
+            _captured_task_v  = task_type
+
+            def generate_vision_stream():
+                import time as _time
+                _start = _time.time()
                 try:
-                    title = _build_analysis_title(user_input, filename, is_binary=True)
-                    cleaned_text = _strip_code_blocks(brain_result["response"])
-                    saved_path = save_docx(cleaned_text, title=title, output_dir=settings_manager.documents_dir)
-                    docx_rel = os.path.relpath(saved_path, WORKSPACE_DIR).replace("\\", "/")
-                    result.setdefault("saved_files", []).append(docx_rel)
-                    print(f"[FILE UPLOAD] ✅ 视觉分析已保存为 DOCX: {docx_rel}")
-                    
-                    # Update response to mention saved analysis
-                    if result.get("response"):
-                        result["response"] += f"\n\n📄 分析报告已保存: {os.path.basename(saved_path)}"
-                except Exception as docx_err:
-                    print(f"[FILE UPLOAD] ⚠️ DOCX保存失败: {docx_err}")
-        
-        # 确保result包含完整的响应
-        if not result.get('response'):
-            result['response'] = "处理完成"
-        if not result.get('task'):
-            result['task'] = task_type
-        if not result.get('model'):
-            result['model'] = model_to_use
-        
-        # Update history（更新模型回复，用户消息已早期保存，包含元数据）
-        session_manager.update_last_model_response(
-            f"{session_name}.json", result.get("response", ""),
-            task=result.get('task', task_type),
-            model_name=result.get('model', model_to_use),
-            saved_files=result.get('saved_files', []),
-            images=result.get('images', [])
-        )
-        
-        print(f"[FILE UPLOAD] 响应成功，任务: {result.get('task')}, 文件: {len(result.get('saved_files', []))} 个")
-        return jsonify(result)
+                    yield f"data: {json.dumps({'type': 'classification', 'task_type': _captured_task_v, 'model': _captured_model_v, 'message': f'👁️ 正在分析: {filename}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '� 文件已接收', 'stage': 'file_ready_complete', 'progress': 15})}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'⚡ 正在请求视觉模型 {_captured_model_v}...', 'stage': 'api_calling', 'progress': 35})}\n\n"
+
+                    # 调用 brain.chat（vision 路径通常较快）
+                    _brain_result = brain.chat(
+                        history=history,
+                        user_input=formatted_message,
+                        file_data=_captured_fdata,
+                        model=_captured_model_v,
+                        auto_model=(locked_model == 'auto')
+                    )
+                    _resp_text = _brain_result.get("response", "")
+                    _elapsed   = round(_time.time() - _start, 2)
+                    _saved_files = list(_brain_result.get("saved_files", []))
+
+                    # 输出内容
+                    if _resp_text:
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '✍️ 分析完成，正在输出...', 'stage': 'generating_complete', 'progress': 70})}\n\n"
+                        yield f"data: {json.dumps({'type': 'token', 'content': _resp_text})}\n\n"
+
+                    # 自动保存视觉分析为 DOCX
+                    if _resp_text and len(_resp_text) > 50:
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '💾 正在保存文档...', 'stage': 'saving', 'progress': 90})}\n\n"
+                        try:
+                            _title   = _build_analysis_title(user_input, filename, is_binary=True)
+                            _cleaned = _strip_code_blocks(_resp_text)
+                            _docx    = save_docx(_cleaned, title=_title, output_dir=settings_manager.documents_dir)
+                            _docx_rel = os.path.relpath(_docx, WORKSPACE_DIR).replace("\\", "/")
+                            _saved_files.append(_docx_rel)
+                            print(f"[FILE UPLOAD] ✅ 视觉分析已保存 DOCX: {_docx_rel}")
+                        except Exception as _de:
+                            print(f"[FILE UPLOAD] ⚠️ 视觉 DOCX 保存失败: {_de}")
+
+                    session_manager.update_last_model_response(
+                        f"{session_name}.json", _resp_text,
+                        task=_captured_task_v, model_name=_captured_model_v,
+                        saved_files=_saved_files,
+                        images=_brain_result.get("images", [])
+                    )
+                    yield f"data: {json.dumps({'type': 'done', 'images': _brain_result.get('images', []), 'saved_files': _saved_files, 'total_time': _elapsed})}\n\n"
+
+                except Exception as _e:
+                    import traceback as _tb
+                    _tb.print_exc()
+                    _emsg = str(_e)[:200]
+                    session_manager.update_last_model_response(f"{session_name}.json", f"❌ 文件分析失败: {_emsg}")
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'❌ 文件分析失败: {_emsg}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0})}\n\n"
+
+            return Response(stream_with_context(generate_vision_stream()), mimetype='text/event-stream')
         
     except Exception as e:
         # 即使出错也保存用户的问题和错误信息
@@ -9393,6 +11975,54 @@ def health():
         "status": "ok",
         "time": time.time()
     })
+
+@app.route('/api/v1/models', methods=['GET'])
+def api_list_models():
+    """
+    动态模型列表 API
+    返回当前 API 可用的模型及各任务的路由结果。
+    - ready: 模型管理器是否已完成初始化
+    - model_map: 任务 → 模型 ID 的当前路由表（含评分信息）
+    - available: 所有可用模型的能力列表
+    """
+    if _model_manager:
+        return jsonify({
+            "ready":     True,
+            "model_map": _model_manager.get_model_map_with_scores(),
+            "available": _model_manager.get_available_models(),
+            "fallback":  _INTERACTIONS_FALLBACK_MODEL,
+            "interactions_only": list(_INTERACTIONS_ONLY_MODELS),
+        })
+    # 模型管理器尚未就绪或不可用，返回静态默认值
+    return jsonify({
+        "ready":     False,
+        "model_map": {task: {"model_id": mid, "display": get_model_display_name(mid), "provider": "gemini" if mid != "local-executor" else "local", "tier": MODEL_INFO.get(mid, {}).get("tier", 5), "score": None, "_inferred": False} for task, mid in MODEL_MAP.items()},
+        "available": [{"id": mid, "display": get_model_display_name(mid), "tier": MODEL_INFO.get(mid, {}).get("tier", 5), "provider": "gemini" if mid != "local-executor" else "local", "strengths": MODEL_INFO.get(mid, {}).get("strengths", []), "capabilities": {}} for mid in dict.fromkeys(MODEL_MAP.values())],
+        "fallback":  _INTERACTIONS_FALLBACK_MODEL,
+        "interactions_only": list(_INTERACTIONS_ONLY_MODELS),
+    })
+
+@app.route('/api/v1/models/refresh', methods=['POST'])
+def api_refresh_models():
+    """
+    手动触发模型列表刷新。
+    重新查询 API 并更新路由表，在新模型上线后可立即生效。
+    """
+    if not _model_manager_available or _model_manager is None:
+        # 管理器未就绪，在后台重新初始化
+        import threading as _t
+        _t.Thread(target=_init_model_manager, name="ModelManagerReinit", daemon=True).start()
+        return jsonify({"status": "initializing", "message": "模型管理器正在后台初始化"})
+    try:
+        new_map = _model_manager.refresh()
+        MODEL_MAP.update(new_map)
+        return jsonify({
+            "status":    "ok",
+            "model_map": _model_manager.get_model_map_with_scores(),
+            "count":     len(_model_manager.get_available_models()),
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/analyze', methods=['POST'])
 def analyze_task():
@@ -9534,6 +12164,118 @@ def open_file_native():
 
 # ================= Settings API =================
 
+# ─── 本地模型状态 API ─────────────────────────────────────────────────────────
+
+@app.route('/api/local-model/status', methods=['GET'])
+def local_model_status():
+    """返回当前本地模型配置和运行状态"""
+    try:
+        from app.core.llm.ollama_provider import get_local_model_info
+        info = get_local_model_info()
+        return jsonify({"success": True, **info})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/local-model/switch', methods=['POST'])
+def local_model_switch():
+    """切换 AI 模式（local / cloud）并热更新客户端缓存"""
+    global _client, _client_mode_key
+    try:
+        data = request.json or {}
+        mode = data.get("mode", "cloud")  # "local" 或 "cloud"
+        model_tag = data.get("model_tag")  # 本地模式时可指定模型
+
+        settings_path = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+        except Exception:
+            settings = {}
+
+        settings["model_mode"] = mode
+        if model_tag:
+            settings["local_model"] = model_tag
+
+        with open(settings_path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+
+        # 清除缓存，下次 get_client() 调用时重建
+        _user_settings_cache.clear()
+        _client = None
+        _client_mode_key = (None, None)
+
+        return jsonify({
+            "success": True,
+            "mode": mode,
+            "model": model_tag or settings.get("local_model"),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/local-model/setup', methods=['POST'])
+def local_model_setup():
+    """触发本地模型安装向导（异步，不阻塞 API 响应）"""
+    def _run_gui():
+        try:
+            from model_downloader import run_downloader_gui
+            run_downloader_gui()
+            # 安装完成后清除缓存
+            global _client, _client_mode_key
+            _user_settings_cache.clear()
+            _client = None
+            _client_mode_key = (None, None)
+        except Exception as e:
+            print(f"[LocalModel] 安装向导失败: {e}")
+
+    import threading as _threading
+    _threading.Thread(target=_run_gui, daemon=True).start()
+    return jsonify({"success": True, "message": "安装向导已启动"})
+
+
+
+# GET /api/skills 已迁移至 skill_bp 蓝图（app/api/skill_routes.py），在此移除内联定义避免路由阻拦
+
+@app.route('/api/skills/<skill_id>/toggle', methods=['POST'])
+def toggle_skill(skill_id: str):
+    """启用/禁用某个技能"""
+    try:
+        from app.core.skills.skill_manager import SkillManager
+        data = request.json or {}
+        enabled = bool(data.get('enabled', False))
+        success = SkillManager.set_enabled(skill_id, enabled)
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/skills/<skill_id>/prompt', methods=['POST'])
+def update_skill_prompt(skill_id: str):
+    """更新某个技能的自定义 Prompt"""
+    try:
+        from app.core.skills.skill_manager import SkillManager
+        data = request.json or {}
+        prompt = data.get('prompt', '')
+        if not prompt.strip():
+            SkillManager.reset_prompt(skill_id)
+            return jsonify({"success": True, "reset": True})
+        success = SkillManager.update_prompt(skill_id, prompt)
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/skills/<skill_id>/reset', methods=['POST'])
+def reset_skill_prompt(skill_id: str):
+    """将技能 Prompt 恢复为默认值"""
+    try:
+        from app.core.skills.skill_manager import SkillManager
+        success = SkillManager.reset_prompt(skill_id)
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ================= Settings API =================
+
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     # 合并 appearance 主题（如有 cookie/参数可在此合并）
@@ -9549,12 +12291,25 @@ def update_settings():
     if category and key:
         success = settings_manager.set(category, key, value)
         settings_manager.ensure_directories()
+        # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
+        _user_settings_cache.clear()
+        # 代理设置变更时立即重新检测
+        if category == 'proxy':
+            global _proxy_checked, _detected_proxy
+            _proxy_checked = False
+            _detected_proxy = None
+            threading.Thread(target=lambda: get_detected_proxy(), daemon=True).start()
         return jsonify({"success": success})
     return jsonify({"success": False, "error": "Missing category or key"})
 
 @app.route('/api/settings/reset', methods=['POST'])
 def reset_settings():
     success = settings_manager.reset()
+    # 同样清除缓存
+    _user_settings_cache.clear()
+    global _proxy_checked, _detected_proxy
+    _proxy_checked = False
+    _detected_proxy = None
     return jsonify({"success": success})
 
 # ================= Mini Mode Switch API =================
@@ -9564,7 +12319,11 @@ def switch_to_mini():
     """切换到迷你模式"""
     import subprocess
     import sys
-    
+
+    # 打包版无法以脚本方式启动 mini_koto.py
+    if getattr(sys, 'frozen', False):
+        return jsonify({"success": False, "error": "打包版暂不支持迷你模式，请使用窗口顶栏按钮"})
+
     try:
         # 启动迷你窗口
         mini_koto_path = os.path.join(PROJECT_ROOT, 'web', 'mini_koto.py')
@@ -9586,7 +12345,11 @@ def switch_to_main():
     """切换到主程序"""
     import subprocess
     import sys
-    
+
+    # 打包版已在主程序窗口中运行，直接返回成功
+    if getattr(sys, 'frozen', False):
+        return jsonify({"success": True, "message": "已在主程序中运行"})
+
     try:
         # 启动主窗口
         main_app_path = os.path.join(PROJECT_ROOT, 'koto_app.py')
@@ -9606,6 +12369,12 @@ def switch_to_main():
 def mini_page():
     """迷你模式页面（浏览器访问用）"""
     return render_template('mini_koto.html')
+
+@app.route('/m')
+@app.route('/mobile')
+def mobile_page():
+    """移动端优化页面"""
+    return render_template('mobile.html')
 
 @app.route('/api/mini/chat', methods=['POST'])
 def mini_chat():
@@ -9636,7 +12405,8 @@ def mini_chat():
         if task_type == "WEB_SEARCH":
             # 🌐 网络搜索 - 使用 Gemini Google Search Grounding
             print(f"[MINI_CHAT] 🌐 执行网络搜索...")
-            search_result = WebSearcher.search_with_grounding(user_input)
+            _mini_skill_prompt = (context_info or {}).get("skill_prompt")
+            search_result = WebSearcher.search_with_grounding(user_input, skill_prompt=_mini_skill_prompt)
             response_text = search_result.get("response", "")
             used_model = "gemini-2.5-flash (Google Search)"
             
@@ -9649,7 +12419,7 @@ def mini_chat():
                 )
                 try:
                     fix_query_resp = client.models.generate_content(
-                        model="gemini-2.0-flash",
+                        model="gemini-2.0-flash-lite",
                         contents=fix_query_prompt,
                         config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=64)
                     )
@@ -9681,7 +12451,7 @@ def mini_chat():
                     fix_prompt = Utils.build_fix_prompt("SYSTEM", user_input, response_text)
                     try:
                         fix_resp = client.models.generate_content(
-                            model="gemini-2.0-flash",
+                            model="gemini-2.5-flash",
                             contents=fix_prompt,
                             config=types.GenerateContentConfig(
                                 system_instruction=_get_DEFAULT_CHAT_SYSTEM_INSTRUCTION(),
@@ -9690,7 +12460,7 @@ def mini_chat():
                             )
                         )
                         response_text = fix_resp.text or response_text
-                        used_model = "gemini-2.0-flash (fallback)"
+                        used_model = "gemini-2.5-flash (fallback)"
                         is_error = False
                     except Exception as e:
                         print(f"[MINI_CHAT] AI 修正失败: {e}")
@@ -9704,7 +12474,7 @@ def mini_chat():
             # 💬 其他任务（CHAT, RESEARCH, CODER 等）- 使用 brain.chat()
             print(f"[MINI_CHAT] 💬 执行 {task_type} 任务...")
             model = MODEL_MAP.get(task_type, MODEL_MAP['CHAT'])
-            result = brain.chat(history, user_input, model=model, auto_model=False)
+            result = brain.chat(history, user_input, model=model, auto_model=False, task_type=task_type)
             response_text = result.get("response", "")
             used_model = result.get("model", model)
             is_error = response_text.startswith("Error:")
@@ -9712,7 +12482,7 @@ def mini_chat():
             # 如果遇到 404 错误，尝试备用模型
             if is_error and "404" in response_text:
                 print(f"[MINI_CHAT] ⚠️ 模型 404，尝试备用模型...")
-                for fallback_model in ["gemini-2.0-flash", "gemini-1.5-pro"]:
+                for fallback_model in ["gemini-2.5-flash", "gemini-3-flash-preview"]:
                     try:
                         result = brain.chat(history, user_input, model=fallback_model, auto_model=False)
                         if not result.get("response", "").startswith("Error:"):
@@ -9774,11 +12544,12 @@ def setup_api_key():
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     
     try:
-        # 写入配置文件
+        # 写入配置文件（同时写入两个变量名，避免优先级错乱）
         with open(config_path, 'w', encoding='utf-8') as f:
-            f.write(f"# Koto Configuration\nAPI_KEY={api_key}\n")
+            f.write(f"# Koto Configuration\nGEMINI_API_KEY={api_key}\nAPI_KEY={api_key}\n")
         
         # 更新环境变量
+        os.environ['GEMINI_API_KEY'] = api_key
         os.environ['API_KEY'] = api_key
         global API_KEY, client
         API_KEY = api_key
@@ -9848,13 +12619,13 @@ def diagnose_models():
         ("gemini-3-flash-preview", "日常对话"),
         ("gemini-3-pro-preview", "代码生成"),
         ("gemini-2.5-flash", "联网搜索"),
-        ("nano-banana-pro-preview", "图像生成"),
+        ("gemini-3.1-flash-image-preview", "图像生成"),
     ]
     
     def test_model(model_id, purpose):
         try:
             start = time.time()
-            if "nano-banana" in model_id or "imagen" in model_id:
+            if "image-generation" in model_id or "imagen" in model_id:
                 # 图像模型只测试连通性
                 response = client.models.generate_content(
                     model=model_id,
@@ -10210,85 +12981,10 @@ def copy_from_history():
     return jsonify({"success": success})
 
 
-# === 任务调度 API ===
-@app.route('/api/tasks/add', methods=['POST'])
-def add_task():
-    """添加任务到队列"""
-    from task_scheduler import get_task_scheduler, Task, TaskPriority
-    
-    data = request.json
-    task_name = data.get('name', '')
-    priority = data.get('priority', 'NORMAL')
-    
-    # 这里需要根据任务类型创建相应的action
-    # 简化示例：只记录任务信息
-    def dummy_action():
-        print(f"执行任务: {task_name}")
-        return {"status": "completed"}
-    
-    task = Task(
-        task_id=f"task_{int(time.time())}",
-        name=task_name,
-        action=dummy_action,
-        priority=TaskPriority[priority]
-    )
-    
-    scheduler = get_task_scheduler()
-    task_id = scheduler.add_task(task)
-    
-    return jsonify({"success": True, "task_id": task_id})
-
-
-@app.route('/api/tasks/schedule', methods=['POST'])
-def schedule_task():
-    """调度定时任务"""
-    from task_scheduler import get_task_scheduler
-    
-    data = request.json
-    task_name = data.get('name', '')
-    schedule_type = data.get('schedule_type', 'daily')
-    time_str = data.get('time', '09:00')
-    
-    def dummy_action():
-        print(f"执行定时任务: {task_name}")
-        return {"status": "completed"}
-    
-    scheduler = get_task_scheduler()
-    task_id = scheduler.schedule_task(
-        name=task_name,
-        action=dummy_action,
-        schedule_type=schedule_type,
-        time_str=time_str
-    )
-    
-    return jsonify({"success": True, "task_id": task_id})
-
-
-@app.route('/api/tasks/list', methods=['GET'])
-def list_tasks():
-    """列出所有任务"""
-    from task_scheduler import get_task_scheduler, TaskStatus
-    
-    status = request.args.get('status')
-    scheduler = get_task_scheduler()
-    
-    if status:
-        tasks = scheduler.list_tasks(TaskStatus[status])
-    else:
-        tasks = scheduler.list_tasks()
-    
-    return jsonify({"tasks": tasks})
-
-
-@app.route('/api/tasks/<task_id>/cancel', methods=['POST'])
-def cancel_task(task_id):
-    """取消任务"""
-    from task_scheduler import get_task_scheduler
-    
-    scheduler = get_task_scheduler()
-    success = scheduler.cancel_task(task_id)
-    
-    return jsonify({"success": success})
+# === 任务调度 API（已迁移至 task_bp 蓝图 app/api/task_routes.py）===
+# 原内联路由依赖不存在的 task_scheduler 模块，已移除以解除对 task_bp 的路由阻拦。
+# task_bp 提供：GET /api/tasks, GET /api/tasks/<id>, POST /api/tasks/<id>/cancel,
+#              POST /api/tasks/<id>/interrupt, GET /api/tasks/<id>/stream, 等。
 
 
 # === 邮件 API ===
@@ -10549,46 +13245,156 @@ def voice_listen():
 
 @app.route('/api/voice/stream')
 def voice_stream():
-    """流式语音识别 - 实时返回识别结果（SSE）"""
-    from flask import Response
-    
+    """流式语音识别 - Vosk 本地离线，实时返回部分/最终结果（SSE）"""
+    import json as _json
+    from flask import Response, stream_with_context
+
+    @stream_with_context
     def generate():
         try:
-            from web.voice_fast import recognize_streaming
-            
-            for result in recognize_streaming(timeout=12):
-                # 发送 SSE 格式数据
-                import json
-                yield f"data: {json.dumps(result, ensure_ascii=False)}\n\n"
-                
-                # 如果是最终结果或错误，结束流
-                if result.get('type') in ('final', 'error'):
+            from web.voice_engine import recognize_stream
+            for event in recognize_stream(max_wait=8.0, max_speech=30.0):
+                yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get('type') in ('final', 'error'):
                     break
-                    
+        except GeneratorExit:
+            pass
         except Exception as e:
-            import json
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
-    
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
     return Response(
         generate(),
         mimetype='text/event-stream',
         headers={
-            'Cache-Control': 'no-cache',
+            'Cache-Control': 'no-cache, no-transform',
             'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no'
+            'X-Accel-Buffering': 'no',
+            'Transfer-Encoding': 'chunked',
         }
     )
 
 
-# 全局变量：控制语音识别停止
-_voice_stop_flag = False
-
 @app.route('/api/voice/stop', methods=['POST'])
 def voice_stop():
-    """停止语音识别"""
-    global _voice_stop_flag
-    _voice_stop_flag = True
+    """停止当前语音识别流（通知 voice_engine 停止）"""
+    try:
+        from web.voice_engine import request_stop
+        request_stop()
+    except Exception:
+        pass
     return jsonify({"success": True, "message": "已发送停止信号"})
+
+
+@app.route('/api/voice/commands', methods=['GET'])
+def voice_commands():
+    """返回内置语音命令列表（供语音面板展示）"""
+    commands = [
+        {"name": "发送消息", "description": "说出消息后自动发送",        "keyword": ""},
+        {"name": "新对话",   "description": "说'新对话'开始新聊天",     "keyword": "新对话"},
+        {"name": "清空输入", "description": "说'清空'清除输入框",        "keyword": "清空"},
+        {"name": "重新识别", "description": "再次点击麦克风重新说",      "keyword": ""},
+    ]
+    return jsonify({"success": True, "commands": commands})
+
+
+@app.route('/api/voice/stt_status', methods=['GET'])
+def voice_stt_status():
+    """查询当前语音引擎状态（使用新 voice_engine）。"""
+    try:
+        from web.voice_engine import get_status
+        fast = get_status()
+    except Exception:
+        fast = {"available": False, "engine": "unavailable", "label": "无引擎"}
+
+    return jsonify({
+        "fast":   fast,
+        "local":  fast,   # 兼容前端旧字段
+        "active": fast.get("engine", "none"),
+    })
+
+
+@app.route('/api/voice/gemini_stt', methods=['POST'])
+@app.route('/api/voice/stt',        methods=['POST'])   # 统一入口别名
+def voice_gemini_stt():
+    """
+    统一语音转文字 (STT) 入口：本地 Whisper 优先 → Gemini STT 备用。
+
+    - 若安装了 faster-whisper 或 openai-whisper：完全本地转写，无 API 消耗
+    - 否则：发送至 Gemini gemini-2.0-flash-lite 转写
+    - 始终返回 JSON，绝不返回 HTML 错误页面。
+    """
+    try:
+        data      = request.get_json(silent=True) or {}
+        audio_b64 = data.get('audio', '')
+        mime_type = data.get('mime', 'audio/webm')
+
+        if not audio_b64:
+            return jsonify({"success": False, "text": "", "message": "缺少 audio 字段"}), 400
+
+        import base64 as _b64
+        try:
+            audio_bytes = _b64.b64decode(audio_b64)
+        except Exception:
+            return jsonify({"success": False, "text": "", "message": "音频 base64 解码失败"}), 400
+
+        if len(audio_bytes) < 300:
+            return jsonify({"success": False, "text": "", "message": "录音太短，请重新说话"})
+
+        print(f"[STT] 收到音频 {len(audio_bytes)/1024:.1f}KB  MIME={mime_type}")
+
+        # ── 优先尝试本地 Whisper ──────────────────────────────────────────────
+        try:
+            from web.local_stt import is_available, transcribe
+            if is_available():
+                ok, text, engine = transcribe(audio_bytes, mime_type)
+                if ok and text:
+                    return jsonify({"success": True,  "text": text,
+                                    "engine": engine, "message": "识别成功（本地）"})
+                # 本地识别出空文本 → 也直接返回（不回退，避免重复计费）
+                return jsonify({"success": False, "text": "",
+                                "engine": engine, "message": "未检测到语音"})
+        except Exception as _le:
+            print(f"[STT] 本地 STT 异常，回退 Gemini: {_le}")
+
+        # ── 回退：Gemini STT ──────────────────────────────────────────────────
+        if client is None:
+            return jsonify({"success": False, "text": "",
+                            "message": "Gemini 客户端未初始化，请检查 API Key；"
+                                       "或安装 faster-whisper 使用本地识别"}), 503
+
+        stt_model = "gemini-2.0-flash-lite"
+        prompt_parts = [
+            types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+            types.Part.from_text(text=(
+                "请将上面音频中的语音内容完整转写为文字。"
+                "只输出转写结果，不要加任何解释、标点修饰或前缀（如「转写：」等）。"
+                "如果听不清或没有语音，只输出空字符串。"
+            )),
+        ]
+
+        resp = client.models.generate_content(
+            model=stt_model,
+            contents=[types.Content(role="user", parts=prompt_parts)],
+            config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=512)
+        )
+
+        text = (resp.text or "").strip()
+        for prefix in ("转写：", "转写:", "识别：", "识别:", "文字：", "文字:"):
+            if text.startswith(prefix):
+                text = text[len(prefix):].strip()
+
+        print(f"[STT] Gemini 识别结果: {text[:80]!r}")
+        return jsonify({
+            "success": bool(text),
+            "text":    text,
+            "engine":  f"Gemini/{stt_model}",
+            "message": "识别成功" if text else "未检测到语音内容"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "text": "", "message": f"STT 失败: {str(e)[:200]}"}), 500
 
 
 # ================= 增强功能 API (场景1-3) =================
@@ -10772,34 +13578,71 @@ def _should_use_annotation_system(requirement: str, has_file: bool = False) -> b
 
 
 def _is_analysis_request(requirement: str) -> bool:
-    """判断是否为纯分析/研究类请求（只读分析，不生成新内容）"""
+    """判断是否为分析/问答类请求（包括简单问答和复杂分析，但不含生成文档意图）"""
     if not requirement:
         return False
 
     requirement_lower = requirement.lower()
-    
-    # 明确的分析动作词
+
+    # 明确的分析/问答动作词（全面覆盖）
     analysis_actions = [
+        # 分析类
         "分析", "总结", "概述", "梳理", "解读",
         "评估", "对比", "提炼", "归纳",
-        "主要观点", "核心观点", "要点",
-        "review", "analysis", "summary", "summarize"
+        "主要观点", "核心观点", "要点", "重点", "亮点",
+        # 问答/询问类
+        "告诉我", "告诉", "是什么", "做什么", "想做什么",
+        "在做什么", "是否", "有没有", "值不值", "值不值得",
+        "投资价值", "投资建议", "是否值得", "值得投资",
+        "有无价值", "有价值吗", "值得关注",
+        "讲讲", "讲一下", "说说", "说一下",
+        "介绍", "介绍一下", "介绍下",
+        "解释", "解释一下", "帮我解释",
+        "了解", "看看", "看一看", "读一读", "读一下",
+        "什么是", "怎么看", "怎么样", "如何", "什么情况",
+        "帮我看", "帮我读", "帮我理解", "帮我了解", "帮我评估", "帮我判断",
+        "这份", "这个", "检查一下", "查看一下", "看一下这",
+        "他们想", "他想", "它想", "该公司", "该项目",
+        # English
+        "review", "analysis", "summary", "summarize", "analyze",
+        "explain", "understand", "evaluate", "assess",
+        "what is", "what does", "how does", "tell me",
+        "should i", "is it worth", "investment value",
+        "check", "read this", "look at",
     ]
-    
-    # 排除词：如果同时包含生成/写/改善意图，这不是纯分析
+
+    # 排除词：明确的文档生成意图（只排除最明确的生成指令）
     generation_words = [
-        '写', '生成', '改善', '改进', '优化', '润色',
-        '重写', '摘要', '引言', '结论', '帮我做'
+        '生成一份', '生成一个', '帮我生成', '写一份', '写一个', '帮我写',
+        '改善', '改进', '优化', '润色', '重写',
+        '帮我做一份', '做一个报告', '做一份报告',
+        'create a document', 'generate a report', 'write a report',
     ]
-    
+
     has_analysis = any(kw in requirement_lower for kw in analysis_actions)
     has_generation = any(kw in requirement_lower for kw in generation_words)
-    
-    # 只有纯分析（无生成意图）才返回True
+
     if has_analysis and not has_generation:
         return True
-    
+
     return False
+
+
+def _is_explicit_file_gen_request(requirement: str) -> bool:
+    """判断用户是否明确要求生成/输出一个新文件（报告、Word、PDF等）"""
+    if not requirement:
+        return False
+    requirement_lower = requirement.lower()
+    gen_keywords = [
+        "生成一份", "生成一个", "帮我生成",
+        "写一份报告", "写一个报告", "写报告", "写一份", "帮我写",
+        "做一份", "做一个", "帮我做",
+        "导出", "输出为", "保存为", "转成",
+        "生成word", "生成pdf", "生成excel", "生成ppt",
+        "创建文档", "新建文档", "制作报告", "整理成文档",
+        "形成报告", "输出报告",
+    ]
+    return any(kw in requirement_lower for kw in gen_keywords)
 
 
 @app.route('/api/document/smart-process', methods=['POST'])
@@ -12774,6 +15617,86 @@ def file_search_list():
 
 
 # ═══════════════════════════════════════════════════
+# 全盘文件扫描 API  (FileScanner)
+# ═══════════════════════════════════════════════════
+
+@app.route('/api/scan/start', methods=['POST'])
+def scan_start():
+    """启动全盘文件扫描（后台线程）"""
+    try:
+        from web.file_scanner import FileScanner
+        data = request.json or {}
+        drives = data.get('drives')  # None → 自动枚举所有分区
+        already = not FileScanner.start_scan(drives=drives)
+        return jsonify({
+            "success": True,
+            "already_running": already,
+            "drives": drives or FileScanner.get_drives(),
+            "message": "扫描已在进行中" if already else "全盘扫描已启动（后台运行）"
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/scan/status', methods=['GET'])
+def scan_status():
+    """返回扫描进度和统计"""
+    try:
+        from web.file_scanner import FileScanner
+        return jsonify({"success": True, **FileScanner.get_status(),
+                        "indexed_count": FileScanner.stats()["total"],
+                        "by_category": FileScanner.stats()["by_category"]})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/scan/search', methods=['POST'])
+def scan_search():
+    """全盘文件名模糊搜索"""
+    try:
+        from web.file_scanner import FileScanner
+        data = request.json or {}
+        query = (data.get('query') or '').strip()
+        limit = int(data.get('limit', 12))
+        ext_filter = data.get('ext_filter')          # ['.docx', ...] or None
+        category_filter = data.get('category')       # '文档' / '图片' / ... or None
+        if not query:
+            return jsonify({"success": False, "error": "缺少 query 参数"}), 400
+        FileScanner.ensure_loaded()
+        results = FileScanner.search(query, limit=limit,
+                                      ext_filter=ext_filter,
+                                      category_filter=category_filter)
+        return jsonify({"success": True, "results": results, "count": len(results)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/scan/open', methods=['POST'])
+def scan_open():
+    """用系统默认程序打开指定绝对路径文件"""
+    try:
+        from web.file_scanner import FileScanner
+        data = request.json or {}
+        path = (data.get('path') or '').strip()
+        if not path:
+            return jsonify({"success": False, "error": "缺少 path 参数"}), 400
+        result = FileScanner.open_file(path)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/scan/stats', methods=['GET'])
+def scan_stats():
+    """索引统计数据"""
+    try:
+        from web.file_scanner import FileScanner
+        return jsonify({"success": True, **FileScanner.stats()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════
 # 概念提取 API
 # ═══════════════════════════════════════════════════
 
@@ -13994,5 +16917,230 @@ def get_backup_manifest(filename):
         return send_from_directory(backup_dir, filename, as_attachment=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 404
+
+
+# ── Token 使用统计接口 ────────────────────────────────────────────────────────
+
+@app.route('/api/token-stats', methods=['GET'])
+def api_token_stats():
+    """返回 Token 用量统计（今日 / 本月 / 按模型 / 近 7 天）"""
+    try:
+        from token_tracker import get_stats
+        return jsonify(get_stats())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/token-stats/reset', methods=['POST'])
+def api_token_stats_reset():
+    """重置统计数据。Body: {"period": "today" | "month" | "all"}"""
+    try:
+        from token_tracker import reset_stats
+        period = (request.json or {}).get('period', 'all')
+        return jsonify(reset_stats(period))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── LangGraph 工作流可视化 & 开发工具 API ─────────────────────────────────────
+
+@app.route('/workflow-dag')
+def workflow_dag_page():
+    """工作流 DAG 可视化页面"""
+    import os
+    html_path = os.path.join(os.path.dirname(__file__), 'static', 'workflow_dag.html')
+    try:
+        from flask import send_file
+        return send_file(html_path)
+    except Exception as e:
+        return f"<h3>Error: {e}</h3>", 500
+
+
+@app.route('/api/dev/graph-mermaid', methods=['GET'])
+def api_dev_graph_mermaid():
+    """
+    返回指定工作流 / Agent 的 Mermaid DAG 图标记。
+
+    参数:
+        workflow : 工作流名称  (research_and_document | multi_agent_ppt | react_agent)
+        type     : 类型        (workflow | agent)
+    """
+    wf = request.args.get('workflow', 'react_agent')
+    wf_type = request.args.get('type', 'agent')
+    try:
+        if wf_type == 'agent' or wf == 'react_agent':
+            from app.core.agent.factory import create_langgraph_agent
+            agent = create_langgraph_agent()
+            mermaid_code = agent.get_graph_mermaid()
+            # Count nodes/edges
+            node_count = mermaid_code.count('\n    ') if mermaid_code else 0
+            edge_count = mermaid_code.count('-->') + mermaid_code.count('-.->') if mermaid_code else 0
+        else:
+            from app.core.workflow.langgraph_workflow import WorkflowEngine
+            engine = WorkflowEngine()
+            mermaid_code = engine.get_graph_mermaid(wf)
+            node_count = mermaid_code.count('\n    ') if mermaid_code else 0
+            edge_count = mermaid_code.count('-->') + mermaid_code.count('-.->') if mermaid_code else 0
+
+        return jsonify({
+            "success": True,
+            "workflow": wf,
+            "type": wf_type,
+            "mermaid": mermaid_code,
+            "node_count": max(node_count, 0),
+            "edge_count": max(edge_count, 0),
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"success": False, "error": str(e), "traceback": traceback.format_exc()}), 500
+
+
+@app.route('/api/dev/checkpoint-info', methods=['GET'])
+def api_dev_checkpoint_info():
+    """返回检查点数据库信息（类型 / 会话数 / 快照总数）。"""
+    try:
+        from app.core.agent.checkpoint_manager import CheckpointManager
+        return jsonify(CheckpointManager.get_db_info())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/dev/checkpoints/<thread_id>', methods=['GET'])
+def api_dev_list_checkpoints(thread_id):
+    """列出某会话的检查点快照列表。"""
+    try:
+        from app.core.agent.checkpoint_manager import CheckpointManager
+        snapshots = CheckpointManager.list_checkpoints(thread_id)
+        return jsonify({"thread_id": thread_id, "snapshots": snapshots, "count": len(snapshots)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/dev/checkpoints/<thread_id>', methods=['DELETE'])
+def api_dev_delete_checkpoints(thread_id):
+    """删除某会话的全部检查点（用于清除对话历史）。"""
+    try:
+        from app.core.agent.checkpoint_manager import CheckpointManager
+        ok = CheckpointManager.delete_thread(thread_id)
+        return jsonify({"success": ok, "thread_id": thread_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RAG 向量检索 API
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/rag/ingest', methods=['POST'])
+def api_rag_ingest():
+    """
+    索引文件或文本到向量库。
+
+    请求体 (JSON):
+        { "file_path": "/abs/path/to/doc.pdf" }
+        或
+        { "text": "要索引的文本内容...", "source": "my_doc" }
+
+    返回:
+        { "success": true, "chunks_added": 42, "stats": {...} }
+    """
+    try:
+        from app.core.services.rag_service import get_rag_service
+        data = request.get_json(force=True) or {}
+        rag = get_rag_service()
+
+        if "file_path" in data:
+            fp = data["file_path"]
+            if not os.path.isabs(fp):
+                fp = os.path.join(os.getcwd(), fp)
+            if not os.path.exists(fp):
+                return jsonify({"error": f"文件不存在: {fp}"}), 400
+            count = rag.index_file(fp)
+        elif "text" in data:
+            count = rag.index_text(data["text"], source=data.get("source", "api_input"))
+        else:
+            return jsonify({"error": "请提供 file_path 或 text 字段"}), 400
+
+        return jsonify({"success": True, "chunks_added": count, "stats": rag.stats()})
+    except Exception as e:
+        logger.exception("[RAG /ingest] error")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/rag/query', methods=['POST'])
+def api_rag_query():
+    """
+    检索向量库，返回相关文本片段。
+
+    请求体 (JSON):
+        {
+          "question": "Koto 支持哪些文件格式？",
+          "k": 5,
+          "answer": true        // 可选：true = 同时生成 LLM 答案
+        }
+
+    返回（仅检索）:
+        { "chunks": [...], "count": 3 }
+
+    返回（含答案）:
+        { "answer": "...", "sources": [...], "chunks": [...], "context_used": true }
+    """
+    try:
+        from app.core.services.rag_service import get_rag_service
+        data = request.get_json(force=True) or {}
+        question = data.get("question", "").strip()
+        if not question:
+            return jsonify({"error": "question 字段不能为空"}), 400
+
+        k = int(data.get("k", 5))
+        want_answer = data.get("answer", False)
+        rag = get_rag_service()
+
+        if want_answer:
+            result = rag.rag_answer(question, k=k)
+            return jsonify(result)
+        else:
+            chunks = rag.retrieve(question, k=k)
+            return jsonify({"chunks": chunks, "count": len(chunks)})
+    except Exception as e:
+        logger.exception("[RAG /query] error")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/rag/stats', methods=['GET'])
+def api_rag_stats():
+    """
+    返回 RAG 索引统计信息。
+
+    返回:
+        {
+          "initialized": true,
+          "doc_count": 312,
+          "index_dir": "config/rag_index",
+          "index_size_mb": 2.4,
+          "embedding_model": "GoogleGenerativeAIEmbeddings"
+        }
+    """
+    try:
+        from app.core.services.rag_service import get_rag_service
+        rag = get_rag_service()
+        return jsonify(rag.stats())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/rag/clear', methods=['DELETE'])
+def api_rag_clear():
+    """清空 RAG 向量库（删除所有索引数据）。"""
+    try:
+        from app.core.services.rag_service import get_rag_service, _rag_instance
+        import app.core.services.rag_service as _rag_mod
+        rag = get_rag_service()
+        ok = rag.clear()
+        # 重置单例，下次 get_rag_service() 将重建
+        _rag_mod._rag_instance = None
+        return jsonify({"success": ok, "message": "向量库已清空"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 

@@ -1,0 +1,37 @@
+# ===== Koto - 本地 LoRA 蒸馏训练依赖 =====
+#
+# 仅在需要「本机 GPU 训练」时安装，普通用户/发行版不需要。
+# 未安装时 Koto 会自动降级为"骨架模式"，其他功能完全正常。
+#
+# 安装步骤（需要 NVIDIA GPU + CUDA 12.x）：
+#
+#   Step 1 — 安装 CUDA 版 PyTorch（按你的 CUDA 版本选择链接）：
+#     CUDA 12.6:  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+#     CUDA 12.4:  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+#     CUDA 11.8:  pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#
+#   Step 2 — 安装本文件的其余依赖：
+#     pip install -r config/requirements_training.txt
+#
+# 显存需求（Qwen3 LoRA，rank=16，fp16）：
+#   Qwen3-8B   → ~16 GB VRAM（RTX 4090 / A100 推荐）
+#   Qwen3-4B   → ~10 GB VRAM（RTX 3080/4070 等）
+#   Qwen3-1.7B → ~ 6 GB VRAM（RTX 3060/4060 等）
+#   Qwen3-0.6B → ~ 4 GB VRAM（入门级，或 4-bit 量化）
+# ===================================================================
+
+# LoRA 微调核心
+peft>=0.12.0
+trl>=0.9.0
+
+# 模型加载 / Tokenizer
+transformers>=4.45.0
+
+# 加速器（混合精度 / 分布式）
+accelerate>=0.30.0
+
+# 数据集加载
+datasets>=2.18.0
+
+# QLoRA 4-bit 量化（可选，低显存机器启用）
+# bitsandbytes>=0.43.0

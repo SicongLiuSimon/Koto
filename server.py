@@ -13,13 +13,19 @@ Koto Server Mode - 纯 Web 服务（无桌面窗口）
   KOTO_JWT_SECRET=xxx          JWT 签名密钥
   KOTO_MAX_DAILY_REQUESTS=100  每用户每日请求上限
   GEMINI_API_KEY=xxx           Gemini API 密钥
+
+  # LangSmith 可观测性追踪（可选）
+  LANGCHAIN_TRACING_V2=true
+  LANGCHAIN_API_KEY=lsv2_...   # https://smith.langchain.com
+  LANGCHAIN_PROJECT=Koto
 """
 import os
 import sys
 from pathlib import Path
 
 # 设置环境
-APP_ROOT = Path(__file__).parent
+here = Path(__file__).resolve().parent
+APP_ROOT = here.parent if here.name == "src" else here
 os.chdir(str(APP_ROOT))
 # 项目根目录放在最前面，确保 app/ 包优先于 web/app.py
 sys.path.insert(0, str(APP_ROOT))
@@ -37,6 +43,13 @@ try:
     if env_file.exists():
         load_dotenv(str(env_file))
 except ImportError:
+    pass
+
+# LangSmith 可观测性初始化（可选，仅当环境变量已设置时激活）
+try:
+    from app.core.monitoring.langsmith_tracer import init_langsmith
+    init_langsmith()
+except Exception:
     pass
 
 # 导入 Flask app

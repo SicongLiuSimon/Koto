@@ -152,60 +152,133 @@ class DocumentEditor:
     @staticmethod
     def edit_word(file_path: str, modifications: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        根据AI建议修改Word文档
-        
-        Args:
-            modifications: 修改指令
-                [
-                    {
-                        "paragraph_index": 0,
-                        "action": "update" | "insert" | "delete",
-                        "content": "新内容"
-                    },
-                    ...
-                ]
+        根据AI建议修改Word文档，支持段落操作和表格单元格操作。
+
+        段落操作（action 字段）：
+          update   - 修改第 paragraph_index 段落文本
+          insert   - 在第 paragraph_index 段落之前插入新段落
+          delete   - 删除第 paragraph_index 段落
+
+        表格操作（需提供 table_index）：
+          update_table_cell  - 修改某单元格: table_index, row, col, value
+          insert_table_row   - 在指定行前插入空行: table_index, row
+          delete_table_row   - 删除指定行: table_index, row
+          insert_table_col   - 暂不支持（OpenXML结构限制）
         """
         try:
             from docx import Document
-            
+            from docx.oxml.ns import qn
+            from copy import deepcopy
+            import lxml.etree as etree
+
             doc = Document(file_path)
             applied_count = 0
             errors = []
-            
+
             for mod in modifications:
                 try:
-                    para_index = mod.get("paragraph_index")
-                    action = mod.get("action")
+                    action = mod.get("action", "")
                     content = mod.get("content", "")
-                    
+
+                    # ─── 表格操作 ───────────────────────────────────────────
+                    if action in ("update_table_cell", "insert_table_row", "delete_table_row"):
+                        t_idx = mod.get("table_index", 0)
+                        if t_idx >= len(doc.tables):
+                            errors.append(f"表格索引 {t_idx} 超出范围（共 {len(doc.tables)} 个表格）")
+                            continue
+                        table = doc.tables[t_idx]
+
+                        if action == "update_table_cell":
+                            row_i = mod.get("row", 0)
+                            col_i = mod.get("col", 0)
+                            value = mod.get("value", content)
+                            if row_i < len(table.rows) and col_i < len(table.rows[row_i].cells):
+                                cell = table.rows[row_i].cells[col_i]
+                                # 保留第一段格式，只改文本
+                                if cell.paragraphs:
+                                    for run in cell.paragraphs[0].runs:
+                                        run.text = ""
+                                    if cell.paragraphs[0].runs:
+                                        cell.paragraphs[0].runs[0].text = value
+                                    else:
+                                        cell.paragraphs[0].add_run(value)
+                                else:
+                                    cell.add_paragraph(value)
+                                applied_count += 1
+                                print(f"  ✅ 表格{t_idx+1}[{row_i},{col_i}] → '{value}'")
+                            else:
+                                errors.append(f"表格{t_idx+1} 单元格({row_i},{col_i})超出范围")
+
+                        elif action == "insert_table_row":
+                            row_i = mod.get("row", len(table.rows))
+                            # 复制最后一行结构再插入
+                            ref_row = table.rows[-1]._tr
+                            new_tr = deepcopy(ref_row)
+                            # 清空所有单元格文本
+                            for tc in new_tr.findall(qn('w:tc')):
+                                for p in tc.findall(qn('w:p')):
+                                    for r in p.findall(qn('w:r')):
+                                        for t in r.findall(qn('w:t')):
+                                            t.text = ""
+                            if row_i < len(table.rows):
+                                table.rows[row_i]._tr.addprevious(new_tr)
+                            else:
+                                table._tbl.append(new_tr)
+                            applied_count += 1
+                            print(f"  ✅ 表格{t_idx+1} 第{row_i}行前插入新行")
+
+                        elif action == "delete_table_row":
+                            row_i = mod.get("row", 0)
+                            if row_i < len(table.rows):
+                                tr = table.rows[row_i]._tr
+                                tr.getparent().remove(tr)
+                                applied_count += 1
+                                print(f"  ✅ 表格{t_idx+1} 删除第{row_i}行")
+                            else:
+                                errors.append(f"表格{t_idx+1} 行{row_i}超出范围")
+                        continue
+
+                    # ─── 段落操作 ───────────────────────────────────────────
+                    para_index = mod.get("paragraph_index")
+                    if para_index is None:
+                        errors.append(f"修改项缺少 paragraph_index: {mod}")
+                        continue
+
                     if action == "update":
                         if para_index < len(doc.paragraphs):
-                            doc.paragraphs[para_index].text = content
+                            # 保留样式，只替换文本
+                            para = doc.paragraphs[para_index]
+                            for run in para.runs:
+                                run.text = ""
+                            if para.runs:
+                                para.runs[0].text = content
+                            else:
+                                para.add_run(content)
                             applied_count += 1
-                    
+
                     elif action == "insert":
-                        # 在指定位置插入新段落
                         p = doc.add_paragraph(content)
+                        p._element.getparent().remove(p._element)
                         if para_index < len(doc.paragraphs):
-                            # 移动到指定位置
-                            p._element.getparent().remove(p._element)
                             doc.paragraphs[para_index]._element.addprevious(p._element)
+                        else:
+                            doc.element.body.append(p._element)
                         applied_count += 1
-                    
+
                     elif action == "delete":
                         if para_index < len(doc.paragraphs):
                             p = doc.paragraphs[para_index]
                             p._element.getparent().remove(p._element)
                             applied_count += 1
-                
+
                 except Exception as e:
-                    errors.append(f"应用修改失败: {str(e)}")
-            
+                    errors.append(f"应用修改失败({mod.get('action','?')}): {str(e)}")
+
             # 保存
             base_name = os.path.splitext(file_path)[0]
             new_file_path = f"{base_name}_edited_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
             doc.save(new_file_path)
-            
+
             return {
                 "success": True,
                 "file_path": new_file_path,
@@ -213,7 +286,7 @@ class DocumentEditor:
                 "total_modifications": len(modifications),
                 "errors": errors
             }
-            
+
         except Exception as e:
             return {
                 "success": False,

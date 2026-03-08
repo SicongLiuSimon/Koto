@@ -6,6 +6,385 @@
     <title>Koto (言) - AI Assistant</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='assets/koto_icon.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Restore UI zoom before first paint to avoid flash -->
+    <script>(function(){
+        var z=parseFloat(localStorage.getItem('koto.uiZoom')||'1');
+        if(z!==1){
+            document.documentElement.style.zoom=z;
+            document.documentElement.style.setProperty('--viewport-h',(window.innerHeight/z)+'px');
+        }
+        window.addEventListener('resize',function(){
+            var cz=parseFloat(document.documentElement.style.zoom||'1');
+            document.documentElement.style.setProperty('--viewport-h',(window.innerHeight/cz)+'px');
+        });
+    })()</script>
+    <style>
+        /* ── Skills UI ──────────────────────────────────────────── */
+        .skill-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+        .skill-tab {
+            padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border-color);
+            background: var(--bg-tertiary); color: var(--text-secondary);
+            font-size: 12px; cursor: pointer; transition: all 0.15s;
+        }
+        .skill-tab.active, .skill-tab:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+        .skills-list { display: flex; flex-direction: column; gap: 8px; max-height: 360px; overflow-y: auto; padding-right: 2px; }
+        .skill-card {
+            border: 1px solid var(--border-color); border-radius: var(--radius-md);
+            padding: 10px 12px; background: var(--bg-tertiary); transition: border-color 0.15s;
+        }
+        .skill-card.active { border-color: var(--accent); background: rgba(51,139,255,0.07); }
+        .skill-card[data-hidden] { display: none; }
+        .skill-card-header { display: flex; align-items: center; gap: 8px; }
+        .skill-icon { font-size: 17px; flex-shrink: 0; line-height: 1; }
+        .skill-info { flex: 1; min-width: 0; }
+        .skill-name { font-size: 13px; font-weight: 600; color: var(--text-primary); display: block; }
+        .skill-scope { font-size: 11px; color: var(--text-muted); }
+        .skill-desc { font-size: 12px; color: var(--text-secondary); margin: 6px 0 4px 25px; line-height: 1.45; }
+        .skill-footer { display: flex; justify-content: flex-end; margin-top: 4px; }
+        .skill-edit-btn {
+            font-size: 11px; padding: 2px 9px; border-radius: 6px;
+            border: 1px solid var(--border-color); background: transparent;
+            color: var(--text-muted); cursor: pointer; transition: all 0.15s;
+        }
+        .skill-edit-btn:hover { color: var(--accent); border-color: var(--accent); }
+        .skill-editor-modal {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+            display: flex; align-items: center; justify-content: center; z-index: 3000;
+        }
+        .skill-editor-inner {
+            background: var(--bg-card); border-radius: var(--radius-lg);
+            padding: 20px; width: min(540px, 92vw);
+            border: 1px solid var(--border-color); box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .skill-editor-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 8px; font-weight: 600; font-size: 14px; color: var(--text-primary);
+        }
+        .skill-editor-textarea {
+            width: 100%; padding: 10px; border-radius: 8px; box-sizing: border-box;
+            border: 1px solid var(--border-color); background: var(--bg-tertiary);
+            color: var(--text-primary); font-size: 12px; font-family: 'JetBrains Mono', monospace;
+            resize: vertical; min-height: 170px; line-height: 1.5;
+        }
+        .skill-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
+        /* ── Bindings & Triggers UI ─────────────────────────────── */
+        .bindings-toolbar { display: flex; gap: 6px; margin: 0 0 8px; align-items: center; flex-wrap: wrap; }
+        .bindings-list, .triggers-list {
+            display: flex; flex-direction: column; gap: 6px;
+            max-height: 300px; overflow-y: auto; padding-right: 2px;
+        }
+        .binding-row, .trigger-row {
+            border: 1px solid var(--border-color); border-radius: var(--radius-md);
+            padding: 8px 10px; background: var(--bg-tertiary);
+            display: flex; align-items: center; gap: 8px; transition: border-color 0.15s;
+        }
+        .binding-row.enabled, .trigger-row.enabled { border-color: rgba(99,198,255,0.3); }
+        .binding-row-info, .trigger-row-info { flex: 1; min-width: 0; }
+        .binding-skill-name, .trigger-name {
+            font-size: 12px; font-weight: 600; color: var(--text-primary);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .binding-patterns { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+        .pattern-tag {
+            font-size: 10px; padding: 1px 6px; border-radius: 10px;
+            background: rgba(99,198,255,0.12); color: var(--text-secondary);
+            border: 1px solid rgba(99,198,255,0.2);
+        }
+        .type-badge {
+            font-size: 10px; padding: 1px 6px; border-radius: 10px;
+            background: rgba(118,247,212,0.12); color: var(--accent-secondary);
+            border: 1px solid rgba(118,247,212,0.2); white-space: nowrap; flex-shrink: 0;
+        }
+        .binding-delete-btn {
+            font-size: 13px; padding: 2px 6px; border-radius: 6px;
+            border: 1px solid transparent; background: transparent;
+            color: var(--text-muted); cursor: pointer; flex-shrink: 0;
+            transition: color 0.15s, border-color 0.15s;
+        }
+        .binding-delete-btn:hover { color: var(--accent-danger); border-color: var(--accent-danger); }
+
+        /* ── Modal Forms ─────────────────────────────────────────── */
+        .form-group { margin-bottom: 11px; }
+        .form-label {
+            display: block; font-size: 10px; color: var(--text-muted);
+            margin-bottom: 4px; text-transform: uppercase; letter-spacing: .05em;
+        }
+        .form-input, .form-select {
+            width: 100%; padding: 7px 10px; border-radius: 8px; box-sizing: border-box;
+            border: 1px solid var(--border-color); background: var(--bg-tertiary);
+            color: var(--text-primary); font-size: 12px; font-family: inherit;
+            outline: none; transition: border-color .15s;
+        }
+        .form-input:focus, .form-select:focus { border-color: var(--accent-primary); }
+        .form-select option { background: var(--bg-secondary); }
+        .form-row { display: flex; gap: 8px; }
+        .form-row .form-group { flex: 1; }
+
+        /* ── Jobs running pill ──────────────────────────────────── */
+        #jobsRunningPill {
+            font-size: 10px; color: var(--accent-primary);
+            padding: 3px 8px; border-radius: 8px;
+            background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.2);
+            margin-top: 4px; text-align: center; display: none;
+        }
+
+        /* ── Active Skills Pill Bar (above chat input) ──────────── */
+        #chat-skill-bar {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 12px 4px;
+            border-bottom: 1px solid var(--border-color);
+            background: transparent; flex-wrap: wrap;
+        }
+        .csb-label {
+            font-size: 10px; color: var(--text-muted);
+            font-weight: 600; white-space: nowrap; letter-spacing: .04em;
+        }
+        .csb-pills { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
+        .csb-pill {
+            display: inline-flex; align-items: center; gap: 3px;
+            padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
+            background: rgba(99,198,255,0.12); border: 1px solid rgba(99,198,255,0.28);
+            color: var(--accent-primary); cursor: default; white-space: nowrap;
+            transition: background .15s; position: relative;
+        }
+        .csb-pill:hover { background: rgba(99,198,255,0.22); }
+        .csb-pill-dismiss {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 13px; height: 13px; border-radius: 50%;
+            font-size: 9px; line-height: 1; font-style: normal;
+            background: transparent; color: rgba(99,198,255,.5);
+            cursor: pointer; margin-left: 2px; flex-shrink: 0;
+            transition: background .15s, color .15s;
+            border: none; padding: 0;
+        }
+        .csb-pill:hover .csb-pill-dismiss { color: rgba(99,198,255,.9); }
+        .csb-pill-dismiss:hover { background: rgba(99,198,255,.2) !important; color: #fff !important; }
+        .csb-pill-tip {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 8px);
+            left: 50%; transform: translateX(-50%);
+            width: 210px; max-width: 80vw;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            box-shadow: 0 6px 24px rgba(0,0,0,0.28);
+            z-index: 9999;
+            pointer-events: none;
+            white-space: normal;
+        }
+        .csb-pill-tip-name {
+            font-size: 12px; font-weight: 700; color: var(--text-primary);
+            margin-bottom: 3px;
+        }
+        .csb-pill-tip-cat {
+            font-size: 10px; color: var(--accent-primary);
+            margin-bottom: 5px; text-transform: capitalize;
+        }
+        .csb-pill-tip-desc {
+            font-size: 11px; color: var(--text-secondary);
+            line-height: 1.45; font-weight: 400;
+        }
+        .csb-pill-tip::after {
+            content: '';
+            position: absolute;
+            top: 100%; left: 50%; transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: var(--border-color);
+        }
+        .csb-pill-tip::before {
+            content: '';
+            position: absolute;
+            top: calc(100% - 1px); left: 50%; transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: var(--bg-secondary);
+            z-index: 1;
+        }
+        .csb-pill:hover .csb-pill-tip { display: block; }
+        .csb-manage-link {
+            font-size: 10px; color: var(--text-muted); white-space: nowrap;
+            margin-left: auto; text-decoration: none; padding: 2px 6px;
+            border-radius: 6px; border: 1px solid var(--border-color);
+            transition: color .15s, border-color .15s;
+        }
+        .csb-manage-link:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+
+        /* ── FileHub panel ──────────────────────────────────────── */
+        #fhFileList { max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
+        .fh-card { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px;
+            background:var(--bg-tertiary); border:1px solid var(--border-color); font-size:12px; }
+        .fh-card .fh-icon { font-size:18px; flex:none; }
+        .fh-card .fh-meta { flex:1; min-width:0; }
+        .fh-card .fh-name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .fh-card .fh-sub { color:var(--text-secondary); font-size:11px; margin-top:1px; }
+        .fh-dup-group { padding:8px 10px; border-radius:8px; border:1px solid var(--accent-warning);
+            background:rgba(255,165,0,.06); margin-bottom:6px; font-size:12px; }
+        .fh-dup-group .fh-dup-title { font-weight:600; color:var(--accent-warning); margin-bottom:4px; }
+        .fh-dup-group .fh-dup-path { color:var(--text-secondary); font-size:11px; padding:2px 0; display:flex; align-items:center; }
+
+        /* ── Skills Panel (VS Code Extension 风格) ──────────────────────── */
+        .skills-panel {
+            position: fixed; right: 0; top: 0;
+            width: var(--skills-panel-width, 400px); height: var(--viewport-h, 100vh);
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            box-shadow: -20px 0 40px rgba(0,0,0,0.35);
+            display: flex; flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.25s ease; z-index: 45;
+        }
+        .skills-panel.active { transform: translateX(0); }
+        .sp-header {
+            padding: 15px 18px; display: flex; align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+        }
+        .sp-title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+        .sp-search-wrap {
+            padding: 10px 14px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+        }
+        .sp-search {
+            width: 100%; padding: 7px 10px; box-sizing: border-box;
+            border-radius: 8px; border: 1px solid var(--border-color);
+            background: var(--bg-tertiary); color: var(--text-primary);
+            font-size: 12px; outline: none; font-family: inherit;
+        }
+        .sp-search:focus { border-color: var(--accent-primary); }
+        .sp-tabs {
+            display: flex; border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0; padding: 0 14px;
+        }
+        .sp-tab {
+            padding: 8px 12px; font-size: 12px; font-weight: 500;
+            color: var(--text-secondary); background: transparent;
+            border: none; border-bottom: 2px solid transparent;
+            cursor: pointer; transition: all .15s; margin-bottom: -1px;
+        }
+        .sp-tab.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+        .sp-tab:hover:not(.active) { color: var(--text-primary); }
+        .sp-filter-row {
+            display: flex; gap: 5px; flex-wrap: wrap;
+            padding: 8px 14px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+        }
+        .sp-chip {
+            padding: 3px 10px; border-radius: 20px; font-size: 11px;
+            border: 1px solid var(--border-color); background: var(--bg-tertiary);
+            color: var(--text-secondary); cursor: pointer; transition: all .15s;
+        }
+        .sp-chip.active, .sp-chip:hover { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
+        .sp-content { flex: 1; overflow-y: auto; padding: 10px 12px; }
+        .sp-studio { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+        .sp-loading { text-align: center; padding: 24px 0; color: var(--text-muted); font-size: 12px; }
+        .sp-card {
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 10px; border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card); transition: border-color .15s; margin-bottom: 6px;
+        }
+        .sp-card.enabled { border-color: rgba(99,198,255,0.35); background: rgba(99,198,255,0.04); }
+        .sp-card:hover { border-color: var(--accent-primary); }
+        .sp-card-icon {
+            font-size: 22px; line-height: 1; flex-shrink: 0;
+            width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
+            background: var(--bg-tertiary); border-radius: 8px;
+        }
+        .sp-card-body { flex: 1; min-width: 0; }
+        .sp-card-name { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.3; }
+        .sp-card-cat { font-size: 10px; color: var(--text-muted); margin: 2px 0 4px; }
+        .sp-card-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+        .sp-card-actions { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+        .sp-enable-btn {
+            font-size: 10px; padding: 3px 10px; border-radius: 6px;
+            border: 1px solid var(--accent-primary); color: var(--accent-primary);
+            background: transparent; cursor: pointer; transition: all .15s;
+        }
+        .sp-enable-btn:hover { background: var(--accent-primary); color: #fff; }
+        .sp-enable-btn.enabled { background: var(--accent-primary); color: #fff; }
+        .sp-edit-btn {
+            font-size: 10px; padding: 3px 8px; border-radius: 6px;
+            border: 1px solid var(--border-color); color: var(--text-muted);
+            background: transparent; cursor: pointer; transition: all .15s;
+        }
+        .sp-edit-btn:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+        .sp-studio-section {
+            padding: 12px; border-radius: 10px;
+            border: 1px solid var(--border-color); background: var(--bg-card);
+        }
+        .sp-studio-title { font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+        .sp-studio-desc { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; line-height: 1.4; }
+        .sp-textarea {
+            width: 100%; padding: 7px 10px; box-sizing: border-box;
+            border-radius: 8px; border: 1px solid var(--border-color);
+            background: var(--bg-tertiary); color: var(--text-primary);
+            font-size: 12px; resize: vertical; outline: none; font-family: inherit;
+        }
+        .sp-textarea:focus { border-color: var(--accent-primary); }
+        .sp-input {
+            padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border-color);
+            background: var(--bg-tertiary); color: var(--text-primary);
+            font-size: 12px; outline: none; font-family: inherit;
+            width: 100%; box-sizing: border-box;
+        }
+        .sp-input:focus { border-color: var(--accent-primary); }
+        .sp-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+        .sp-build-result {
+            margin-top: 8px; padding: 10px; border-radius: 8px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            font-size: 11px; color: var(--text-secondary);
+        }
+        .sp-wizard-steps { display: flex; align-items: center; gap: 4px; margin: 8px 0; }
+        .sp-wstep { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); }
+        .sp-wstep.active { color: var(--accent-primary); }
+        .sp-wstep.done { color: var(--accent-secondary); }
+        .sp-step-num {
+            width: 18px; height: 18px; border-radius: 50%; font-size: 10px;
+            display: flex; align-items: center; justify-content: center;
+            border: 1px solid currentColor; background: transparent; flex-shrink: 0;
+        }
+        .sp-wstep.active .sp-step-num { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; }
+        .sp-wstep.done .sp-step-num { background: var(--accent-secondary); border-color: var(--accent-secondary); color: #fff; }
+        .sp-step-line { flex: 1; height: 1px; background: var(--border-color); min-width: 16px; }
+        .sp-session-list { max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+        .sp-session-item {
+            padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border-color);
+            background: var(--bg-tertiary); font-size: 11px; cursor: pointer;
+            color: var(--text-secondary); transition: all .15s;
+        }
+        .sp-session-item:hover { border-color: var(--accent-primary); color: var(--text-primary); }
+        .sp-session-item.selected { border-color: var(--accent-primary); background: rgba(99,198,255,0.1); color: var(--accent-primary); }
+        .sp-create-btn {
+            width: 100%; padding: 8px; border-radius: 8px;
+            border: 1px dashed var(--border-color); background: transparent;
+            color: var(--text-secondary); cursor: pointer; font-size: 12px;
+            transition: all .15s;
+        }
+        .sp-create-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+        .sp-footer {
+            padding: 10px 14px; border-top: 1px solid var(--border-color); flex-shrink: 0;
+        }
+        .sp-footer-btn {
+            width: 100%; padding: 7px 12px; border-radius: 8px;
+            border: 1px solid var(--border-color); background: transparent;
+            color: var(--text-secondary); cursor: pointer; font-size: 12px;
+            transition: all .15s; text-align: center;
+        }
+        .sp-footer-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+        .nav-skills-btn {
+            display: flex; align-items: center; gap: 8px;
+            padding: 8px 12px; margin-bottom: 6px; border-radius: 10px;
+            background: var(--bg-tertiary); color: var(--text-secondary);
+            border: 1px solid transparent; cursor: pointer; font-size: 13px;
+            transition: all .15s ease; width: 100%; text-align: left;
+        }
+        .nav-skills-btn:hover, .nav-skills-btn.active { border-color: var(--accent-primary); color: var(--accent-primary); }
+        .sp-empty { text-align: center; padding: 20px 0; color: var(--text-muted); font-size: 12px; }
+        .sp-section-label {
+            font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+            color: var(--text-muted); padding: 6px 0 4px; margin-bottom: 2px;
+        }
+    </style>
     <style>
         body.loading { background: #f5f7fb; }
         #startupSplash {
@@ -50,6 +429,126 @@
     <!-- KaTeX 数学公式渲染 -->
     <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.css">
     <script defer src="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+    <!-- ── Token 使用监测嵌入式样式 ── -->
+    <style>
+        /* ── Token Monitor — topbar inline chip ──────────────────────── */
+        #tokenMonitor {
+            position: relative;
+            z-index: 2500;
+            font-family: inherit;
+            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+        }
+        #tokenChip {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--border-color, rgba(0,0,0,0.15));
+            background: var(--bg-secondary, #f5f7fa);  /* 跟随主题，完全不透明 */
+            color: var(--text-secondary, #555e70);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+            user-select: none;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        #tokenChip:hover { border-color: var(--accent-primary, #338bff); color: var(--accent-primary, #338bff); }
+        #tokenChip .tc-icon { font-size: 12px; }
+        #tokenChip .tc-label { font-size: 11.5px; font-weight: 500; }
+        #tokenPanel {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 320px;
+            background: var(--bg-secondary, #f5f7fa);  /* 跟随主题，完全不透明 */
+            border: 1px solid var(--border-color, rgba(0,0,0,0.12));
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+            overflow: hidden;
+        }
+        #tokenPanel.open { display: block; }
+        .tp-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px 10px;
+            border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.08));
+        }
+        .tp-title { font-weight: 600; font-size: 13px; color: var(--text-primary, #1e293b); }
+        .tp-close {
+            background: none; border: none; color: var(--text-muted, #6b7897);
+            cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px;
+        }
+        .tp-close:hover { color: var(--text-primary, #1e293b); }
+        .tp-body { padding: 12px 14px; }
+        .tp-section { margin-bottom: 12px; }
+        .tp-section-label {
+            font-size: 10.5px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted, #6b7897);
+            margin-bottom: 6px;
+        }
+        .tp-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.06));
+            font-size: 12px;
+            color: var(--text-secondary, #555e70);
+        }
+        .tp-row:last-child { border-bottom: none; }
+        .tp-row .tp-val { font-weight: 500; color: var(--text-primary, #1e293b); }
+        .tp-row .tp-cost { color: #29a05a; font-size: 11.5px; }
+        .tp-divider { height: 1px; background: var(--border-color, rgba(0,0,0,0.08)); margin: 10px 0; }
+        .tp-model-tag {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 10px;
+            background: rgba(51,139,255,0.12);
+            color: #338bff;
+            font-size: 11px;
+            margin-right: 4px;
+        }
+        .tp-model-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 3px 0;
+            font-size: 11.5px;
+            color: var(--text-secondary, #555e70);
+        }
+        .tp-model-row .tp-mv { color: var(--text-primary, #1e293b); font-size: 11px; }
+        .tp-bar-wrap { height: 3px; background: var(--border-color, rgba(0,0,0,0.08)); border-radius: 2px; margin: 4px 0 8px; }
+        .tp-bar { height: 3px; border-radius: 2px; background: linear-gradient(90deg, #338bff, #56c27e); }
+        .tp-footer {
+            padding: 8px 14px;
+            border-top: 1px solid var(--border-color, rgba(0,0,0,0.08));
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .tp-btn {
+            font-size: 11px; padding: 3px 10px; border-radius: 6px;
+            border: 1px solid var(--border-color, rgba(0,0,0,0.1));
+            background: transparent; color: var(--text-muted, #6b7897);
+            cursor: pointer; transition: all 0.15s;
+        }
+        .tp-btn:hover { border-color: var(--accent-primary, #338bff); color: var(--accent-primary, #338bff); }
+        .tp-spinner {
+            width: 16px; height: 16px; border-radius: 50%;
+            border: 2px solid var(--border-color, rgba(0,0,0,0.1)); border-top-color: #338bff;
+            animation: tp-spin 0.8s linear infinite; margin: 12px auto;
+        }
+        @keyframes tp-spin { to { transform: rotate(360deg); } }
+    </style>
     <script defer src="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
     <!-- Mermaid 图表渲染 -->
     <script defer src="https://cdn.bootcdn.net/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
@@ -93,14 +592,21 @@
                     <span id="auth-user-name" style="color:var(--text-secondary);"></span>
                     <button id="auth-logout-btn" onclick="KotoAuth.logout()" style="float:right;background:none;border:none;color:var(--accent-primary);cursor:pointer;font-size:12px;" title="退出登录">退出</button>
                 </div>
+                <!-- Skill 市场入口 -->
+                <button id="navSkillsBtn" class="nav-skills-btn" onclick="openSkillsPanel()" title="打开 Skills 面板">
+                    ✨ <span>Skills 市场</span>
+                </button>
                 <div class="status-indicator" id="statusIndicator">
                     <span class="status-dot"></span>
                     <div class="status-info">
                         <span class="status-text">检查中...</span>
+                        <span id="opsStatusBadge" style="font-size:10px;color:var(--text-muted);display:none;"></span>
                     </div>
                     <button class="icon-btn-mini" onclick="checkStatus()" title="刷新">🔄</button>
                 </div>
+                <div id="jobsRunningPill"></div>
             </div>
+            <div class="resize-handle resize-handle-sidebar" id="sidebarResizeHandle"></div>
         </aside>
 
         <main class="main-content chatgpt-main">
@@ -112,50 +618,61 @@
                 </div>
                 <div class="top-actions">
                     <button class="ghost-btn" onclick="switchToMiniMode()" title="切换到简洁模式">▣ 简洁</button>
-                    <button class="ghost-btn" onclick="toggleWorkspace()" title="浏览工作区">📂 工作区</button>
                     <button class="ghost-btn" onclick="openWorkspaceFolder()" title="打开工作区文件夹">🗁 打开</button>
                     <button class="ghost-btn notification-btn" onclick="openNotificationCenter()" title="通知中心">
                         🔔 通知
                         <span class="badge" id="notificationBadge" style="display: none;">0</span>
                     </button>
-                    <button class="ghost-btn" onclick="openTriggerPanel()" title="主动触发器">🧭 触发器</button>
-                    <button class="ghost-btn" onclick="openBatchJobsPanel()" title="批量任务">📋 批量</button>
+                    <!-- Token 监测嵌入顶栏 -->
+                    <div id="tokenMonitor">
+                        <div id="tokenPanel">
+                            <div class="tp-header">
+                                <span class="tp-title">📊 Token 使用监测</span>
+                                <button class="tp-close" onclick="tokenWidget.close()">×</button>
+                            </div>
+                            <div class="tp-body" id="tokenPanelBody">
+                                <div class="tp-spinner"></div>
+                            </div>
+                            <div class="tp-footer">
+                                <button class="tp-btn" onclick="tokenWidget.reset('today')">重置今日</button>
+                                <button class="tp-btn" onclick="tokenWidget.refresh()">↻ 刷新</button>
+                            </div>
+                        </div>
+                        <div id="tokenChip" onclick="tokenWidget.toggle()">
+                            <span class="tc-icon">📊</span>
+                            <span class="tc-label" id="tokenChipLabel">本月 …</span>
+                        </div>
+                    </div>
                     <button class="ghost-btn" onclick="openSettings()" title="设置">⚙️ 设置</button>
                     <button class="danger-btn" onclick="deleteCurrentSession()" title="删除对话">🗑 删除</button>
+                    <!-- 影子追踪主动交互按鈕 -->
+                    <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="position:relative">
+                        👁️ 影子
+                        <span class="badge" id="shadowBadge" style="display:none;">0</span>
+                    </button>
                 </div>
             </header>
 
-            <div class="capability-toolbar" id="capabilityToolbar">
-                <div class="toolbar-title">任务模式</div>
-                <div class="capability-chips">
-                    <div class="capability capability-chip" data-task="CHAT">
-                        <span class="cap-icon">💬</span><span>对话</span>
-                    </div>
-                    <div class="capability capability-chip" data-task="CODER">
-                        <span class="cap-icon">💻</span><span>编程</span>
-                    </div>
-                    <div class="capability capability-chip" data-task="SYSTEM">
-                        <span class="cap-icon">🖥️</span><span>系统</span>
-                    </div>
-                    <div class="capability capability-chip" data-task="WEB_SEARCH">
-                        <span class="cap-icon">🌐</span><span>搜索</span>
-                    </div>
-                    <div class="capability capability-chip" data-task="FILE_OP">
-                        <span class="cap-icon">📂</span><span>文件</span>
-                    </div>
-                    <div class="capability capability-chip" data-task="PAINTER">
-                        <span class="cap-icon">🎨</span><span>创作</span>
-                    </div>
-                    <div class="capability capability-chip" data-task="AGENT">
-                        <span class="cap-icon">🤖</span><span>Agent</span>
-                    </div>
-                    <div class="capability capability-chip" data-task="VOICE">
-                        <span class="cap-icon">🎤</span><span>语音</span>
-                    </div>
-                </div>
-            </div>
+
 
             <div class="main-grid single-column">
+                <!-- 影子追踪：主动消息条带 -->
+                <div id="shadowBanner" style="display:none; background:var(--bg-card,#f0f4ff); border:1px solid var(--border,#dde3f0); border-radius:8px; padding:10px 14px; margin:6px 16px 0; font-size:13px; display:none;">
+                    <div style="display:flex;align-items:flex-start;gap:10px;">
+                        <span style="font-size:17px;">&#x1F441;&#xFE0F;</span>
+                        <div style="flex:1;" id="shadowBannerText">应用正在呀话中...</div>
+                        <div style="display:flex;gap:6px;flex-shrink:0;">
+                            <button class="btn-secondary btn-sm" onclick="shadowReply()">回复</button>
+                            <button class="btn-secondary btn-sm" onclick="shadowDismissCurrent()">&times; 关闭</button>
+                        </div>
+                    </div>
+                    <div id="shadowBannerNav" style="margin-top:6px;font-size:11px;color:var(--text-muted);display:flex;gap:8px;align-items:center;">
+                        <span id="shadowBannerCount"></span>
+                        <button class="btn-secondary btn-sm" onclick="shadowPrevMsg()">&#8249;</button>
+                        <button class="btn-secondary btn-sm" onclick="shadowNextMsg()">&#8250;</button>
+                        <button class="btn-secondary btn-sm" style="margin-left:auto" onclick="shadowDismissAll()">全部关闭</button>
+                    </div>
+                </div>
                 <section class="chat-pane">
                     <div class="chat-messages" id="chatMessages" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragleave="handleDragLeave(event)">
                         <div class="drag-overlay" id="dragOverlay" style="display: none;">
@@ -175,14 +692,12 @@
                             </div>
                             <div class="welcome-grid">
                                 <div class="welcome-block full-width">
-                                    <div class="block-title">快速开始</div>
+                                    <div class="block-title">直接开始对话</div>
                                     <div class="hint-list">
-                                        <span>💬 <strong>对话</strong> — 自然交流，获取信息和建议</span>
-                                        <span>💻 <strong>编程</strong> — 代码生成、调试与重构</span>
-                                        <span>🌐 <strong>搜索</strong> — 实时网页搜索与内容总结</span>
-                                        <span>🎨 <strong>创作</strong> — AI 生成图片与创意设计</span>
-                                        <span>📂 <strong>文件</strong> — 本地文件读取、编辑与协作</span>
-                                        <span>🎤 <strong>语音</strong> — 语音输入、识别与指令</span>
+                                        <span>🤖 <strong>自动任务识别</strong> — 直接输入需求，Koto 会自动判断并分配最合适的处理方式</span>
+                                        <span>📎 <strong>拖拽或上传文件</strong> — 支持 Word、PDF、图片、表格、代码等多种格式直接分析</span>
+                                        <span>🎙️ <strong>语音输入</strong> — 点击麦克风图标，用语音代替打字</span>
+                                        <span>⚙️ <strong>个性化设置</strong> — 右上角设置可调整主题、模型、记忆和 Skills</span>
                                     </div>
                                 </div>
                             </div>
@@ -191,14 +706,33 @@
                 </section>
             </div>
 
+            <div id="miniGamePanel" class="mini-game-panel hidden">
+                <div class="mini-game-header">
+                    <span>🦖 放松一下</span>
+                    <button class="mini-game-close" onclick="hideMiniGame()">✕</button>
+                </div>
+                <canvas id="miniGameCanvas" width="260" height="120"></canvas>
+                <div class="mini-game-hint">空格 / 点击 跳跃</div>
+            </div>
+
             <div class="chat-input-container">
+                <div class="resize-handle-row" id="inputResizeHandle"></div>
+                <!-- Active Skills Pill Bar -->
+                <div id="chat-skill-bar" style="display:none;">
+                  <span class="csb-label">✨ Skill</span>
+                  <div class="csb-pills" id="csb-pills"></div>
+                  <a href="#" class="csb-manage-link" title="管理 Skill 库" onclick="openSkillsPanel(); return false;">管理</a>
+                </div>
+
                 <div class="file-preview" id="filePreview" style="display: none;">
                     <div class="file-list" id="fileList"></div>
                     <button class="remove-all-files" onclick="removeFile()" title="清除所有文件">清空</button>
                 </div>
                 <form class="chat-input-form" onsubmit="sendMessage(event)">
                     <label class="file-upload-btn" title="附加文件">
-                        <input type="file" id="fileInput" onchange="handleFileSelect(event)" multiple hidden>
+                        <input type="file" id="fileInput" onchange="handleFileSelect(event)" multiple hidden
+                               accept=".docx,.doc,.pdf,.txt,.md,.markdown,.rtf,.odt,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.pptx,.ppt,.json"
+                               title="支持 Word、PDF、文本、Markdown、RTF、ODT、图片、表格等格式">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
                         </svg>
@@ -240,7 +774,9 @@
             <div class="workspace-files" id="workspaceFiles"></div>
         </aside>
 
+        <!-- ==================== Settings Panel ==================== -->
         <aside class="settings-panel" id="settingsPanel">
+            <div class="resize-handle resize-handle-skills" id="settingsResizeHandle"></div>
             <div class="panel-header">
                 <h3>⚙️ 设置</h3>
                 <button class="close-panel" onclick="closeSettings()">×</button>
@@ -379,6 +915,27 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- UI Zoom / Font Scale -->
+                    <div class="setting-item" style="margin-top:12px;">
+                        <label style="display:flex;align-items:center;justify-content:space-between;">
+                            🔍 界面缩放
+                            <span class="fs-badge" id="uiZoomDisplay">100%</span>
+                        </label>
+                        <div class="font-scale-row">
+                            <input type="range" id="uiZoomSlider" min="70" max="150" step="5" value="100"
+                                   oninput="setUIZoom(this.value / 100)">
+                        </div>
+                        <div class="fs-presets">
+                            <button class="fs-preset-btn" onclick="setUIZoom(0.8)">80%</button>
+                            <button class="fs-preset-btn" onclick="setUIZoom(0.9)">90%</button>
+                            <button class="fs-preset-btn active" onclick="setUIZoom(1.0)">100%</button>
+                            <button class="fs-preset-btn" onclick="setUIZoom(1.1)">110%</button>
+                            <button class="fs-preset-btn" onclick="setUIZoom(1.2)">120%</button>
+                            <button class="fs-preset-btn" onclick="setUIZoom(1.3)">130%</button>
+                        </div>
+                        <p class="setting-hint">整体放大/缩小界面与字体，设置会自动保存</p>
+                    </div>
                 </div>
 
                 <div class="settings-section">
@@ -391,16 +948,26 @@
                         AI 设置
                     </h4>
                     <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label">🖥️ 仅使用本地模型</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingLocalOnly" onchange="onLocalOnlyChange(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">开启后所有请求只走本地模型（Ollama），不调用云端 API，保证完全本地隐私。</p>
+                    </div>
+                    <div class="setting-item">
                         <label>默认模型</label>
                         <select id="settingModel" onchange="onModelChange(this.value)">
                             <option value="auto">🤖 Auto (智能选择)</option>
                             <option value="gemini-3-flash-preview">⚡ Gemini 3 Flash (快速)</option>
                             <option value="gemini-3-pro-preview">🚀 Gemini 3 Pro (智能)</option>
-                            <option value="nano-banana-pro-preview">🎨 Nano Banana Pro (图像)</option>
+                            <option value="gemini-3.1-flash-image-preview">🎨 Gemini 3.1 Flash Image (图像)</option>
                             <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash</option>
                             <option value="gemini-2.5-pro">🚀 Gemini 2.5 Pro</option>
                         </select>
-                        <p class="setting-hint">Auto 会根据任务类型自动选择最合适的模型</p>
+                        <p class="setting-hint" id="settingModelHint">Auto 会根据任务类型自动选择最合适的模型</p>
                     </div>
                     <div class="setting-item">
                         <div class="toggle-row">
@@ -421,6 +988,16 @@
                             </label>
                         </div>
                         <p class="setting-hint">说完后自动识别上传，无需点击确认</p>
+                    </div>
+                    <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label">等待时启用小游戏</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingEnableMiniGame" checked onchange="updateSetting('ai', 'enable_mini_game', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">等待回复时显示小恐龙游戏</p>
                     </div>
                 </div>
 
@@ -450,10 +1027,485 @@
                     </div>
                 </div>
 
+                <!-- Skills Section -->
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                        </svg>
+                        Skills 技能模块
+                    </h4>
+                    <p class="setting-desc">启用后，该 Skill 的 Prompt 会自动注入每次对话中，调整 AI 的回复风格和行为。</p>
+
+                    <div class="skill-tabs" id="skillTabs">
+                        <button class="skill-tab active" onclick="filterSkills('all')">&#x1f4cb; 全部</button>
+                        <button class="skill-tab" onclick="filterSkills('behavior')">&#x2699;&#xfe0f; 行为</button>
+                        <button class="skill-tab" onclick="filterSkills('style')">&#x1f3a8; 风格</button>
+                        <button class="skill-tab" onclick="filterSkills('domain')">&#x1f52c; 领域</button>
+                        <button class="skill-tab" onclick="openCreateSkillModal()" style="margin-left:auto;border-style:dashed;">＋ 创建</button>
+                    </div>
+
+                    <div id="skillsList" class="skills-list">
+                        <div class="memory-empty">正在加载 Skills…</div>
+                    </div>
+                </div>
+
+                <!-- Skill Intent Bindings Section -->
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                        </svg>
+                        意图绑定
+                    </h4>
+                    <p class="setting-desc">当用户输入匹配关键词时，自动临时注入对应 Skill Prompt，无需全局启用。</p>
+                    <div class="bindings-toolbar">
+                        <button class="btn-secondary btn-sm" onclick="openCreateBindingModal()">＋ 新建</button>
+                        <button class="btn-secondary btn-sm" onclick="bootstrapBindings(false)">✨ 初始化推荐</button>
+                        <button class="btn-secondary btn-sm" onclick="bootstrapBindings(true)" style="color:var(--accent-warning)">🔄 重建</button>
+                    </div>
+                    <div id="bindingsList" class="bindings-list">
+                        <div class="memory-empty">正在加载绑定...</div>
+                    </div>
+                </div>
+
+                <!-- Shadow Watcher Section -->
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        影子追踪 · 主动交互
+                    </h4>
+                    <p class="setting-desc">长期观察您的常用话题、活跃时段和未完成任务，由 Koto 主动进行问候、跨日跟进和智能提醒。</p>
+                    <div class="bindings-toolbar">
+                        <label class="toggle" title="开关影子追踪">
+                            <input type="checkbox" id="shadowWatcherToggle" onchange="toggleShadowWatcher(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span id="shadowWatcherLabel" style="font-size:13px;color:var(--text-secondary);flex:1;">加载中...</span>
+                        <button class="btn-secondary btn-sm" onclick="shadowForceTick()">✨ 立即检查</button>
+                        <button class="btn-secondary btn-sm" onclick="shadowOpenObservations()">&#128202; 观察统计</button>
+                    </div>
+                    <!-- 观察摘要卡片区 -->
+                    <div id="shadowSummaryCards" style="display:none;margin-top:8px;"></div>
+                    <!-- 待处理任务列表 -->
+                    <div id="shadowOpenTasksList" style="margin-top:6px;"></div>
+                </div>
+
+                <!-- Scheduled Triggers Section -->
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        定时触发器
+                    </h4>
+                    <p class="setting-desc">后台自动化任务，支持 interval / cron / startup 类型。启用后按计划自动执行。</p>
+                    <div class="bindings-toolbar">
+                        <button class="btn-secondary btn-sm" onclick="openCreateTriggerModal()">＋ 新建</button>
+                        <button class="btn-secondary btn-sm" onclick="bootstrapTriggers(false)">✨ 初始化推荐</button>
+                        <button class="btn-secondary btn-sm" onclick="bootstrapTriggers(true)" style="color:var(--accent-warning)">🔄 重建</button>
+                    </div>
+                    <div id="triggersList" class="triggers-list">
+                        <div class="memory-empty">正在加载触发器...</div>
+                    </div>
+                </div>
+
+                <!-- FileHub Section -->
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                        文件库
+                    </h4>
+                    <p class="setting-desc">搜索已注册文件，或直接浏览任意目录下的文件。</p>
+
+                    <!-- 模式切换标签 -->
+                    <div style="display:flex;gap:0;margin-bottom:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+                        <button id="fhTabSearch" onclick="fhSwitchTab('search')"
+                            style="flex:1;padding:6px 0;font-size:12px;border:none;background:var(--accent-primary);color:#fff;cursor:pointer;">
+                            🔍 关键词搜索
+                        </button>
+                        <button id="fhTabBrowse" onclick="fhSwitchTab('browse')"
+                            style="flex:1;padding:6px 0;font-size:12px;border:none;background:var(--bg-card);color:var(--text-primary);cursor:pointer;">
+                            📂 浏览目录
+                        </button>
+                    </div>
+
+                    <!-- 搜索模式 -->
+                    <div id="fhPaneSearch">
+                        <div style="display:flex;gap:6px;margin-bottom:6px;">
+                            <input type="text" id="fhSearchInput" class="form-input"
+                                placeholder="输入文件名、关键词…"
+                                style="flex:1;"
+                                onkeydown="if(event.key==='Enter')fhDoSearch()"
+                            >
+                            <select id="fhCatFilter" class="form-select" style="width:82px;">
+                                <option value="">全部</option>
+                                <option value="文档">文档</option>
+                                <option value="图片">图片</option>
+                                <option value="代码">代码</option>
+                                <option value="视频">视频</option>
+                                <option value="音频">音频</option>
+                                <option value="压缩包">压缩包</option>
+                                <option value="其他">其他</option>
+                            </select>
+                            <button class="btn-primary btn-sm" onclick="fhDoSearch()">搜索</button>
+                        </div>
+                        <div style="display:flex;gap:6px;margin-bottom:6px;">
+                            <button class="btn-secondary btn-sm" onclick="fhLoadRecent()">🕐 最近文件</button>
+                            <button class="btn-secondary btn-sm" onclick="fhCheckDuplicates()">🔁 重复检测</button>
+                            <span id="fhStatsSummary" style="margin-left:auto;font-size:11px;color:var(--text-muted);line-height:1;align-self:center;"></span>
+                        </div>
+                    </div>
+
+                    <!-- 浏览目录模式 -->
+                    <div id="fhPaneBrowse" style="display:none;">
+                        <div style="display:flex;gap:6px;margin-bottom:6px;">
+                            <input type="text" id="fhBrowsePath" class="form-input"
+                                placeholder="输入目录路径，如 C:\Users\12524\Desktop"
+                                style="flex:1;"
+                                onkeydown="if(event.key==='Enter')fhDoBrowse()"
+                            >
+                            <button class="btn-secondary btn-sm" onclick="fhPickFolder()" title="打开系统文件夹选择对话框">📂</button>
+                            <button class="btn-primary btn-sm" onclick="fhDoBrowse()">浏览</button>
+                        </div>
+                        <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
+                            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
+                                <input type="checkbox" id="fhRecursive"> 包含子目录
+                            </label>
+                            <input type="text" id="fhBrowseFilter" class="form-input"
+                                placeholder="过滤文件名…" style="flex:1;font-size:12px;"
+                                oninput="fhFilterBrowseResults(this.value)"
+                            >
+                        </div>
+                    </div>
+
+                    <!-- 统一文件结果区 -->
+                    <div id="fhResultHeader" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
+                        <span id="fhResultCount"></span>
+                        <button class="btn-secondary btn-sm" style="font-size:11px;" onclick="fhCopyAllPaths()">📋 复制所有路径</button>
+                    </div>
+                    <div id="fhFileList" style="max-height:280px;overflow-y:auto;">
+                        <div class="memory-empty">在上方选择搜索模式</div>
+                    </div>
+                </div>
+
                 <div class="settings-actions">
                     <button class="btn-secondary" onclick="resetSettings()">重置默认</button>
                     <button class="btn-primary" onclick="closeSettings()">完成</button>
                 </div>
+            </div>
+        </aside>
+
+        <!-- ── Create Intent Binding Modal ──────────────────────────────── -->
+        <div id="createBindingModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeCreateBindingModal()">
+            <div class="skill-editor-inner">
+                <div class="skill-editor-header">
+                    <span>＋ 新建意图绑定</span>
+                    <button class="close-panel" onclick="closeCreateBindingModal()">×</button>
+                </div>
+                <p class="setting-hint" style="margin:0 0 10px;">当用户输入匹配关键词时，自动临时注入该 Skill Prompt。</p>
+                <div class="form-group">
+                    <label class="form-label">触发 Skill</label>
+                    <select id="cbSkillId" class="form-select"></select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">关键词（中文逗号或英文逗号分隔）</label>
+                    <input type="text" id="cbPatterns" class="form-input" placeholder="写代码, 最佳实践, 重构">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">有效轮次（N 轮对话后自动失效）</label>
+                    <input type="number" id="cbTurns" class="form-input" value="1" min="1" max="10">
+                </div>
+                <div class="skill-editor-actions">
+                    <button class="btn-secondary btn-sm" onclick="closeCreateBindingModal()">取消</button>
+                    <button class="btn-primary btn-sm" onclick="saveCreateBinding()">💾 创建</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Create Trigger Modal ───────────────────────────────────── -->
+        <div id="createTriggerModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeCreateTriggerModal()">
+            <div class="skill-editor-inner">
+                <div class="skill-editor-header">
+                    <span>➕ 新建触发器</span>
+                    <button class="close-panel" onclick="closeCreateTriggerModal()">×</button>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">名称</label>
+                    <input type="text" id="ctName" class="form-input" placeholder="我的定时任务">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">触发类型</label>
+                        <select id="ctType" class="form-select" onchange="onCreateTriggerTypeChange()">
+                            <option value="interval">⏱️ 间隔 (interval)</option>
+                            <option value="cron">📅 定时 (cron)</option>
+                            <option value="startup">🚀 启动时</option>
+                            <option value="webhook">🔔 Webhook</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">任务类型</label>
+                        <select id="ctJobType" class="form-select">
+                            <option value="agent_query">🤖 AI 查询</option>
+                            <option value="skill_exec">⚡ Skill 执行</option>
+                            <option value="auto_catalog">📂 自动整理</option>
+                            <option value="workflow">🔄 工作流</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="ctConfigInterval" class="form-group">
+                    <label class="form-label">间隔（秒，最小 60）</label>
+                    <input type="number" id="ctIntervalSecs" class="form-input" value="3600" min="60">
+                </div>
+                <div id="ctConfigCron" class="form-group" style="display:none;">
+                    <label class="form-label">执行时间 (HH:MM)</label>
+                    <input type="time" id="ctCronTime" class="form-input" value="09:00">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">提示词 / 查询内容（可选）</label>
+                    <textarea id="ctQuery" class="skill-editor-textarea" rows="3" style="min-height:56px;" placeholder="例：请总结今日的任务进度…"></textarea>
+                </div>
+                <p class="setting-hint" style="margin:0 0 8px;">新触发器默认禁用，创建后在列表中手动开启。</p>
+                <div class="skill-editor-actions">
+                    <button class="btn-secondary btn-sm" onclick="closeCreateTriggerModal()">取消</button>
+                    <button class="btn-primary btn-sm" onclick="saveCreateTrigger()">💾 创建</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Create Custom Skill Modal ──────────────────────────────── -->
+        <div id="createSkillModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeCreateSkillModal()">
+            <div class="skill-editor-inner" style="width:min(560px,93vw);">
+                <div class="skill-editor-header">
+                    <span>✨ 创建自定义 Skill</span>
+                    <button class="close-panel" onclick="closeCreateSkillModal()">×</button>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="width:68px;flex:none;">
+                        <label class="form-label">图标</label>
+                        <input type="text" id="csIcon" class="form-input" value="🤖" style="text-align:center;font-size:18px;padding:4px;">
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label class="form-label">技能名称</label>
+                        <input type="text" id="csName" class="form-input" placeholder="我的专属助手">
+                    </div>
+                    <div class="form-group" style="width:120px;flex:none;">
+                        <label class="form-label">分类</label>
+                        <select id="csCategory" class="form-select">
+                            <option value="custom">🔧 自定义</option>
+                            <option value="behavior">⚙️ 行为</option>
+                            <option value="style">🎨 风格</option>
+                            <option value="domain">🔬 领域</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">简介</label>
+                    <input type="text" id="csDesc" class="form-input" placeholder="这个 Skill 的功能描述">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">System Prompt</label>
+                    <textarea id="csPrompt" class="skill-editor-textarea" rows="5" placeholder="你是一个专注于...的 AI 助手。&#10;&#10;（留空则使用默认模板）"></textarea>
+                </div>
+                <div class="skill-editor-actions">
+                    <button class="btn-secondary btn-sm" onclick="closeCreateSkillModal()">取消</button>
+                    <button class="btn-primary btn-sm" onclick="saveCreateSkill()">💾 创建 Skill</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Catalog Schedule Wizard Modal ──────────────────────── -->
+        <div id="catalogWizardModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeCatalogScheduleWizard()">
+            <div class="skill-editor-inner" style="width:min(480px,93vw);">
+                <div class="skill-editor-header">
+                    <span>⏰ 定时自动整理向导</span>
+                    <button class="close-panel" onclick="closeCatalogScheduleWizard()">×</button>
+                </div>
+                <p class="setting-hint" style="margin:0 0 12px;">配置「下载目录自动整理」触发器，按设定间隔自动整理指定目录。</p>
+                <div class="form-group">
+                    <label class="form-label">要整理的目录路径</label>
+                    <input type="text" id="cwSourceDir" class="form-input" placeholder="例：C:/Users/用户名/Downloads">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">整理间隔（小时）</label>
+                    <input type="number" id="cwIntervalHours" class="form-input" value="6" min="1" max="168">
+                </div>
+                <p class="setting-hint" style="margin:0 0 10px;">⚠️ 配置完成后触发器将自动开启；首次运行在保存后约 1 分钟触发。</p>
+                <div class="skill-editor-actions">
+                    <button class="btn-secondary btn-sm" onclick="closeCatalogScheduleWizard()">取消</button>
+                    <button class="btn-primary btn-sm" onclick="saveCatalogScheduleWizard()">✅ 启用定时整理</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Skill Prompt Editor modal (outside settings panel, full-screen overlay) -->
+        <div id="skillEditorModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeSkillEditor()">
+            <div class="skill-editor-inner">
+                <div class="skill-editor-header">
+                    <span id="skillEditorTitle">编辑 Skill Prompt</span>
+                    <button class="close-panel" onclick="closeSkillEditor()">×</button>
+                </div>
+                <p class="setting-hint" style="margin:0 0 8px;">编辑该技能注入到系统指令的内容。空白且保存则恢复默认。</p>
+                <textarea id="skillEditorContent" class="skill-editor-textarea" rows="9" placeholder="输入 Prompt 内容，留空则恢复默认…"></textarea>
+                <div class="skill-editor-actions">
+                    <button class="btn-secondary btn-sm" onclick="resetSkillPromptEdit()">🔄 恢复默认</button>
+                    <button class="btn-primary btn-sm" onclick="saveSkillPromptEdit()">&#x1f4be; 保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Template Upload Modal ==================== -->
+        <div id="templateUploadModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeTemplateUpload()">
+            <div class="skill-editor-inner" style="max-width:480px;background:#131c2e;border:1px solid rgba(99,198,255,.18);box-shadow:0 24px 60px rgba(0,0,0,.65);">
+                <!-- Header -->
+                <div class="skill-editor-header" style="border-bottom:1px solid rgba(255,255,255,.07);padding-bottom:12px;margin-bottom:14px;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:20px;line-height:1;">📄</span>
+                        <div>
+                            <div id="templateUploadTitle" style="font-size:14px;font-weight:600;color:#e8eefc;">绑定 Word 模板</div>
+                            <div style="font-size:11px;color:#6c7a91;margin-top:1px;">为此 Skill 绑定 .docx 填写模板</div>
+                        </div>
+                    </div>
+                    <button class="close-panel" onclick="closeTemplateUpload()">×</button>
+                </div>
+
+                <!-- Hint -->
+                <div style="background:#0b111d;border:1px solid rgba(99,198,255,.12);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#9fb3d1;line-height:1.6;">
+                    在 .docx 文档中用 <code style="background:rgba(99,198,255,.15);color:#7ecfff;padding:1px 5px;border-radius:4px;">{{字段名}}</code> 标记需要 AI 填写的位置，上传后自动识别所有字段。
+                </div>
+
+                <!-- Drop Zone -->
+                <div id="templateDropZone"
+                    style="background:#0d1523;border:2px dashed rgba(99,198,255,.35);border-radius:10px;padding:32px 20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;margin-bottom:12px;position:relative;"
+                    onclick="document.getElementById('templateFileInput').click()"
+                    ondragover="event.preventDefault();this.style.borderColor='rgba(99,198,255,.85)';this.style.background='rgba(99,198,255,.06)'"
+                    ondragleave="this.style.borderColor='rgba(99,198,255,.35)';this.style.background='#0d1523'"
+                    ondrop="handleTemplateDrop(event)">
+                    <div id="tmplDropIcon" style="font-size:36px;margin-bottom:8px;filter:drop-shadow(0 2px 8px rgba(99,198,255,.3));">📄</div>
+                    <div style="font-size:13px;font-weight:500;color:#c8d8ef;margin-bottom:4px;">点击选择 或 拖拽文件到此处</div>
+                    <div style="font-size:11px;color:#4b5e7a;">仅支持 .docx 格式</div>
+                    <div id="templateFileName" style="margin-top:10px;display:inline-flex;align-items:center;gap:5px;background:rgba(99,198,255,.12);border:1px solid rgba(99,198,255,.3);border-radius:6px;padding:4px 10px;font-size:12px;color:#7ecfff;display:none;"></div>
+                </div>
+                <input type="file" id="templateFileInput" accept=".docx" style="display:none;" onchange="onTemplateFileSelected(event)">
+
+                <!-- Fields Preview -->
+                <div id="templateFieldsPreview" style="display:none;background:#0b111d;border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+                    <div style="font-size:11px;font-weight:600;color:#6c7a91;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">识别到的占位字段</div>
+                    <div id="templateFieldsList" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
+                </div>
+
+                <!-- Status -->
+                <div id="templateUploadStatus" style="font-size:12px;color:#9fb3d1;min-height:20px;margin-bottom:10px;padding:0 2px;"></div>
+
+                <!-- Actions -->
+                <div class="skill-editor-actions" style="border-top:1px solid rgba(255,255,255,.07);padding-top:12px;margin-top:2px;">
+                    <button class="btn-secondary btn-sm" onclick="closeTemplateUpload()">取消</button>
+                    <button class="btn-secondary btn-sm" id="templateDeleteBtn" style="display:none;color:#ef6b6b;border-color:rgba(239,107,107,.3);" onclick="deleteSkillTemplate()">🗑️ 删除模板</button>
+                    <button class="btn-primary btn-sm" id="templateUploadBtn" onclick="uploadSkillTemplate()" disabled style="opacity:.5;transition:opacity .2s;">⬆️ 上传绑定</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Skills Panel (VS Code Extension 风格) ==================== -->        <aside class="skills-panel" id="skillsPanel">
+            <div class="resize-handle resize-handle-skills" id="skillsResizeHandle"></div>
+            <div class="sp-header">
+                <span class="sp-title">✨ Skills 市场</span>
+                <button class="close-panel" onclick="closeSkillsPanel()" title="关闭">×</button>
+            </div>
+            <div class="sp-search-wrap">
+                <input class="sp-search" id="spSearchInput" type="text" placeholder="🔍 搜索技能名称、描述…" oninput="spSearchSkills(this.value)">
+            </div>
+            <div class="sp-tabs">
+                <button class="sp-tab active" data-tab="catalog" onclick="spSwitchTab('catalog')">全部</button>
+                <button class="sp-tab" data-tab="library" onclick="spSwitchTab('library')">我的库</button>
+                <button class="sp-tab" data-tab="studio" onclick="spSwitchTab('studio')">创意工坊</button>
+            </div>
+            <!-- Category filter chips -->
+            <div class="sp-filter-row" id="spFilterRow">
+                <button class="sp-chip active" data-cat="all" onclick="spSetCat('all')">全部</button>
+                <button class="sp-chip" data-cat="behavior" onclick="spSetCat('behavior')">⚙️ 行为</button>
+                <button class="sp-chip" data-cat="style" onclick="spSetCat('style')">🎨 风格</button>
+                <button class="sp-chip" data-cat="domain" onclick="spSetCat('domain')">🔬 领域</button>
+                <button class="sp-chip" data-cat="custom" onclick="spSetCat('custom')">🔧 自定义</button>
+            </div>
+            <!-- Skill cards content (catalog / library tabs) -->
+            <div class="sp-content" id="spContent">
+                <div class="sp-loading">正在加载…</div>
+            </div>
+            <!-- Studio tab content -->
+            <div class="sp-studio" id="spStudio" style="display:none;">
+                <!-- AI 智能生成 -->
+                <div class="sp-studio-section">
+                    <div class="sp-studio-title">✨ AI 智能生成</div>
+                    <p class="sp-studio-desc">用自然语言描述你的需求，AI 自动生成专属 Skill</p>
+                    <textarea id="spBuildDesc" class="sp-textarea" rows="3"
+                        placeholder="例：我想让 AI 回复时风格更像一个严谨的程序员，擅长架构设计…"></textarea>
+                    <div class="sp-row">
+                        <input id="spBuildName" class="sp-input" type="text" placeholder="Skill 名称（选填）" style="flex:1;">
+                        <button class="btn-primary btn-sm" onclick="spBuildSkill()">⚡ 生成</button>
+                    </div>
+                    <div id="spBuildResult" class="sp-build-result" style="display:none;"></div>
+                </div>
+                <!-- 从对话提取 (3-step wizard) -->
+                <div class="sp-studio-section">
+                    <div class="sp-studio-title">💬 从对话提取风格</div>
+                    <p class="sp-studio-desc">选择一段高质量对话，AI 提取并创建对应的沟通风格 Skill</p>
+                    <div class="sp-wizard-steps">
+                        <div class="sp-wstep active" id="sp-wstep-1">
+                            <span class="sp-step-num">1</span><span class="sp-step-label" style="font-size:11px;margin-left:3px;">选对话</span>
+                        </div>
+                        <div class="sp-step-line"></div>
+                        <div class="sp-wstep" id="sp-wstep-2">
+                            <span class="sp-step-num">2</span><span class="sp-step-label" style="font-size:11px;margin-left:3px;">命名</span>
+                        </div>
+                        <div class="sp-step-line"></div>
+                        <div class="sp-wstep" id="sp-wstep-3">
+                            <span class="sp-step-num">3</span><span class="sp-step-label" style="font-size:11px;margin-left:3px;">完成</span>
+                        </div>
+                    </div>
+                    <!-- Step 1: session picker -->
+                    <div id="spWizardStep1">
+                        <div class="sp-session-list" id="spSessionList">
+                            <div class="sp-loading">正在加载对话列表…</div>
+                        </div>
+                    </div>
+                    <!-- Step 2: name + icon -->
+                    <div id="spWizardStep2" style="display:none;">
+                        <div class="sp-row" style="margin-bottom:6px;">
+                            <input id="spSessionIcon" class="sp-input" type="text" value="💬"
+                                style="width:46px;flex:none;text-align:center;font-size:16px;padding:4px;" placeholder="图标">
+                            <input id="spSessionName" class="sp-input" type="text" placeholder="Skill 名称" style="flex:1;">
+                        </div>
+                        <div class="sp-row">
+                            <button class="btn-secondary btn-sm" onclick="spWizardBack()">← 返回</button>
+                            <button class="btn-primary btn-sm" onclick="spExtractFromSession()">⚡ 提取风格</button>
+                        </div>
+                    </div>
+                    <!-- Step 3: result -->
+                    <div id="spWizardStep3" style="display:none;">
+                        <div id="spExtractResult" class="sp-build-result"></div>
+                        <div class="sp-row" style="margin-top:6px;">
+                            <button class="btn-secondary btn-sm" onclick="spWizardReset()">← 重新选择</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- 手动创建 -->
+                <div class="sp-studio-section">
+                    <div class="sp-studio-title">✏️ 手动创建</div>
+                    <p class="sp-studio-desc">自定义图标、名称、System Prompt，完全由你掌控</p>
+                    <button class="sp-create-btn" onclick="openCreateSkillModal()">＋ 创建自定义 Skill</button>
+                </div>
+            </div>
+            <div class="sp-footer">
+                <button class="sp-footer-btn" onclick="closeSkillsPanel(); openSettings()">⚙️ 高级设置 (绑定 / 触发器)</button>
             </div>
         </aside>
 
@@ -756,6 +1808,153 @@
     <script src="{{ url_for('static', filename='js/auth.js') }}?v=20260615"></script>
     <script defer src="{{ url_for('static', filename='js/app.js') }}?v=20260615"></script>
     <script src="{{ url_for('static', filename='js/app-framework.js') }}?v=20260615"></script>
+
+    <!-- Token 监测移至顶栏 top-actions，此处保留空白占位 -->
+
+    <script>
+    const tokenWidget = (() => {
+        let _open = false;
+        let _stats = null;
+        let _timer = null;
+
+        function fmt(n) {
+            if (n === undefined || n === null) return '0';
+            if (n >= 1000000) return (n / 1000000).toFixed(2) + 'M';
+            if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+            return String(n);
+        }
+
+        function fmtCost(usd) {
+            if (!usd) return '< $0.001';
+            if (usd < 0.001) return '< $0.001';
+            if (usd < 0.01)  return '≈ $' + usd.toFixed(4);
+            if (usd < 1)     return '≈ $' + usd.toFixed(3);
+            return '≈ $' + usd.toFixed(2);
+        }
+
+        function renderPanel(stats) {
+            const today = stats.today || {};
+            const month = stats.this_month || {};
+            const last7 = stats.last_7_days || [];
+
+            // 按模型排序（按 total 降序），显示全部
+            const monthModels = Object.entries(month.by_model || {})
+                .sort((a, b) => b[1].total - a[1].total);
+
+            const monthTotal = month.total || 1;
+
+            let modelsHtml = '';
+            for (const [model, v] of monthModels) {
+                const pct = Math.max(1, Math.round((v.total / monthTotal) * 100));
+                const shortName = model.replace('gemini-', '').replace('nano-banana-', '').replace('imagen-', 'img-').replace('-image-preview', '-img').replace('-preview', '').replace('-generate-001', '').replace('-fast-generate-001', '-fast');
+                modelsHtml += `
+                    <div class="tp-model-row">
+                        <span><span class="tp-model-tag">${shortName}</span></span>
+                        <span class="tp-mv">${fmt(v.total)} tokens · ${fmtCost(v.cost_usd)}</span>
+                    </div>
+                    <div class="tp-bar-wrap"><div class="tp-bar" style="width:${pct}%"></div></div>`;
+            }
+            if (!monthModels.length) modelsHtml = '<div style="color:var(--text-muted,#6b7897);font-size:11px">暂无数据</div>';
+
+            // 最近7天趋势（迷你文字热图）
+            const maxDay = Math.max(1, ...last7.map(d => d.total));
+            let trendHtml = '<div style="display:flex;gap:3px;align-items:flex-end;height:24px">';
+            for (const d of last7) {
+                const h = Math.max(3, Math.round((d.total / maxDay) * 22));
+                const isToday = d.date === new Date().toISOString().slice(0,10);
+                const color = isToday ? '#338bff' : 'var(--border-color, rgba(0,0,0,0.15))';
+                trendHtml += `<div title="${d.date}: ${fmt(d.total)} tokens" style="flex:1;height:${h}px;background:${color};border-radius:2px;cursor:default"></div>`;
+            }
+            trendHtml += '</div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted,#6b7897);margin-top:3px"><span>7天前</span><span>今天</span></div>';
+
+            document.getElementById('tokenPanelBody').innerHTML = `
+                <div class="tp-section">
+                    <div class="tp-section-label">今日</div>
+                    <div class="tp-row"><span>输入 tokens</span><span class="tp-val">${fmt(today.input)}</span></div>
+                    <div class="tp-row"><span>输出 tokens</span><span class="tp-val">${fmt(today.output)}</span></div>
+                    <div class="tp-row"><span>API 调用次数</span><span class="tp-val">${today.calls || 0}</span></div>
+                    <div class="tp-row"><span>估算费用</span><span class="tp-val tp-cost">${fmtCost(today.cost_usd)}</span></div>
+                </div>
+                <div class="tp-divider"></div>
+                <div class="tp-section">
+                    <div class="tp-section-label">本月</div>
+                    <div class="tp-row"><span>总 tokens</span><span class="tp-val">${fmt(month.total)}</span></div>
+                    <div class="tp-row"><span>API 调用次数</span><span class="tp-val">${month.calls || 0}</span></div>
+                    <div class="tp-row"><span>估算费用</span><span class="tp-val tp-cost">${fmtCost(month.cost_usd)}</span></div>
+                </div>
+                <div class="tp-divider"></div>
+                <div class="tp-section">
+                    <div class="tp-section-label">按模型（本月）</div>
+                    ${modelsHtml}
+                </div>
+                <div class="tp-divider"></div>
+                <div class="tp-section">
+                    <div class="tp-section-label">近 7 天趋势</div>
+                    ${trendHtml}
+                </div>`;
+        }
+
+        async function fetchStats(silent = false) {
+            if (!silent) {
+                document.getElementById('tokenPanelBody').innerHTML = '<div class="tp-spinner"></div>';
+            }
+            try {
+                const r = await fetch('/api/token-stats');
+                if (!r.ok) throw new Error(r.status);
+                _stats = await r.json();
+                // 更新胶囊标签
+                const m = _stats.this_month || {};
+                const label = m.total ? `本月 ${fmt(m.total)} · ${fmtCost(m.cost_usd)}` : '暂无数据';
+                document.getElementById('tokenChipLabel').textContent = label;
+                if (_open) renderPanel(_stats);
+            } catch (e) {
+                document.getElementById('tokenChipLabel').textContent = '统计不可用';
+                if (_open) {
+                    document.getElementById('tokenPanelBody').innerHTML =
+                        '<div style="color:#e06c75;font-size:12px;padding:4px 0">加载失败，请检查服务是否正常</div>';
+                }
+            }
+        }
+
+        function toggle() {
+            _open = !_open;
+            document.getElementById('tokenPanel').classList.toggle('open', _open);
+            if (_open) {
+                if (_stats) renderPanel(_stats);
+                else fetchStats();
+            }
+        }
+
+        function close() {
+            _open = false;
+            document.getElementById('tokenPanel').classList.remove('open');
+        }
+
+        async function reset(period) {
+            if (!confirm(`确认重置「${period === 'today' ? '今日' : '全部'}」统计数据？`)) return;
+            try {
+                await fetch('/api/token-stats/reset', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({period})
+                });
+                await fetchStats();
+            } catch (e) { alert('重置失败: ' + e.message); }
+        }
+
+        function refresh() { fetchStats(); }
+
+        // 初始加载 + 每 60 秒自动刷新
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchStats();
+            _timer = setInterval(() => fetchStats(true), 60000);
+        });
+
+        return { toggle, close, reset, refresh };
+    })();
+    </script>
+    <!-- ══ /Token 使用监测浮窗 ══════════════════════════════════════════════ -->
+
     <script>
         // 页面加载时淡入动画
         document.addEventListener('DOMContentLoaded', () => {
@@ -766,5 +1965,860 @@
             }
         });
     </script>
+
+    <!-- ══ Active Skills Pill Bar ═══════════════════════════════════════════ -->
+    <script>
+    (function() {
+        const BAR_ID   = 'chat-skill-bar';
+        const PILLS_ID = 'csb-pills';
+
+        async function refreshActiveSkills() {
+            try {
+                const res = await fetch('/api/skillmarket/active');
+                if (!res.ok) return;
+                const data = await res.json();
+                const skills = (data.skills || []);
+                const conflicts = (data.conflicts || []);
+                const bar   = document.getElementById(BAR_ID);
+                const pills = document.getElementById(PILLS_ID);
+                if (!bar || !pills) return;
+
+                if (!skills.length) {
+                    bar.style.display = 'none';
+                    return;
+                }
+                bar.style.display = 'flex';
+                const CAT_ZH = {behavior:'⚙️ 行为', style:'🎨 风格', domain:'🔬 领域', custom:'🔧 自定义', workflow:'🔄 工作流'};
+
+                // Build conflict lookup: loser_id → winner_name
+                const conflictWinner = {};
+                conflicts.forEach(c => { conflictWinner[c.loser_id] = c.winner_name; });
+
+                pills.innerHTML = skills.map(s => {
+                    const cat = CAT_ZH[s.category] || s.category;
+                    const desc = s.description ? s.description.replace(/</g,'&lt;').replace(/>/g,'&gt;') : '暂无简介';
+                    const tmplBadge = s.has_template ? '<span style="font-size:10px;opacity:.75;margin-left:3px">📄</span>' : '';
+                    const isSuppressed = s.suppressed;
+                    const suppressedBy = conflictWinner[s.id];
+                    const suppressStyle = isSuppressed
+                        ? 'opacity:.45;text-decoration:line-through;cursor:help;'
+                        : '';
+                    const suppressNote = isSuppressed
+                        ? `<br><span style="color:#ffb86c;font-size:11px">⚠️ 已被「${suppressedBy}」覆盖，本次不生效</span>`
+                        : '';
+                    return `<span class="csb-pill" style="${suppressStyle}" title="${isSuppressed ? '与「'+suppressedBy+'」冲突，被抑制' : ''}">
+                        <span class="csb-pill-tip">
+                            <div class="csb-pill-tip-name">${s.icon || '🔧'} ${s.name}${s.has_template ? ' <span style="font-size:11px">📄</span>' : ''}${isSuppressed ? ' ⚠️' : ''}</div>
+                            <div class="csb-pill-tip-cat">${cat}</div>
+                            <div class="csb-pill-tip-desc">${desc}${s.has_template ? '<br><span style="color:#7ecfff;font-size:11px">📄 已绑定 Word 模板</span>' : ''}${suppressNote}</div>
+                        </span>
+                        ${s.icon || '🔧'} ${s.name}${tmplBadge}${isSuppressed ? ' <span style="color:#ffb86c;font-size:10px">⚠️</span>' : ''}
+                        <button class="csb-pill-dismiss" title="取消 ${s.name}" onclick="csbDismissSkill(event,'${s.id}')">✕</button>
+                    </span>`;
+                }).join('');
+
+                // Show conflict banner if any
+                let banner = document.getElementById('csb-conflict-banner');
+                if (conflicts.length > 0) {
+                    if (!banner) {
+                        banner = document.createElement('div');
+                        banner.id = 'csb-conflict-banner';
+                        banner.style.cssText = 'font-size:11px;color:#ffb86c;padding:2px 6px;background:rgba(255,184,108,.12);border-radius:4px;cursor:pointer;white-space:nowrap;flex-shrink:0;';
+                        banner.onclick = () => { if(typeof window.openSkillsPanel==='function') window.openSkillsPanel(); };
+                        bar.appendChild(banner);
+                    }
+                    banner.textContent = `⚠️ ${conflicts.length} 个冲突`;
+                    banner.title = conflicts.map(c => `「${c.winner_name}」抑制「${c.loser_name}」`).join('\n');
+                } else if (banner) {
+                    banner.remove();
+                }
+            } catch (e) {
+                // silently ignore — non-critical UI
+            }
+        }
+
+        window.csbDismissSkill = async function(e, skillId) {
+            e.stopPropagation();
+            try {
+                const res = await fetch(`/api/skillmarket/toggle/${skillId}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled: false})
+                });
+                if (!res.ok) throw new Error('toggle failed');
+                await refreshActiveSkills();
+                // Also sync the skills panel card if open
+                if (typeof window.spLoadSkills === 'function') window.spLoadSkills();
+            } catch (e) {
+                console.warn('[Koto] csbDismissSkill error', e);
+            }
+        };
+
+        // Load on page init
+        document.addEventListener('DOMContentLoaded', refreshActiveSkills);
+
+        // Expose so settings panel can refresh after toggling skills
+        window.refreshActiveSkills = refreshActiveSkills;
+    })();
+    </script>
+    <!-- ══ /Active Skills Pill Bar ══════════════════════════════════════════ -->
+
+    <!-- ══ Skills Panel JS (VS Code Extension 风格) ═════════════════════════ -->
+    <script>
+    (function() {
+        let _spSkills = [];
+        let _spSuppressedIds = new Set();
+        let _spConflictWinner = {}; // loser_id → winner_name
+        let _spCurrentTab = 'catalog';
+        let _spCurrentCat = 'all';
+        let _spCurrentSearch = '';
+        let _spSelectedSessionId = null;
+
+        const CAT_LABELS = { behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', custom: '🔧 自定义' };
+
+        window.openSkillsPanel = function() {
+            const panel = document.getElementById('skillsPanel');
+            if (!panel) return;
+            panel.classList.add('active');
+            const navBtn = document.getElementById('navSkillsBtn');
+            if (navBtn) navBtn.classList.add('active');
+            spLoadSkills();
+        };
+
+        window.closeSkillsPanel = function() {
+            const panel = document.getElementById('skillsPanel');
+            if (!panel) return;
+            panel.classList.remove('active');
+            const navBtn = document.getElementById('navSkillsBtn');
+            if (navBtn) navBtn.classList.remove('active');
+        };
+
+        async function spLoadSkills() {
+            const content = document.getElementById('spContent');
+            if (!content) return;
+            content.innerHTML = '<div class="sp-loading">正在加载 Skills…</div>';
+            try {
+                const resp = await fetch('/api/skills');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                _spSkills = data.skills || [];
+                // Also fetch conflict state so cards can show suppressed warnings
+                try {
+                    const cres = await fetch('/api/skillmarket/conflicts');
+                    if (cres.ok) {
+                        const cdata = await cres.json();
+                        _spSuppressedIds = new Set((cdata.conflicts || []).map(c => c.loser_id));
+                        _spConflictWinner = {};
+                        (cdata.conflicts || []).forEach(c => { _spConflictWinner[c.loser_id] = c.winner_name; });
+                    }
+                } catch (_) {}
+                spRenderCards();
+            } catch (e) {
+                content.innerHTML = `<div class="sp-loading" style="color:var(--error-color,#e06c75)">⚠️ ${e.message}</div>`;
+            }
+        }
+
+        function spRenderCards() {
+            const content = document.getElementById('spContent');
+            if (!content) return;
+            const tab = _spCurrentTab;
+            const cat = _spCurrentCat;
+            const q = _spCurrentSearch.toLowerCase();
+            let skills = _spSkills;
+            if (tab === 'library') {
+                skills = skills.filter(s => s.enabled || s.is_custom);
+            }
+            if (cat !== 'all') {
+                skills = skills.filter(s => s.category === cat);
+            }
+            if (q) {
+                skills = skills.filter(s =>
+                    s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
+                );
+            }
+            if (!skills.length) {
+                content.innerHTML = `<div class="sp-loading">${tab === 'library' ? '尚未启用任何 Skill' : '暂无匹配结果'}</div>`;
+                return;
+            }
+            // Group: enabled first in library mode
+            if (tab === 'library') {
+                skills = [...skills.filter(s => s.enabled), ...skills.filter(s => !s.enabled && s.is_custom)];
+            }
+            content.innerHTML = skills.map(s => `
+                <div class="sp-card ${s.enabled ? 'enabled' : ''} ${s.enabled && _spSuppressedIds.has(s.id) ? 'sp-card-suppressed' : ''}" data-sp-id="${s.id}">
+                    <div class="sp-card-icon" style="${s.enabled && _spSuppressedIds.has(s.id) ? 'opacity:.5' : ''}">${s.icon || '🔧'}</div>
+                    <div class="sp-card-body">
+                        <div class="sp-card-name" style="${s.enabled && _spSuppressedIds.has(s.id) ? 'text-decoration:line-through;opacity:.6' : ''}">${s.name}${s.has_template ? ' <span title="已绑定 Word 模板" style="font-size:12px;opacity:.8">📄</span>' : ''}${s.enabled && _spSuppressedIds.has(s.id) ? ' <span title="与「'+_spConflictWinner[s.id]+'」冲突，本次不生效" style="font-size:12px;color:#ffb86c">⚠️</span>' : ''}</div>
+                        <div class="sp-card-cat">${CAT_LABELS[s.category] || s.category}${s.enabled && _spSuppressedIds.has(s.id) ? ' <span style="color:#ffb86c;font-size:11px">· 已被「'+_spConflictWinner[s.id]+'」抑制</span>' : ''}</div>
+                        <div class="sp-card-desc">${s.description}</div>
+                        <div class="sp-card-actions">
+                            <button class="sp-enable-btn ${s.enabled ? 'enabled' : ''}"
+                                onclick="spToggleSkill('${s.id}', ${!s.enabled})">
+                                ${s.enabled ? '✓ 已启用' : '启用'}
+                            </button>
+                            <button class="sp-edit-btn" onclick="openSkillEditor('${s.id}')">✏️ 编辑</button>
+                            <button class="sp-edit-btn" onclick="spOpenTemplateUpload('${s.id}', '${s.name}')" title="${s.has_template ? '重新上传模板' : '绑定 Word 模板'}">📄 ${s.has_template ? '模板' : '绑定模板'}</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        window.spSwitchTab = function(tab) {
+            _spCurrentTab = tab;
+            document.querySelectorAll('.sp-tab').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tab);
+            });
+            const filterRow = document.getElementById('spFilterRow');
+            const content = document.getElementById('spContent');
+            const studio = document.getElementById('spStudio');
+            if (tab === 'studio') {
+                if (filterRow) filterRow.style.display = 'none';
+                if (content) content.style.display = 'none';
+                if (studio) { studio.style.display = 'flex'; spLoadSessionList(); }
+            } else {
+                if (filterRow) filterRow.style.display = 'flex';
+                if (content) { content.style.display = 'block'; spRenderCards(); }
+                if (studio) studio.style.display = 'none';
+            }
+        };
+
+        window.spSetCat = function(cat) {
+            _spCurrentCat = cat;
+            document.querySelectorAll('.sp-chip').forEach(c => {
+                c.classList.toggle('active', c.dataset.cat === cat);
+            });
+            spRenderCards();
+        };
+
+        window.spSearchSkills = function(q) {
+            _spCurrentSearch = q;
+            spRenderCards();
+        };
+
+        window.spToggleSkill = async function(skillId, enabled) {
+            // Optimistic UI update in panel
+            const card = document.querySelector(`.sp-card[data-sp-id="${skillId}"]`);
+            if (card) {
+                card.classList.toggle('enabled', enabled);
+                const btn = card.querySelector('.sp-enable-btn');
+                if (btn) { btn.textContent = enabled ? '✓ 已启用' : '启用'; btn.classList.toggle('enabled', enabled); }
+            }
+            const skill = _spSkills.find(s => s.id === skillId);
+            if (skill) skill.enabled = enabled;
+            // Delegate to main toggleSkill (handles API + main UI)
+            if (typeof window.toggleSkill === 'function') {
+                await window.toggleSkill(skillId, enabled);
+            }
+        };
+
+        // ── Studio: AI 生成 ──────────────────────────────────────────────────
+        window.spBuildSkill = async function() {
+            const desc = (document.getElementById('spBuildDesc').value || '').trim();
+            const name = (document.getElementById('spBuildName').value || '').trim();
+            const resultEl = document.getElementById('spBuildResult');
+            if (!desc) { alert('请先描述 Skill 的功能'); return; }
+            resultEl.style.display = 'block';
+            resultEl.innerHTML = '<div class="sp-loading">AI 正在生成 Skill…</div>';
+            try {
+                const resp = await fetch('/api/skillmarket/auto-build', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ description: desc, name, auto_enable: false })
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '生成失败');
+                const skill = data.skill || {};
+                resultEl.innerHTML = `
+                    <div style="color:var(--accent-secondary,#76f7d4);font-weight:600;margin-bottom:4px">
+                        ✓ ${skill.icon || '✨'} ${skill.name || name} 已创建
+                    </div>
+                    <div style="font-size:10px;color:var(--text-muted);white-space:pre-wrap;
+                        max-height:56px;overflow-y:auto;line-height:1.4;">${(skill.prompt || '').substring(0, 300)}</div>
+                    <button class="sp-enable-btn" style="margin-top:6px;"
+                        onclick="spToggleSkill('${skill.id}', true)">启用</button>
+                `;
+                await spLoadSkills();
+            } catch (e) {
+                resultEl.innerHTML = `<div style="color:var(--error-color,#e06c75)">⚠️ ${e.message}</div>`;
+            }
+        };
+
+        // ── Studio: 从对话提取 wizard ──────────────────────────────────────
+        async function spLoadSessionList() {
+            const list = document.getElementById('spSessionList');
+            if (!list) return;
+            list.innerHTML = '<div class="sp-loading">正在加载对话…</div>';
+            try {
+                const resp = await fetch('/api/skillmarket/sessions');
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '加载失败');
+                const sessions = data.sessions || [];
+                if (!sessions.length) {
+                    list.innerHTML = '<div class="sp-loading">暂无对话记录</div>';
+                    return;
+                }
+                list.innerHTML = sessions.map(s => `
+                    <div class="sp-session-item" data-sp-sid="${s.id}" onclick="spSelectSession('${s.id}', this)">
+                        💬 ${s.title || s.id}
+                        <span style="float:right;color:var(--text-muted)">${s.message_count || 0} 条</span>
+                    </div>
+                `).join('');
+            } catch (e) {
+                list.innerHTML = `<div class="sp-loading" style="color:var(--error-color,#e06c75)">⚠️ ${e.message}</div>`;
+            }
+        }
+
+        window.spSelectSession = function(sessionId, el) {
+            _spSelectedSessionId = sessionId;
+            document.querySelectorAll('.sp-session-item').forEach(i => i.classList.remove('selected'));
+            el.classList.add('selected');
+            spWizardGoToStep(2);
+        };
+
+        function spWizardGoToStep(n) {
+            for (let i = 1; i <= 3; i++) {
+                const stepEl = document.getElementById(`spWizardStep${i}`);
+                if (stepEl) stepEl.style.display = i === n ? 'block' : 'none';
+                const dotEl = document.getElementById(`sp-wstep-${i}`);
+                if (dotEl) {
+                    dotEl.classList.remove('active', 'done');
+                    if (i < n) dotEl.classList.add('done');
+                    else if (i === n) dotEl.classList.add('active');
+                }
+            }
+        }
+
+        window.spWizardBack = function() { spWizardGoToStep(1); };
+        window.spWizardReset = function() {
+            _spSelectedSessionId = null;
+            document.querySelectorAll('.sp-session-item').forEach(i => i.classList.remove('selected'));
+            spWizardGoToStep(1);
+        };
+
+        window.spExtractFromSession = async function() {
+            const sessionId = _spSelectedSessionId;
+            const name = (document.getElementById('spSessionName').value || '').trim() || '提取风格';
+            const icon = (document.getElementById('spSessionIcon').value || '').trim() || '💬';
+            const resultEl = document.getElementById('spExtractResult');
+            if (!sessionId) { alert('请先选择一个对话'); return; }
+            spWizardGoToStep(3);
+            resultEl.innerHTML = '<div class="sp-loading">AI 正在分析对话风格…</div>';
+            try {
+                const resp = await fetch('/api/skillmarket/from-session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId, skill_name: name, icon, auto_enable: true })
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '提取失败');
+                const prompt = data.prompt || data.skill?.prompt || '';
+                resultEl.innerHTML = `
+                    <div style="color:var(--accent-secondary,#76f7d4);font-weight:600;margin-bottom:6px;">
+                        ✓ ${icon} ${name} 已创建并启用
+                    </div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;">Prompt 预览：</div>
+                    <pre style="font-size:10px;white-space:pre-wrap;color:var(--text-muted);
+                        max-height:72px;overflow-y:auto;line-height:1.4;margin:0;">${prompt.substring(0, 400)}</pre>
+                `;
+                await spLoadSkills();
+                if (typeof window.refreshActiveSkills === 'function') window.refreshActiveSkills();
+            } catch (e) {
+                resultEl.innerHTML = `<div style="color:var(--error-color,#e06c75)">⚠️ ${e.message}</div>`;
+            }
+        };
+
+        // ── Hook: refresh panel when skills toggled from settings panel ─────
+        const _origRefreshActiveSkills = window.refreshActiveSkills;
+        window.refreshActiveSkills = async function() {
+            if (typeof _origRefreshActiveSkills === 'function') await _origRefreshActiveSkills();
+            // Also re-render panel if open
+            if (document.getElementById('skillsPanel')?.classList.contains('active') && _spSkills.length) {
+                spRenderCards();
+            }
+        };
+
+    })();
+    </script>
+    <!-- ══ /Skills Panel JS ══════════════════════════════════════════════════ -->
+
+    <!-- ══ Template Upload JS ═══════════════════════════════════════════════ -->
+    <script>
+    (function() {
+        let _tmplSkillId = '';
+        let _tmplFile = null;
+
+        window.spOpenTemplateUpload = async function(skillId, skillName) {
+            _tmplSkillId = skillId;
+            _tmplFile = null;
+            document.getElementById('templateUploadTitle').textContent = `模板 — ${skillName}`;
+            const fnEl = document.getElementById('templateFileName');
+            fnEl.textContent = '';
+            fnEl.style.display = 'none';
+            document.getElementById('templateFieldsPreview').style.display = 'none';
+            document.getElementById('templateUploadStatus').textContent = '';
+            const uploadBtn = document.getElementById('templateUploadBtn');
+            uploadBtn.disabled = true;
+            uploadBtn.style.opacity = '.5';
+            document.getElementById('templateDeleteBtn').style.display = 'none';
+            document.getElementById('templateFileInput').value = '';
+
+            // Check if template already exists
+            try {
+                const res = await fetch(`/api/skillmarket/templates/${skillId}`);
+                const data = await res.json();
+                if (data.has_template) {
+                    document.getElementById('templateUploadStatus').textContent =
+                        `已绑定模板，包含 ${data.field_count} 个字段：${(data.fields || []).join('、')}`;
+                    document.getElementById('templateDeleteBtn').style.display = 'inline-block';
+                }
+            } catch (e) {}
+
+            document.getElementById('templateUploadModal').style.display = 'flex';
+        };
+
+        window.closeTemplateUpload = function() {
+            document.getElementById('templateUploadModal').style.display = 'none';
+        };
+
+        window.onTemplateFileSelected = function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            _tmplFile = file;
+            const fnEl = document.getElementById('templateFileName');
+            fnEl.textContent = `📄 ${file.name}`;
+            fnEl.style.display = 'inline-flex';
+            const btn = document.getElementById('templateUploadBtn');
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            document.getElementById('templateUploadStatus').textContent = '✔ 文件已选择，点击「上传绑定」完成';
+        };
+
+        window.handleTemplateDrop = function(event) {
+            event.preventDefault();
+            document.getElementById('templateDropZone').style.borderColor = 'rgba(99,198,255,.4)';
+            const file = event.dataTransfer.files[0];
+            if (!file) return;
+            if (!file.name.endsWith('.docx')) {
+                document.getElementById('templateUploadStatus').textContent = '⚠️ 仅支持 .docx 格式';
+                return;
+            }
+            _tmplFile = file;
+            document.getElementById('templateFileName').textContent = `📄 ${file.name}`;
+            document.getElementById('templateUploadBtn').disabled = false;
+            document.getElementById('templateUploadStatus').textContent = '点击「上传绑定」完成绑定';
+        };
+
+        window.uploadSkillTemplate = async function() {
+            if (!_tmplFile || !_tmplSkillId) return;
+            const btn = document.getElementById('templateUploadBtn');
+            btn.disabled = true;
+            btn.style.opacity = '.6';
+            btn.textContent = '⬆️ 上传中…';
+            document.getElementById('templateUploadStatus').textContent = '';
+
+            try {
+                const fd = new FormData();
+                fd.append('file', _tmplFile);
+                fd.append('skill_id', _tmplSkillId);
+                const res = await fetch('/api/skillmarket/templates/upload', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || '上传失败');
+
+                // Show parsed fields
+                const fieldsEl = document.getElementById('templateFieldsList');
+                fieldsEl.innerHTML = (data.fields || []).map(f =>
+                    {% raw %}`<span style="background:rgba(99,198,255,.15);border:1px solid rgba(99,198,255,.35);border-radius:4px;padding:2px 7px;font-size:11px;color:#7ecfff;">{{${f}}}</span>`{% endraw %}
+                ).join('');
+                document.getElementById('templateFieldsPreview').style.display = 'block';
+                document.getElementById('templateUploadStatus').textContent =
+                    `✅ 模板绑定成功！识别到 ${data.field_count} 个字段。`;
+                document.getElementById('templateDeleteBtn').style.display = 'inline-block';
+
+                // Refresh active skill pills
+                if (typeof window.refreshActiveSkills === 'function') window.refreshActiveSkills();
+                if (typeof spLoadSkills === 'function') await spLoadSkills();
+
+            } catch (e) {
+                document.getElementById('templateUploadStatus').textContent = `⚠️ ${e.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.textContent = '⬆️ 上传绑定';
+            }
+        };
+
+        window.deleteSkillTemplate = async function() {
+            if (!_tmplSkillId) return;
+            if (!confirm(`确认删除 Skill "${_tmplSkillId}" 的 Word 模板吗？`)) return;
+            try {
+                const res = await fetch(`/api/skillmarket/templates/${_tmplSkillId}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error || '删除失败');
+                document.getElementById('templateUploadStatus').textContent = '✅ 模板已删除';
+                document.getElementById('templateDeleteBtn').style.display = 'none';
+                document.getElementById('templateFieldsPreview').style.display = 'none';
+                if (typeof window.refreshActiveSkills === 'function') window.refreshActiveSkills();
+                if (typeof spLoadSkills === 'function') await spLoadSkills();
+            } catch (e) {
+                document.getElementById('templateUploadStatus').textContent = `⚠️ ${e.message}`;
+            }
+        };
+    })();
+    </script>
+    <!-- ══ /Template Upload JS ═══════════════════════════════════════════════ -->
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         宏录制 — MacroRecorder 主动建议 Toast + 确认 Modal
+    ══════════════════════════════════════════════════════════════════════════ -->
+    <style>
+        /* ── 宏录制 Toast ── */
+        #macroToast {
+            position: fixed;
+            bottom: 28px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 1px solid rgba(99,102,241,.45);
+            border-radius: 14px;
+            padding: 14px 20px;
+            box-shadow: 0 8px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(99,102,241,.15);
+            z-index: 9900;
+            max-width: 460px;
+            width: calc(100vw - 48px);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .3s ease, transform .3s ease;
+            font-size: 14px;
+            color: #e2e8f0;
+        }
+        #macroToast.visible {
+            opacity: 1;
+            pointer-events: all;
+            transform: translateX(-50%) translateY(0);
+        }
+        #macroToast .macro-toast-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        #macroToast .macro-toast-icon { font-size: 20px; flex-shrink: 0; }
+        #macroToast .macro-toast-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #a5b4fc;
+        }
+        #macroToast .macro-toast-body {
+            font-size: 13px;
+            color: #94a3b8;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+        #macroToast .macro-toast-body strong { color: #e2e8f0; }
+        #macroToast .macro-toast-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .macro-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            border: none;
+            font-size: 13px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: opacity .15s;
+        }
+        .macro-btn:hover { opacity: .85; }
+        .macro-btn-primary {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            color: #fff;
+        }
+        .macro-btn-secondary {
+            background: rgba(148,163,184,.15);
+            color: #94a3b8;
+            border: 1px solid rgba(148,163,184,.2);
+        }
+
+        /* ── 宏录制确认 Modal ── */
+        #macroModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.65);
+            backdrop-filter: blur(4px);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+        #macroModal.open { display: flex; }
+        #macroModalBox {
+            background: #1e293b;
+            border: 1px solid rgba(99,102,241,.35);
+            border-radius: 18px;
+            padding: 28px 28px 24px;
+            max-width: 480px;
+            width: calc(100vw - 48px);
+            box-shadow: 0 24px 64px rgba(0,0,0,.6);
+            position: relative;
+        }
+        #macroModalBox h3 {
+            margin: 0 0 6px;
+            font-size: 17px;
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #macroModalBox .macro-modal-sub {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 18px;
+            line-height: 1.5;
+        }
+        #macroModalBox .macro-samples {
+            background: rgba(15,23,42,.6);
+            border: 1px solid rgba(99,102,241,.2);
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 18px;
+        }
+        #macroModalBox .macro-samples-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            color: #6366f1;
+            margin-bottom: 8px;
+        }
+        #macroModalBox .macro-sample-item {
+            font-size: 13px;
+            color: #94a3b8;
+            padding: 3px 0;
+            border-bottom: 1px solid rgba(99,102,241,.08);
+        }
+        #macroModalBox .macro-sample-item:last-child { border-bottom: none; }
+        #macroModalBox .macro-name-row {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 18px;
+        }
+        #macroModalBox .macro-name-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #94a3b8;
+        }
+        #macroNameInput {
+            background: rgba(15,23,42,.7);
+            border: 1px solid rgba(99,102,241,.35);
+            border-radius: 9px;
+            padding: 9px 12px;
+            font-size: 14px;
+            color: #e2e8f0;
+            outline: none;
+            width: 100%;
+            box-sizing: border-box;
+            transition: border-color .2s;
+        }
+        #macroNameInput:focus { border-color: #6366f1; }
+        #macroModalBox .macro-modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        #macroModalClose {
+            position: absolute;
+            top: 14px; right: 16px;
+            background: none; border: none;
+            color: #475569; font-size: 20px;
+            cursor: pointer; line-height: 1;
+        }
+        #macroModalClose:hover { color: #94a3b8; }
+    </style>
+
+    <!-- Toast -->
+    <div id="macroToast">
+        <div class="macro-toast-header">
+            <span class="macro-toast-icon">🎯</span>
+            <span class="macro-toast-title">发现重复工作流！</span>
+        </div>
+        <div class="macro-toast-body" id="macroToastBody">
+            老板，我发现你经常做这个，帮你固化成一个<strong>专属按钮</strong>吧？
+        </div>
+        <div class="macro-toast-actions">
+            <button class="macro-btn macro-btn-secondary" onclick="macroDismissFromToast()">不用了</button>
+            <button class="macro-btn macro-btn-primary"   onclick="macroOpenModal()">好的，固化它！</button>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="macroModal">
+        <div id="macroModalBox">
+            <button id="macroModalClose" onclick="macroCloseModal()" title="关闭">×</button>
+            <h3>🎯 固化为专属按钮</h3>
+            <p class="macro-modal-sub">
+                系统检测到你反复执行以下操作，帮你一键固化为 Skill 按钮，下次直接点击使用。
+            </p>
+            <div class="macro-samples">
+                <div class="macro-samples-title">📋 你的常用请求示例</div>
+                <div id="macroSamplesList"></div>
+            </div>
+            <div class="macro-name-row">
+                <label class="macro-name-label" for="macroNameInput">给这个按钮起个名字</label>
+                <input id="macroNameInput" type="text" maxlength="50"
+                       placeholder="例：一键总结文档、快速代码审阅…"
+                       onkeydown="if(event.key==='Enter')macroConfirmSkill()">
+            </div>
+            <div class="macro-modal-actions">
+                <button class="macro-btn macro-btn-secondary" onclick="macroCloseModal()">取消</button>
+                <button class="macro-btn macro-btn-primary"   onclick="macroConfirmSkill()">✨ 创建专属按钮</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ══════════════════════════════════════════════════════════════════════════
+    // MacroRecorder 前端控制器
+    // ══════════════════════════════════════════════════════════════════════════
+    (function() {
+        'use strict';
+
+        let _currentSuggestion = null;   // 当前正在提示的建议对象
+        let _toastTimer        = null;   // 自动隐藏计时器
+        const TOAST_AUTO_HIDE  = 18000;  // 18 秒后自动收起 toast
+
+        // ── 轮询检查（每次 AI 响应完成后由外部调用 window.checkMacroSuggestions()）
+        window.checkMacroSuggestions = async function() {
+            try {
+                const res  = await fetch('/api/macro/pending');
+                if (!res.ok) return;
+                const body = await res.json();
+                const items = (body.data || []);
+                // 只展示最新的一条，避免连续弹窗打扰
+                if (items.length > 0 && !_currentSuggestion) {
+                    _showToast(items[0]);
+                }
+            } catch (_) { /* 静默失败，不影响主流程 */ }
+        };
+
+        function _showToast(suggestion) {
+            _currentSuggestion = suggestion;
+
+            const actions_txt = suggestion.actions.join('、') || '该操作';
+            const objects_txt = suggestion.objects.length ? suggestion.objects.slice(0,2).join('、') : '';
+            const body_el = document.getElementById('macroToastBody');
+            if (body_el) {
+                body_el.innerHTML =
+                    `老板，我发现你已 <strong>${suggestion.detected_count} 次</strong>` +
+                    ` 做了「<strong>${actions_txt}${objects_txt ? ' ' + objects_txt : ''}</strong>」，` +
+                    ` 帮你固化成一个<strong>专属按钮</strong>吧？`;
+            }
+
+            const toast = document.getElementById('macroToast');
+            if (toast) {
+                toast.classList.add('visible');
+                clearTimeout(_toastTimer);
+                _toastTimer = setTimeout(_hideToast, TOAST_AUTO_HIDE);
+            }
+        }
+
+        function _hideToast() {
+            const toast = document.getElementById('macroToast');
+            if (toast) toast.classList.remove('visible');
+            clearTimeout(_toastTimer);
+        }
+
+        window.macroDismissFromToast = async function() {
+            _hideToast();
+            if (!_currentSuggestion) return;
+            const id = _currentSuggestion.id;
+            _currentSuggestion = null;
+            try {
+                await fetch('/api/macro/dismiss/' + id, { method: 'POST' });
+            } catch (_) {}
+        };
+
+        window.macroOpenModal = function() {
+            if (!_currentSuggestion) return;
+            _hideToast();
+
+            // 填充样本消息
+            const listEl = document.getElementById('macroSamplesList');
+            if (listEl) {
+                listEl.innerHTML = (_currentSuggestion.sample_messages || [])
+                    .map(m => `<div class="macro-sample-item">💬 ${_escapeHtml(m)}</div>`)
+                    .join('');
+            }
+
+            // 预填建议名称
+            const nameInput = document.getElementById('macroNameInput');
+            if (nameInput) {
+                nameInput.value = _currentSuggestion.suggested_name || '';
+                setTimeout(() => { nameInput.focus(); nameInput.select(); }, 120);
+            }
+
+            document.getElementById('macroModal').classList.add('open');
+        };
+
+        window.macroCloseModal = function() {
+            document.getElementById('macroModal').classList.remove('open');
+        };
+
+        window.macroConfirmSkill = async function() {
+            if (!_currentSuggestion) return;
+            const nameInput = document.getElementById('macroNameInput');
+            const skillName = (nameInput ? nameInput.value : '').trim();
+            if (!skillName) {
+                nameInput && nameInput.focus();
+                return;
+            }
+
+            const id = _currentSuggestion.id;
+            _currentSuggestion = null;
+            macroCloseModal();
+
+            try {
+                const res  = await fetch('/api/macro/confirm/' + id, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: skillName }),
+                });
+                const body = await res.json();
+                if (body.ok) {
+                    if (typeof showNotification === 'function') {
+                        showNotification(`🎯 专属按钮「${skillName}」已创建！可在 Skills 面板中找到它。`, 'success', 5000);
+                    }
+                    // 刷新技能列表（如果面板已打开）
+                    if (typeof spLoadSkills === 'function') spLoadSkills().catch(() => {});
+                    if (typeof window.refreshActiveSkills === 'function') window.refreshActiveSkills();
+                } else {
+                    if (typeof showNotification === 'function') {
+                        showNotification('⚠️ 专属按钮创建失败: ' + (body.error || '未知错误'), 'error');
+                    }
+                }
+            } catch (e) {
+                if (typeof showNotification === 'function') {
+                    showNotification('⚠️ 网络错误，请重试', 'error');
+                }
+            }
+        };
+
+        function _escapeHtml(str) {
+            return String(str)
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        // 点击 Modal 背景关闭
+        document.getElementById('macroModal').addEventListener('click', function(e) {
+            if (e.target === this) macroCloseModal();
+        });
+
+    })();
+    </script>
+    <!-- ══ /MacroRecorder UI ══════════════════════════════════════════════════ -->
 </body>
 </html>
