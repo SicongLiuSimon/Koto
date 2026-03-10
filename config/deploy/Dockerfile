@@ -8,18 +8,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libxml2-dev \
     libxslt1-dev \
+    portaudio19-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # 先复制依赖文件（利用 Docker 缓存）
-COPY requirements.txt .
+COPY config/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY web/ web/
 COPY app/ app/
-COPY server.py .
+COPY src/server.py server.py
 COPY config/gemini_config.env.example config/gemini_config.env
 
 # 创建必要目录

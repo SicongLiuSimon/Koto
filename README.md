@@ -1,5 +1,10 @@
 # Koto — AI Assistant
 
+[![CI](https://github.com/Loganwon/Koto/actions/workflows/ci.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/ci.yml)
+[![Build](https://github.com/Loganwon/Koto/actions/workflows/build.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/build.yml)
+[![Docker Build](https://github.com/Loganwon/Koto/actions/workflows/docker.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/docker.yml)
+[![Release](https://github.com/Loganwon/Koto/actions/workflows/release.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/release.yml)
+
 Koto 是一个基于多模型 AI 的桌面 / 云端智能助手，支持多轮对话、长期记忆、知识库、文件分析、语音交互和工作流自动化。
 
 ## 快速开始（本地运行）
