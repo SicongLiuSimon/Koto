@@ -1,5 +1,8 @@
 [flake8]
 max-line-length = 120
+select =
+    E999,
+    F821
 exclude =
     .venv,
     __pycache__,
@@ -8,10 +11,5 @@ exclude =
     .git,
     *.egg-info,
     _archive
-ignore =
-    E501,
-    W503,
-    E203,
-    E402
 per-file-ignores =
     __init__.py:F401

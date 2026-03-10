@@ -39,6 +39,8 @@ jobs:
 
       - name: Assemble portable package
         run: python src/deploy_portable.py --allow-missing-installer
+        env:
+          PYTHONIOENCODING: utf-8
 
       - name: Create ZIP archive
         shell: pwsh

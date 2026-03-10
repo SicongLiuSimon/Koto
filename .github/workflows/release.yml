@@ -42,6 +42,8 @@ jobs:
 
       - name: Assemble portable package
         run: python src/deploy_portable.py --allow-missing-installer
+        env:
+          PYTHONIOENCODING: utf-8
 
       - name: Extract version from tag
         id: version
