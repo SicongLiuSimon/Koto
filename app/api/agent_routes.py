@@ -168,10 +168,19 @@ def _get_chats_dir() -> str:
     return _CHATS_DIR
 
 
-def _load_history(session_id: str, max_turns: int = 20):
-    """Load recent history from chats/<session_id>.json, compatible with
-    SessionManager format {role, parts}. Converts to agent-compatible
-    {role, content} dicts."""
+def _load_history(session_id: str, max_turns: int = 20, token_budget: int = 6000):
+    """Load recent history with token-budget truncation.
+
+    Loads at most `max_turns` messages, then trims from the oldest end until
+    the cumulative estimated token count stays within `token_budget`.
+    Estimation: len(content) // 4  (rough chars-to-tokens ratio for mixed CJK/Latin).
+    Newest messages always have priority so the most recent context is kept.
+
+    token_budget=6000 keeps ~3-4 turns of normal conversation plus moderate tool
+    observations without artificially squashing memory-relevant context.
+    Heavy raw tool output is compressed at the agent history level (unified_agent.py)
+    before being saved, so budgeting here is a secondary safety valve only.
+    """
     if not session_id:
         return []
     fname = session_id if session_id.endswith(".json") else f"{session_id}.json"
@@ -181,14 +190,26 @@ def _load_history(session_id: str, max_turns: int = 20):
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             raw = json.load(f)
-        # Convert {role, parts} → {role, content}
-        history = []
+        # Convert {role, parts} → {role, content} for the last max_turns messages
+        converted = []
         for msg in raw[-max_turns:]:
             role = msg.get("role", "user")
             parts = msg.get("parts", [])
             content = parts[0] if parts else msg.get("content", "")
-            history.append({"role": role, "content": content})
-        return history
+            converted.append({"role": role, "content": content})
+        # Apply token budget: iterate newest-first, stop when budget overflows
+        budget_used = 0
+        selected = []
+        for msg in reversed(converted):
+            est = max(1, len(msg.get("content", "")) // 4)
+            if budget_used + est > token_budget and selected:
+                break
+            selected.insert(0, msg)
+            budget_used += est
+        logger.debug(
+            f"[_load_history] {len(selected)}/{len(converted)} msgs kept, ~{budget_used} est. tokens"
+        )
+        return selected
     except Exception as exc:
         logger.warning(f"Failed to load history for {session_id}: {exc}")
         return []

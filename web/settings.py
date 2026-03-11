@@ -31,7 +31,7 @@ DEFAULT_SETTINGS = {
         "ui_zoom": 1.0,  # UI 缩放比例 0.7~1.5
     },
     "ai": {
-        "default_model": "gemini-3-flash-preview",
+        "default_model": "auto",
         "auto_execute_scripts": True,
         "voice_auto_send": False,  # 语音输入后自动发送
         "stream_response": True,

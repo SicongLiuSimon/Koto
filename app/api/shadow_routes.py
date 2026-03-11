@@ -57,16 +57,39 @@ def shadow_status():
     try:
         obs = _get_watcher().get_observations()
         topics = sorted(obs.get("topics", {}).items(), key=lambda x: -x[1])[:5]
-        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])[:5]
         open_tasks = _get_watcher().get_open_tasks()
         pending = _get_agent().pending()
+
+        # 对话风格摘要
+        cs = obs.get("conversation_style", {})
+        cs_samples = cs.get("samples", 0)
+        style_summary = {
+            "avg_query_len": cs.get("avg_query_len", 0),
+            "polite_ratio": round(cs.get("polite_ratio", 0.5), 2),
+            "context_ratio": round(cs.get("context_ratio", 0.0), 2),
+            "explicit_pref_ratio": round(cs.get("explicit_pref_ratio", 0.0), 2),
+            "multistep_ratio": round(cs.get("multistep_ratio", 0.0), 2),
+            "samples": cs_samples,
+        } if cs_samples > 0 else None
+
+        # 任务风格摘要：top-3 任务类型 + top-3 输出格式
+        ts = obs.get("task_style", {})
+        task_types_top = sorted(ts.get("task_types", {}).items(), key=lambda x: -x[1])[:3]
+        output_fmt_top = sorted(ts.get("output_format", {}).items(), key=lambda x: -x[1])[:3]
+        task_summary = {
+            "top_task_types": [{"type": k, "count": v} for k, v in task_types_top],
+            "top_output_formats": [{"format": k, "count": v} for k, v in output_fmt_top],
+            "samples": ts.get("samples", 0),
+        } if ts.get("samples", 0) > 0 else None
+
         return _ok({
             "enabled": obs.get("enabled", True),
             "total_observations": obs.get("total_observations", 0),
             "last_seen": obs.get("last_seen"),
             "streak_days": obs.get("streak", {}).get("days", 0),
             "top_topics": [{"topic": k, "count": v} for k, v in topics],
-            "top_phrases": [{"phrase": k, "count": v} for k, v in phrases],
+            "style_summary": style_summary,
+            "task_summary": task_summary,
             "open_tasks_count": len(open_tasks),
             "pending_messages": len(pending),
         })

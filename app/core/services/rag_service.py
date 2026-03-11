@@ -69,6 +69,23 @@ def get_rag_service(index_dir: Optional[str] = None) -> "RAGService":
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 中文感知分词（BM25 使用）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _tokenize(text: str) -> List[str]:
+    """
+    中文感知分词：优先使用 jieba（细粒度搜索模式），
+    未安装时降级为空格分割 + 字符 bigram。
+    """
+    try:
+        import jieba
+        words = list(jieba.cut_for_search(text))
+        return [w for w in words if w.strip()]
+    except ImportError:
+        return text.split() + [text[j:j + 2] for j in range(len(text) - 1)]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Embedding 工厂
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -139,7 +156,7 @@ class RAGService:
     """
 
     CHUNK_SIZE = 800        # 每块字符数（中文约 400 tokens）
-    CHUNK_OVERLAP = 100     # 块间重叠（保留上下文连续性）
+    CHUNK_OVERLAP = 150     # 块间重叠（保留上下文连续性，~18%）
     DEFAULT_K = 5           # 默认检索 top-k
 
     def __init__(
@@ -342,13 +359,7 @@ class RAGService:
                 self._bm25_cache = (None, [])
                 return None, []
 
-            def _tok(text: str) -> List[str]:
-                """空格分割 + 字符 bigram，兼容中英文混合文本。"""
-                words = text.split()
-                bigrams = [text[j:j + 2] for j in range(len(text) - 1)]
-                return words + bigrams
-
-            tokenized = [_tok(d.page_content) for d in docs]
+            tokenized = [_tokenize(d.page_content) for d in docs]
             bm25 = BM25Okapi(tokenized)
             self._bm25_cache = (bm25, docs)
             logger.info(f"[RAGService] BM25 索引构建完成 ({len(docs)} docs)")
@@ -392,10 +403,8 @@ class RAGService:
         bm25_hits: List[Dict[str, Any]] = []
         bm25_idx, all_docs = self._build_bm25()
         if bm25_idx is not None and all_docs:
-            def _tok(t: str) -> List[str]:
-                return t.split() + [t[j:j + 2] for j in range(len(t) - 1)]
             try:
-                scores = bm25_idx.get_scores(_tok(query))
+                scores = bm25_idx.get_scores(_tokenize(query))
                 top_indices = sorted(range(len(scores)), key=lambda i: -scores[i])[:fetch_k]
                 for rank, idx in enumerate(top_indices):
                     if scores[idx] > 0:

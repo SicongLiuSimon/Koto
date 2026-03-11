@@ -9,7 +9,8 @@ import json
 import os
 import time
 from typing import List, Dict, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
+from collections import defaultdict
 from pathlib import Path
 import numpy as np
 
@@ -179,6 +180,11 @@ class UserProfile:
         return f"{level}级别开发者" + (f"，熟悉{'/'.join(langs)}" if langs else "")
 
 
+# ── 记忆生命周期管理（GC）常量 ──────────────────────────────────────────────────
+_GC_STALE_DAYS: int = 90        # 未被访问的自动提取记忆超过此天数将被清理
+_GC_MAX_PER_CATEGORY: int = 150  # 单类别记忆条数上限（超出时保留最新 + 用户手动）
+
+
 class EnhancedMemoryManager:
     """增强的记忆管理器"""
     
@@ -207,7 +213,9 @@ class EnhancedMemoryManager:
         print(f"[EnhancedMemory] 👤 用户画像：{self.user_profile.get_brief_summary()}")
         # 首次启动时如果 FAISS 记庆索引为空，自动从 memories.json 迁移建索
         self._rebuild_memory_rag_if_needed()
-    
+        # 异步执行记忆生命周期 GC（不阻塞启动）
+        self.run_gc()
+
     def _load(self):
         """加载记忆"""
         if os.path.exists(self.memory_path):
@@ -339,6 +347,76 @@ class EnhancedMemoryManager:
             if union > 0 and intersection / union >= threshold:
                 return True
         return False
+
+    # ── 记忆生命周期管理（MemGovernance GC）──────────────────────────────────────
+
+    def run_gc(self) -> None:
+        """异步启动记忆生命周期 GC（不阻塞主线程）。"""
+        import threading
+        threading.Thread(target=self._gc_stale, daemon=True).start()
+
+    def _gc_stale(self) -> int:
+        """
+        修剪过期 / 超限记忆，返回清理条数。
+
+        规则 1 — 过期清理：
+          source != 'user' 且 use_count == 0 且创建超过 _GC_STALE_DAYS 天
+          → 从未被引用的自动提取记忆，直接删除。
+
+        规则 2 — 超限清理：
+          单个 category 超过 _GC_MAX_PER_CATEGORY 条时，
+          优先保留：① user-sourced ② 创建时间最新，超出部分删除。
+        """
+        if not self.memories:
+            return 0
+
+        now = datetime.now()
+        stale_cutoff = now - timedelta(days=_GC_STALE_DAYS)
+
+        def _is_stale(m: Dict) -> bool:
+            if m.get("source") == "user":
+                return False  # 用户手动添加的记忆永不主动删除
+            if m.get("use_count", 0) > 0:
+                return False  # 被访问过 → 保留
+            try:
+                created = datetime.fromisoformat(m.get("created_at", ""))
+                return created < stale_cutoff
+            except Exception:
+                return False
+
+        before = len(self.memories)
+        self.memories = [m for m in self.memories if not _is_stale(m)]
+        removed_stale = before - len(self.memories)
+
+        # 规则 2：单类别上限
+        by_cat: Dict[str, List] = defaultdict(list)
+        for m in self.memories:
+            by_cat[m.get("category", "general")].append(m)
+
+        keep: List[Dict] = []
+        for cat, items in by_cat.items():
+            if len(items) <= _GC_MAX_PER_CATEGORY:
+                keep.extend(items)
+                continue
+            # user-sourced first, then newest created_at
+            items.sort(
+                key=lambda x: (x.get("source") == "user", x.get("created_at", "")),
+                reverse=True,
+            )
+            keep.extend(items[:_GC_MAX_PER_CATEGORY])
+
+        removed_overflow = len(self.memories) - len(keep)
+        self.memories = keep
+
+        total = removed_stale + removed_overflow
+        if total:
+            self._save()
+            print(
+                f"[EnhancedMemory] 🗑️  GC: 清理 {removed_stale} 条过期"
+                f" + {removed_overflow} 条超限 = {total} 条，"
+                f"剩余 {len(self.memories)} 条"
+            )
+        return total
 
     def add_memory(self, content: str, category: str = "user_preference",
                    source: str = "user", metadata: Optional[Dict] = None) -> Optional[Dict]:
@@ -632,48 +710,63 @@ class EnhancedMemoryManager:
             print(f"[EnhancedMemory] 向量检索失败: {e}")
             return []
     
-    def search_memories(self, query: str, limit: int = 5) -> List[Dict]:
-        """搜索相关记忆（关键词版本）"""
+    def search_memories(self, query: str, limit: int = 5,
+                        boost_categories: Optional[List[str]] = None) -> List[Dict]:
+        """搜索相关记忆（置信度感知 + 类别优先 + 关键词匹配）"""
         if not query:
             return []
-        
+
         query_lower = query.lower()
         scored = []
         keywords = [k for k in query_lower.split() if len(k) > 1]
-        
+
         for m in self.memories:
+            # ── 置信度过滤：跳过低置信度的自动提取记忆 ──────────────────────
+            conf = float((m.get("metadata") or {}).get("confidence", 1.0))
+            if conf < 0.4 and m.get("source") != "user":
+                continue
+
             content_lower = m["content"].lower()
             score = 0
-            
-            # 分类加权
-            if m["category"] == "user_preference":
-                score += 3
-            elif m["category"] == "correction":
+
+            # ── 置信度加权 ────────────────────────────────────────────────────
+            if conf >= 0.85:
                 score += 2
-            
-            # 完全匹配
+            elif conf >= 0.6:
+                score += 1
+
+            # ── Cube 优先：任务类型对应的高价值分类 ──────────────────────────
+            cat = m.get("category", "")
+            if boost_categories and cat in boost_categories:
+                score += 3
+
+            # ── 固定分类权重 ──────────────────────────────────────────────────
+            if cat == "user_preference":
+                score += 3
+            elif cat in ("correction", "decision", "reminder"):
+                score += 2
+
+            # ── 内容匹配 ──────────────────────────────────────────────────────
             if query_lower in content_lower:
                 score += 5
-            
-            # 关键词匹配
             for kw in keywords:
                 if kw in content_lower:
                     score += 1
-            
-            if score > 0:
+
+            # 要求至少 2 分（单个关键词命中 = 1 分，不足以证明相关性）
+            # 有效命中：类别加权(+2/+3) 或 2+ 个关键词同时匹配
+            if score > 1:
                 scored.append((score, m))
-        
-        # 排序
+
         scored.sort(key=lambda x: (x[0], x[1]["created_at"]), reverse=True)
-        
-        # 增加使用计数
+
         results = [item[1] for item in scored[:limit]]
         for m in results:
             m["use_count"] = m.get("use_count", 0) + 1
-        
+
         if results:
             self._save()
-        
+
         return results
     
     def get_context_string(self, user_input: str, session_name: Optional[str] = None,

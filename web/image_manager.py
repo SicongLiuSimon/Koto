@@ -89,10 +89,10 @@ class ImageManager:
             )
             
             # ========================================
-            # 回退链 1: Nano Banana Pro (原生图像生成)
+            # 回退链 1: Gemini 3.1 Flash Image (原生图像生成)
             # ========================================
             try:
-                model_name = "nano-banana-pro-preview"
+                model_name = "gemini-3.1-flash-image-preview"
                 print(f"[ImageManager] 尝试模型: {model_name}")
                 response = self.client.models.generate_content(
                     model=model_name,
