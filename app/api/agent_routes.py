@@ -243,53 +243,36 @@ def _load_history(session_id: str, max_turns: int = 20, token_budget: int = 6000
     """
     if not session_id:
         return []
-
-    # --- cache lookup ---
-    cache, lock = _get_history_cache()
-    with lock:
-        if session_id in cache:
-            cache.move_to_end(session_id)
-            raw = cache[session_id]
-        else:
-            raw = None
-
-    if raw is None:
-        fname = session_id if session_id.endswith(".json") else f"{session_id}.json"
-        path = os.path.join(_get_chats_dir(), fname)
-        if not os.path.exists(path):
-            return []
-        try:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                raw = json.load(f)
-            with lock:
-                cache[session_id] = raw
-                cache.move_to_end(session_id)
-                if len(cache) > _HISTORY_CACHE_MAX:
-                    cache.popitem(last=False)
-        except Exception as exc:
-            logger.warning(f"Failed to load history for {session_id}: {exc}")
-            return []
-
-    # Convert {role, parts} → {role, content} for the last max_turns messages
-    converted = []
-    for msg in raw[-max_turns:]:
-        role = msg.get("role", "user")
-        parts = msg.get("parts", [])
-        content = parts[0] if parts else msg.get("content", "")
-        converted.append({"role": role, "content": content})
-    # Apply token budget: iterate newest-first, stop when budget overflows
-    budget_used = 0
-    selected = []
-    for msg in reversed(converted):
-        est = max(1, len(msg.get("content", "")) // 4)
-        if budget_used + est > token_budget and selected:
-            break
-        selected.insert(0, msg)
-        budget_used += est
-    logger.debug(
-        f"[_load_history] {len(selected)}/{len(converted)} msgs kept, ~{budget_used} est. tokens"
-    )
-    return selected
+    fname = session_id if session_id.endswith(".json") else f"{session_id}.json"
+    path = os.path.join(_get_chats_dir(), fname)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            raw = json.load(f)
+        # Convert {role, parts} → {role, content} for the last max_turns messages
+        converted = []
+        for msg in raw[-max_turns:]:
+            role = msg.get("role", "user")
+            parts = msg.get("parts", [])
+            content = parts[0] if parts else msg.get("content", "")
+            converted.append({"role": role, "content": content})
+        # Apply token budget: iterate newest-first, stop when budget overflows
+        budget_used = 0
+        selected = []
+        for msg in reversed(converted):
+            est = max(1, len(msg.get("content", "")) // 4)
+            if budget_used + est > token_budget and selected:
+                break
+            selected.insert(0, msg)
+            budget_used += est
+        logger.debug(
+            f"[_load_history] {len(selected)}/{len(converted)} msgs kept, ~{budget_used} est. tokens"
+        )
+        return selected
+    except Exception as exc:
+        logger.warning(f"Failed to load history for {session_id}: {exc}")
+        return []
 
 
 def _save_history(session_id: str, user_msg: str, model_msg: str):

@@ -703,26 +703,17 @@ class _TrackedModels:
         # 安全守卫：Interactions-only 模型不能调用 generate_content，自动降级
         if model in _INTERACTIONS_ONLY_MODELS:
             import sys as _sys
-
-            _caller = getattr(_sys, "_getframe", lambda n: None)(1)
-            _loc = (
-                f"{getattr(_caller, 'f_code', None) and _caller.f_code.co_filename}:{getattr(_caller, 'f_lineno', '?')}"
-                if _caller
-                else "?"
-            )
-            print(
-                f"[TrackedModels] ⚠️ model '{model}' 仅支持 Interactions API，自动降级为 '{_INTERACTIONS_FALLBACK_MODEL}' (caller: {_loc})"
-            )
+            _caller = getattr(_sys, '_getframe', lambda n: None)(1)
+            _loc = f"{getattr(_caller, 'f_code', None) and _caller.f_code.co_filename}:{getattr(_caller, 'f_lineno', '?')}" if _caller else "?"
+            print(f"[TrackedModels] ⚠️ model '{model}' 仅支持 Interactions API，自动降级为 '{_INTERACTIONS_FALLBACK_MODEL}' (caller: {_loc})")
             model = _INTERACTIONS_FALLBACK_MODEL
         # 合并剩余位置参数到 kwargs（新 SDK 不接受位置参数，args 应始终为空）
-        real = object.__getattribute__(self, "_real")
+        real = object.__getattribute__(self, '_real')
         try:
             response = real.generate_content(model=model, **kwargs)
         except Exception as _e:
             if "Interactions API" in str(_e) and model != _INTERACTIONS_FALLBACK_MODEL:
-                print(
-                    f"[TrackedModels] 🔄 运行时发现 '{model}' 为 Interactions-only，降级到 '{_INTERACTIONS_FALLBACK_MODEL}'"
-                )
+                print(f"[TrackedModels] 🔄 运行时发现 '{model}' 为 Interactions-only，降级到 '{_INTERACTIONS_FALLBACK_MODEL}'")
                 _INTERACTIONS_ONLY_MODELS.add(model)
                 model = _INTERACTIONS_FALLBACK_MODEL
                 response = real.generate_content(model=model, **kwargs)
@@ -749,27 +740,21 @@ class _TrackedModels:
             model, args = args[0], args[1:]
         # 安全守卫：Interactions-only 模型不支持流式 generate_content，自动降级
         if model in _INTERACTIONS_ONLY_MODELS:
-            print(
-                f"[TrackedModels] ⚠️ generate_content_stream: model '{model}' 仅支持 Interactions API，自动降级为 '{_INTERACTIONS_FALLBACK_MODEL}'"
-            )
+            print(f"[TrackedModels] ⚠️ generate_content_stream: model '{model}' 仅支持 Interactions API，自动降级为 '{_INTERACTIONS_FALLBACK_MODEL}'")
             model = _INTERACTIONS_FALLBACK_MODEL
-        real = object.__getattribute__(self, "_real")
+        real = object.__getattribute__(self, '_real')
         # 运行时自愈：若 API 返回"Interactions API"错误，动态标记该模型并降级重试
         try:
             stream = real.generate_content_stream(model=model, **kwargs)
         except Exception as _e:
             if "Interactions API" in str(_e) and model != _INTERACTIONS_FALLBACK_MODEL:
-                print(
-                    f"[TrackedModels] 🔄 运行时发现 '{model}' 为 Interactions-only，降级到 '{_INTERACTIONS_FALLBACK_MODEL}'"
-                )
+                print(f"[TrackedModels] 🔄 运行时发现 '{model}' 为 Interactions-only，降级到 '{_INTERACTIONS_FALLBACK_MODEL}'")
                 _INTERACTIONS_ONLY_MODELS.add(model)
-                stream = real.generate_content_stream(
-                    model=_INTERACTIONS_FALLBACK_MODEL, **kwargs
-                )
+                stream = real.generate_content_stream(model=_INTERACTIONS_FALLBACK_MODEL, **kwargs)
                 model = _INTERACTIONS_FALLBACK_MODEL
             else:
                 raise
-        _model_str = str(model or "unknown")
+        _model_str = str(model or 'unknown')
         for chunk in stream:
             yield chunk
             if _TOKEN_TRACKER_ENABLED:
@@ -1625,23 +1610,23 @@ except ImportError:
 
 # 静态默认值（API 不可用时的兜底，也是启动时的初始值）
 MODEL_MAP = {
-    "CHAT": "gemini-3-flash-preview",
-    "CODER": "gemini-3-pro-preview",
-    "WEB_SEARCH": "gemini-2.5-flash",
-    "VISION": "gemini-3-flash-preview",
-    "RESEARCH": "gemini-2.5-flash",
-    "FILE_GEN": "gemini-3-flash-preview",
-    "FILE_GEN_COMPLEX": "gemini-3-pro-preview",  # FILE_GEN 复杂度变体
-    "DOC_ANNOTATE": "gemini-3-flash-preview",
-    "DOC_ANNOTATE_COMPLEX": "gemini-3-pro-preview",  # DOC_ANNOTATE 复杂度变体
-    "CODER_COMPLEX": "gemini-3-pro-preview",
-    "MULTI_STEP": "gemini-3-pro-preview",
-    "PAINTER": "gemini-3.1-flash-image-preview",
-    "SYSTEM": "local-executor",
-    "FILE_OP": "local-executor",
-    "AGENT": "gemini-3-flash-preview",
-    "FILE_SEARCH": "gemini-3-flash-preview",  # 文件搜索/整理始终 Flash
-    "COMPLEX": "gemini-3-pro-preview",  # 通用复杂度升级兜底
+    "CHAT":               "gemini-3-flash-preview",
+    "CODER":              "gemini-3-pro-preview",
+    "WEB_SEARCH":         "gemini-2.5-flash",
+    "VISION":             "gemini-3-flash-preview",
+    "RESEARCH":           "gemini-2.5-flash",
+    "FILE_GEN":           "gemini-3-flash-preview",
+    "FILE_GEN_COMPLEX":   "gemini-3-pro-preview",    # FILE_GEN 复杂度变体
+    "DOC_ANNOTATE":       "gemini-3-flash-preview",
+    "DOC_ANNOTATE_COMPLEX":"gemini-3-pro-preview",   # DOC_ANNOTATE 复杂度变体
+    "CODER_COMPLEX":      "gemini-3-pro-preview",
+    "MULTI_STEP":         "gemini-3-pro-preview",
+    "PAINTER":            "gemini-3.1-flash-image-preview",
+    "SYSTEM":             "local-executor",
+    "FILE_OP":            "local-executor",
+    "AGENT":              "gemini-3-flash-preview",
+    "FILE_SEARCH":        "gemini-3-flash-preview",  # 文件搜索/整理始终 Flash
+    "COMPLEX":            "gemini-3-pro-preview",    # 通用复杂度升级兜底
 }
 
 # 用户手动覆盖的任务→模型映射（优先级高于动态发现，重启后清除）
@@ -4210,13 +4195,11 @@ class TaskOrchestrator:
                     print(f"[FILE_GEN] ⚠️ 深度研究失败: {research_err}")
 
             # 调用模型生成内容
-            model_id = SmartDispatcher.get_model_for_task(
-                "FILE_GEN", complexity="complex" if is_complex else "normal"
-            )
+            model_id = SmartDispatcher.get_model_for_task("FILE_GEN", complexity="complex" if is_complex else "normal")
             # Interactions-only 模型不支持 generate_content；降级到兼容模型
             if model_id in _INTERACTIONS_ONLY_MODELS:
                 model_id = _INTERACTIONS_FALLBACK_MODEL
-
+            
             _report(f"正在撰写内容...", f"模型: {model_id}")
 
             def _generate_text(prompt_text: str) -> str:
@@ -4804,7 +4787,7 @@ class TaskOrchestrator:
                     "success": True,
                     "output": f"深度研究完成，获取 {len(research_text)} 字专业分析",
                     "content": research_text,
-                    "model_id": MODEL_MAP.get("RESEARCH", "gemini-2.5-flash"),
+                    "model_id": MODEL_MAP.get("RESEARCH", "gemini-2.5-flash")
                 }
             else:
                 _report("⚠️ 研究产出为空", "回退到基础搜索结果")
@@ -5000,14 +4983,12 @@ class TaskOrchestrator:
                 f"最终输出（前1500字）：{final_output[:1500]}\n\n"
                 "请评估输出是否满足了用户需求。只输出一个 0~30 的整数（30为完全满足）。"
             )
-            resp = await asyncio.to_thread(
-                lambda: client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=check_prompt,
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=8,
-                        temperature=0.0,
-                    ),
+            resp = await asyncio.to_thread(lambda: client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=check_prompt,
+                config=types.GenerateContentConfig(
+                    max_output_tokens=8,
+                    temperature=0.0,
                 )
             )
             text = (resp.text or "").strip()
@@ -5193,8 +5174,8 @@ class Utils:
         """
         try:
             task_criteria = {
-                "CHAT": "对话是否直接回答了用户问题，语义是否完整自然",
-                "CODER": "代码是否完整可运行，函数/类/括号是否全部闭合",
+                "CHAT":     "对话是否直接回答了用户问题，语义是否完整自然",
+                "CODER":    "代码是否完整可运行，函数/类/括号是否全部闭合",
                 "RESEARCH": "分析是否全面深入，是否有明显未展开的论点或结论",
                 "FILE_GEN": "文档内容是否完整，结构是否完善",
             }.get(task_type, "输出是否完整地回应了用户需求")
@@ -6369,26 +6350,21 @@ class KotoBrain:
                     if not any(original_input.lower() == k for k in skip_keywords):
                         print(f"[RAG]正在检索知识库: {original_input[:50]}...")
                         rag_results = kb_inst.search(original_input, top_k=3)
-
+                        
                         # 过滤低相关度结果，并对每个片段文本设置长度上限，
                         # 避免原始大文本块把 prompt 撑到数千 token
                         rag_results = [
-                            r for r in rag_results if r.get("similarity", 1.0) >= 0.35
+                            r for r in rag_results
+                            if r.get("similarity", 1.0) >= 0.35
                         ]
                         if rag_results:
                             print(f"[RAG] 检索到 {len(rag_results)} 个相关片段")
-                            context_str = "\n".join(
-                                [
-                                    f"--- 来源: {r['file_name']} (相似度: {r['similarity']:.2f}) ---\n"
-                                    + (
-                                        r["text"][:600] + "…"
-                                        if len(r.get("text", "")) > 600
-                                        else r.get("text", "")
-                                    )
-                                    for r in rag_results
-                                ]
-                            )
-
+                            context_str = "\n".join([
+                                f"--- 来源: {r['file_name']} (相似度: {r['similarity']:.2f}) ---\n"
+                                + (r['text'][:600] + "…" if len(r.get('text','')) > 600 else r.get('text',''))
+                                for r in rag_results
+                            ])
+                            
                             # 将上下文注入 prompt
                             rag_context = f"\n\n【参考资料】\n以下是从本地知识库检索到的相关内容，供回答参考：\n{context_str}\n\n"
 
@@ -6456,17 +6432,13 @@ class KotoBrain:
                     # Interactions API 是纯文本接口，不支持二进制附件（图片字节会被丢弃）
                     # → 直接降级到 gemini-2.5-flash，用 generate_content() 携带图片字节
                     if model_id != _INTERACTIONS_FALLBACK_MODEL:
-                        print(
-                            f"[brain.chat] 图片文件 + Interactions-only 模型 ({model_id}): 降级到 {_INTERACTIONS_FALLBACK_MODEL} 以保留图片数据"
-                        )
+                        print(f"[brain.chat] 图片文件 + Interactions-only 模型 ({model_id}): 降级到 {_INTERACTIONS_FALLBACK_MODEL} 以保留图片数据")
                         model_id = _INTERACTIONS_FALLBACK_MODEL
                         result["model"] = model_id
                     response = client.models.generate_content(
                         model=model_id,
                         contents=[original_input, doc_part],
-                        config=types.GenerateContentConfig(
-                            system_instruction=_brain_sys_instruction
-                        ),
+                        config=types.GenerateContentConfig(system_instruction=_brain_sys_instruction)
                     )
                     accumulated_text = response.text if response.text else ""
                 else:
@@ -6567,15 +6539,8 @@ class KotoBrain:
             # 自动降级：如果模型返回"只支持 Interactions API"错误，自动选择可用模型重试
             if "Interactions API" in err_str:
                 # 若当前是 fallback 本身仍报错，尝试 gemini-1.5-flash 作终极兜底
-                _retry_model = (
-                    "gemini-1.5-flash"
-                    if model_id
-                    in (_INTERACTIONS_ONLY_MODELS | {_INTERACTIONS_FALLBACK_MODEL})
-                    else _INTERACTIONS_FALLBACK_MODEL
-                )
-                print(
-                    f"[brain.chat] Interactions API 错误 (model={model_id})，自动降级 → {_retry_model}"
-                )
+                _retry_model = "gemini-1.5-flash" if model_id in (_INTERACTIONS_ONLY_MODELS | {_INTERACTIONS_FALLBACK_MODEL}) else _INTERACTIONS_FALLBACK_MODEL
+                print(f"[brain.chat] Interactions API 错误 (model={model_id})，自动降级 → {_retry_model}")
                 try:
                     model_id = _retry_model
                     _fb = client.models.generate_content(
@@ -6966,7 +6931,6 @@ def chat_stream():
     # 🧠 MemoryRouter — UserProfile + 长期记忆 + 分页会话上下文 一体注入
     try:
         from app.core.memory.memory_router import MemoryRouter as _MR
-
         _mem_block = _MR.read(
             query=user_input,
             session_name=session_name,
@@ -7202,25 +7166,21 @@ def chat_stream():
                     _agent_order = ["researcher", "writer", "critic", "revise"]
                     _agent_action_labels = {
                         "researcher": "📚 研究专员 正在分析资料…",
-                        "writer": "✍️ 写作专员 正在撰写初稿…",
-                        "critic": "🔍 审核专员 正在检查质量…",
-                        "revise": "🔧 修订专员 正在优化内容…",
+                        "writer":     "✍️ 写作专员 正在撰写初稿…",
+                        "critic":     "🔍 审核专员 正在检查质量…",
+                        "revise":     "🔧 修订专员 正在优化内容…",
                     }
                     _agent_done_labels = {
                         "researcher": "📚 研究分析完成",
-                        "writer": "✍️ 初稿撰写完成",
-                        "critic": "🔍 内容审核完成",
-                        "revise": "🔧 修订优化完成",
+                        "writer":     "✍️ 初稿撰写完成",
+                        "critic":     "🔍 内容审核完成",
+                        "revise":     "🔧 修订优化完成",
                     }
 
                     # 显示执行计划
                     _plan_lines = ["🤖 多Agent执行计划\n"]
-                    _plan_roles = [
-                        ("📚 研究分析", "researcher"),
-                        ("✍️ 撰写初稿", "writer"),
-                        ("🔍 内容审核", "critic"),
-                        ("🔧 修订优化", "revise"),
-                    ]
+                    _plan_roles = [("📚 研究分析", "researcher"), ("✍️ 撰写初稿", "writer"),
+                                   ("🔍 内容审核", "critic"), ("🔧 修订优化", "revise")]
                     for _pi, (_pl, _) in enumerate(_plan_roles):
                         _prefix = "└─" if _pi == len(_plan_roles) - 1 else "├─"
                         _plan_lines.append(f"  {_prefix} {_pi+1}. {_pl}")
@@ -7233,9 +7193,7 @@ def chat_stream():
                     final_output = ""
                     _seen_agents: set = set()
 
-                    for event in orch.stream(
-                        user_input=user_input, session_id=session_name
-                    ):
+                    for event in orch.stream(user_input=user_input, session_id=session_name):
                         agent_name = event.get("agent", "unknown")
                         content = event.get("content", "")
                         done = event.get("done", False)
@@ -7251,9 +7209,7 @@ def chat_stream():
                         elif agent_name not in _seen_agents:
                             _seen_agents.add(agent_name)
                             # 完成当前步骤卡片
-                            _done_lbl = _agent_done_labels.get(
-                                agent_name, f"✅ {agent_name} 完成"
-                            )
+                            _done_lbl = _agent_done_labels.get(agent_name, f"✅ {agent_name} 完成")
                             yield f"data: {json.dumps({'type': 'agent_step_done', 'step_number': _step_counter, 'label': _done_lbl, 'success': True})}\n\n"
                             # 找下一个待执行的 Agent，发出新步骤卡片
                             try:
@@ -7261,9 +7217,7 @@ def chat_stream():
                                 if _next_idx < len(_agent_order):
                                     _next_agent = _agent_order[_next_idx]
                                     _step_counter += 1
-                                    _next_lbl = _agent_action_labels.get(
-                                        _next_agent, f"⏳ {_next_agent} 正在处理…"
-                                    )
+                                    _next_lbl = _agent_action_labels.get(_next_agent, f"⏳ {_next_agent} 正在处理…")
                                     yield f"data: {json.dumps({'type': 'agent_step', 'step_type': 'ACTION', 'step_number': _step_counter, 'label': _next_lbl, 'tool_name': _next_agent})}\n\n"
                             except (ValueError, IndexError):
                                 pass
@@ -7476,7 +7430,7 @@ def chat_stream():
             pattern = multi_step_info.get("pattern", "unknown")
             classification_msg = f"🎯 任务分类: 🔄 多步任务"
             yield f"data: {json.dumps({'type': 'classification', 'task_type': 'MULTI_STEP', 'pattern': pattern, 'route_method': route_method, 'message': classification_msg})}\n\n"
-
+            
             # 显示完整任务计划（Copilot 风格）
             total_subtasks = len(subtasks)
             plan_lines = [f"🗂️ 任务计划（共 {total_subtasks} 步）\n"]
@@ -7486,7 +7440,7 @@ def chat_stream():
             plan_lines.append("\n开始执行...")
             _plan_text = "\n".join(plan_lines) + "\n"
             yield f"data: {json.dumps({'type': 'status', 'message': _plan_text})}\n\n"
-
+            
             # 执行所有子任务（逐步流式反馈）
             try:
                 import asyncio
@@ -7554,13 +7508,13 @@ def chat_stream():
                     if etype == "progress":
                         _sn = evt.get("step_number", 0)
                         _sdesc = evt.get("step_description", "")
-                        _prog_msg = evt.get("message", "")
+                        _prog_msg = evt.get('message', '')
                         if _sn and _sdesc:
                             # 每步开始时发出步骤卡片（Copilot 风格）
                             yield f"data: {json.dumps({'type': 'agent_step', 'step_type': 'ACTION', 'step_number': _sn, 'label': f'⚙️ 步骤{_sn}：{_sdesc[:50]}', 'tool_name': evt.get('detail', '')})}\n\n"
                         else:
-                            _prog_pct = evt.get("progress", 0)
-                            _prog_stage = evt.get("stage", "running")
+                            _prog_pct = evt.get('progress', 0)
+                            _prog_stage = evt.get('stage', 'running')
                             yield f"data: {json.dumps({'type': 'progress', 'message': _prog_msg, 'detail': evt.get('detail',''), 'progress': _prog_pct, 'stage': _prog_stage})}\n\n"
 
                     elif etype == "step_done":
@@ -7577,15 +7531,9 @@ def chat_stream():
                         for _st in subtasks:
                             if str(_st.get("id")) == str(evt.get("step_id")):
                                 _st["status"] = "completed" if success else "failed"
-                                _st["result"] = {
-                                    "success": success,
-                                    "output": preview,
-                                    "error": evt.get("error"),
-                                }
+                                _st["result"] = {"success": success, "output": preview, "error": evt.get("error")}
                                 if success:
-                                    step_results.append(
-                                        {"success": success, "output": preview}
-                                    )
+                                    step_results.append({"success": success, "output": preview})
                                 break
 
                     elif etype == "status":
@@ -7641,9 +7589,7 @@ def chat_stream():
                     yield f"data: {json.dumps({'type': 'status', 'message': '🩺 自检未通过，正在修正最终输出...'})}\n\n"
                     try:
                         # 使用 _INTERACTIONS_FALLBACK_MODEL，避免 gemini-3-*-preview 仅支持 Interactions API
-                        _selfcheck_model = SmartDispatcher.get_model_for_task(
-                            "MULTI_STEP"
-                        )
+                        _selfcheck_model = SmartDispatcher.get_model_for_task("MULTI_STEP")
                         if _selfcheck_model in _INTERACTIONS_ONLY_MODELS:
                             _selfcheck_model = _INTERACTIONS_FALLBACK_MODEL
                         fix_resp = client.models.generate_content(
@@ -7766,11 +7712,7 @@ def chat_stream():
                     content = chunk.get("content", "")
                     if ctype == "answer":
                         final_answer = content
-                        step_data = {
-                            "step_type": "ANSWER",
-                            "content": content,
-                            "tool": None,
-                        }
+                        step_data = {"step_type": "ANSWER", "content": content, "tool": None}
                     elif ctype == "step_status":
                         # Copilot 风格：工具调用前后的状态通知
                         # 直接作为 status 事件发给前端（显示在步骤面板中）
@@ -7947,9 +7889,7 @@ def chat_stream():
                     _src = os.path.basename(_rc.get("source", "unknown"))
                     # 每个片段截断至 600 字符，防止大块文本撑爆 system_instruction
                     _content = _rc.get("content", "")
-                    _content_cap = (
-                        _content[:600] + "…" if len(_content) > 600 else _content
-                    )
+                    _content_cap = _content[:600] + "…" if len(_content) > 600 else _content
                     _rag_context_block += f"[{_src} | 相似度: {_rc.get('score', 0):.3f}]\n{_content_cap}\n\n"
                 # 同时注入 system_instruction（供 ToT 、AGENT 路径使用）
                 _rag_sys_block = (
@@ -12281,14 +12221,7 @@ def chat_stream():
                                 task=task_type,
                                 model_name=f"ollama/{LocalModelRouter._response_model}",
                             )
-                            _reflect_types_local = {
-                                "CHAT",
-                                "RESEARCH",
-                                "CODER",
-                                "FILE_GEN",
-                                "AGENT",
-                                "WEB_SEARCH",
-                            }
+                            _reflect_types_local = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT", "WEB_SEARCH"}
                             if task_type in _reflect_types_local:
                                 _start_memory_extraction(
                                     user_input,
@@ -12580,32 +12513,12 @@ def chat_stream():
                         try:
                             cont_resp = client.models.generate_content_stream(
                                 model=model_id,
-                                contents=formatted_history
-                                + [
-                                    types.Content(
-                                        role="user",
-                                        parts=[
-                                            types.Part.from_text(
-                                                text=_rag_augmented_input
-                                            )
-                                        ],
-                                    ),
-                                    types.Content(
-                                        role="model",
-                                        parts=[types.Part.from_text(text=full_text)],
-                                    ),
-                                    types.Content(
-                                        role="user",
-                                        parts=[
-                                            types.Part.from_text(
-                                                text="请继续，从刚才中断的地方接着写。"
-                                            )
-                                        ],
-                                    ),
+                                contents=formatted_history + [
+                                    types.Content(role="user", parts=[types.Part.from_text(text=_rag_augmented_input)]),
+                                    types.Content(role="model", parts=[types.Part.from_text(text=full_text)]),
+                                    types.Content(role="user", parts=[types.Part.from_text(text="请继续，从刚才中断的地方接着写。")]),
                                 ],
-                                config=types.GenerateContentConfig(
-                                    system_instruction=use_instruction
-                                ),
+                                config=types.GenerateContentConfig(system_instruction=use_instruction),
                             )
                             cont_text = ""
                             for cont_chunk in cont_resp:
@@ -12617,9 +12530,7 @@ def chat_stream():
                             print(f"[SELF_CHECK] 续写失败: {_cont_err}")
                             break
                         # 续写后再次检查是否已完整
-                        recheck = Utils.quick_self_check(
-                            task_type, user_input, full_text
-                        )
+                        recheck = Utils.quick_self_check(task_type, user_input, full_text)
                         if recheck.get("action") != "continue":
                             break
 
@@ -12632,7 +12543,7 @@ def chat_stream():
                             system_instruction=use_instruction,
                             temperature=0.4,
                             max_output_tokens=4000,
-                        ),
+                        )
                     )
                     corrected_text = fix_resp.text or full_text
                     if corrected_text and corrected_text != full_text:
@@ -12681,14 +12592,7 @@ def chat_stream():
                 saved_files=saved_files,
             )
             # 2-B: Memory reflection for all supported task types
-            _reflect_types = {
-                "CHAT",
-                "RESEARCH",
-                "CODER",
-                "FILE_GEN",
-                "AGENT",
-                "WEB_SEARCH",
-            }
+            _reflect_types = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT", "WEB_SEARCH"}
             if task_type in _reflect_types:
                 _start_memory_extraction(
                     user_input,
@@ -14578,14 +14482,13 @@ def chat_with_file():
                     # 并将 PDF 字节附加到请求中，而不是依赖提取的文本
                     _stream_model = _captured_model
                     _stream_contents = formatted_message  # 默认：文本消息
-                    _has_binary_doc = file_data is not None and not (
-                        file_data.get("mime_type") or ""
-                    ).lower().startswith("image/")
+                    _has_binary_doc = (
+                        file_data is not None
+                        and not (file_data.get("mime_type") or "").lower().startswith("image/")
+                    )
                     # 所有二进制文档在 generate_content_stream 中必须使用支持字节的模型
                     if _has_binary_doc and _stream_model in _INTERACTIONS_ONLY_MODELS:
-                        print(
-                            f"[FILE STREAM] 📄 Binary-Doc: Interactions-only model '{_stream_model}' 降级为 '{_INTERACTIONS_FALLBACK_MODEL}'"
-                        )
+                        print(f"[FILE STREAM] 📄 Binary-Doc: Interactions-only model '{_stream_model}' 降级为 '{_INTERACTIONS_FALLBACK_MODEL}'")
                         _stream_model = _INTERACTIONS_FALLBACK_MODEL
                     if _has_binary_doc and _captured_task in ("CHAT", "RESEARCH"):
                         # 强制降级到支持文件字节的模型（Interactions API 不支持附件字节）
@@ -15042,8 +14945,7 @@ def api_refresh_models():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-
-@app.route("/api/v1/models/override", methods=["POST"])
+@app.route('/api/v1/models/override', methods=['POST'])
 def api_override_model():
     """
     手动覆盖指定任务的模型分配（运行时生效，重启后还原动态发现结果）。
@@ -15052,8 +14954,8 @@ def api_override_model():
     """
     global _MANUAL_OVERRIDES
     data = request.get_json(silent=True) or {}
-    task = (data.get("task") or "").upper().strip()
-    model_id = (data.get("model_id") or "").strip()
+    task = (data.get('task') or '').upper().strip()
+    model_id = (data.get('model_id') or '').strip()
 
     if not task:
         return jsonify({"error": "缺少 task 参数"}), 400
@@ -15070,9 +14972,7 @@ def api_override_model():
             orig = _model_manager.get_model_map().get(task)
             if orig:
                 MODEL_MAP[task] = orig
-        print(
-            f"[ModelOverride] 🔄 {task} 覆盖已移除，当前值: {MODEL_MAP.get(task, '(无)')}"
-        )
+        print(f"[ModelOverride] 🔄 {task} 覆盖已移除，当前值: {MODEL_MAP.get(task, '(无)')}")
 
     # 同步更新 SmartDispatcher
     try:
@@ -15080,38 +14980,29 @@ def api_override_model():
     except Exception:
         pass
 
-    return jsonify(
-        {
-            "status": "ok",
-            "task": task,
-            "model_id": MODEL_MAP.get(task),
-            "overrides": _MANUAL_OVERRIDES,
-            "model_map": {t: m for t, m in MODEL_MAP.items()},
-        }
-    )
+    return jsonify({
+        "status":    "ok",
+        "task":      task,
+        "model_id":  MODEL_MAP.get(task),
+        "overrides": _MANUAL_OVERRIDES,
+        "model_map": {t: m for t, m in MODEL_MAP.items()},
+    })
 
-
-@app.route("/api/v1/models/overrides", methods=["GET"])
+@app.route('/api/v1/models/overrides', methods=['GET'])
 def api_get_overrides():
     """返回当前所有手动覆盖列表。"""
-    return jsonify(
-        {
-            "overrides": _MANUAL_OVERRIDES,
-            "model_map": {
-                t: {
-                    "model_id": m,
-                    "display": get_model_display_name(m),
-                    "overridden": t in _MANUAL_OVERRIDES,
-                }
-                for t, m in MODEL_MAP.items()
-            },
-            "fallback": _INTERACTIONS_FALLBACK_MODEL,
-            "interactions_only": list(_INTERACTIONS_ONLY_MODELS),
-        }
-    )
+    return jsonify({
+        "overrides":  _MANUAL_OVERRIDES,
+        "model_map":  {t: {
+            "model_id": m,
+            "display":  get_model_display_name(m),
+            "overridden": t in _MANUAL_OVERRIDES,
+        } for t, m in MODEL_MAP.items()},
+        "fallback":   _INTERACTIONS_FALLBACK_MODEL,
+        "interactions_only": list(_INTERACTIONS_ONLY_MODELS),
+    })
 
-
-@app.route("/api/analyze", methods=["POST"])
+@app.route('/api/analyze', methods=['POST'])
 def analyze_task():
     """预分析任务类型和模型选择 - 让前端立即显示"""
     data = request.json
@@ -15443,64 +15334,46 @@ def reset_settings():
     _detected_proxy = None
     return jsonify({"success": success})
 
-
 # ================= Local Model API =================
 
-
-@app.route("/api/local/models", methods=["GET"])
+@app.route('/api/local/models', methods=['GET'])
 def get_local_models():
     """查询 Ollama 已安装的本地模型列表，并返回推荐与当前选择。"""
     try:
         from app.core.routing.local_model_router import LocalModelRouter
-
         installed = LocalModelRouter.list_installed_models()
         best = LocalModelRouter.pick_best_chat_model() if installed else None
         _, current = _get_local_model_config()
-        return jsonify(
-            {
-                "ollama_running": len(installed) > 0,
-                "models": installed,
-                "recommended": best or "",
-                "current": current or best or "",
-            }
-        )
+        return jsonify({
+            "ollama_running": len(installed) > 0,
+            "models": installed,
+            "recommended": best or "",
+            "current": current or best or "",
+        })
     except Exception as e:
-        return jsonify(
-            {
-                "ollama_running": False,
-                "models": [],
-                "recommended": "",
-                "current": "",
-                "error": str(e),
-            }
-        )
+        return jsonify({"ollama_running": False, "models": [], "recommended": "", "current": "", "error": str(e)})
 
-
-@app.route("/api/local/model", methods=["POST"])
+@app.route('/api/local/model', methods=['POST'])
 def set_local_model():
     """设置本地模型以及运行模式（local/cloud）。"""
     try:
         data = request.json or {}
-        tag = data.get("tag", "")
-        mode = data.get("mode", "cloud")
-        if mode not in ("local", "cloud"):
-            return (
-                jsonify({"success": False, "error": "mode must be 'local' or 'cloud'"}),
-                400,
-            )
+        tag = data.get('tag', '')
+        mode = data.get('mode', 'cloud')
+        if mode not in ('local', 'cloud'):
+            return jsonify({"success": False, "error": "mode must be 'local' or 'cloud'"}), 400
         settings_path = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
-        with open(settings_path, "r", encoding="utf-8") as f:
+        with open(settings_path, 'r', encoding='utf-8') as f:
             s = json.load(f)
-        s["model_mode"] = mode
+        s['model_mode'] = mode
         if tag:
-            s["local_model"] = tag
-        with open(settings_path, "w", encoding="utf-8") as f:
+            s['local_model'] = tag
+        with open(settings_path, 'w', encoding='utf-8') as f:
             json.dump(s, f, indent=2, ensure_ascii=False)
         _user_settings_cache.clear()
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
-
 
 # ================= Mini Mode Switch API =================
 
@@ -20602,12 +20475,13 @@ def api_response_rate():
         except Exception as e:
             print(f"[ResponseRate] ⚠️ ShadowTracer 记录失败: {e}")
 
-    return jsonify(
-        {
-            "success": True,
-            "msg_id": msg_id,
-            "stars": stars,
-            "trace_id": trace_id,
-            "flywheel": trace_id is not None,
-        }
-    )
+    return jsonify({
+        "success": True,
+        "msg_id": msg_id,
+        "stars": stars,
+        "trace_id": trace_id,
+        "flywheel": trace_id is not None,
+    })
+
+
+

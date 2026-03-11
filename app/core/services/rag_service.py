@@ -76,7 +76,6 @@ def get_rag_service(index_dir: Optional[str] = None) -> "RAGService":
 # 中文感知分词（BM25 使用）
 # ─────────────────────────────────────────────────────────────────────────────
 
-
 def _tokenize(text: str) -> List[str]:
     """
     中文感知分词：优先使用 jieba（细粒度搜索模式），
@@ -84,11 +83,10 @@ def _tokenize(text: str) -> List[str]:
     """
     try:
         import jieba
-
         words = list(jieba.cut_for_search(text))
         return [w for w in words if w.strip()]
     except ImportError:
-        return text.split() + [text[j : j + 2] for j in range(len(text) - 1)]
+        return text.split() + [text[j:j + 2] for j in range(len(text) - 1)]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -167,9 +165,9 @@ class RAGService:
         stats()                  : 索引统计信息
     """
 
-    CHUNK_SIZE = 800  # 每块字符数（中文约 400 tokens）
-    CHUNK_OVERLAP = 150  # 块间重叠（保留上下文连续性，~18%）
-    DEFAULT_K = 5  # 默认检索 top-k
+    CHUNK_SIZE = 800        # 每块字符数（中文约 400 tokens）
+    CHUNK_OVERLAP = 150     # 块间重叠（保留上下文连续性，~18%）
+    DEFAULT_K = 5           # 默认检索 top-k
 
     def __init__(
         self,
@@ -440,9 +438,7 @@ class RAGService:
         if bm25_idx is not None and all_docs:
             try:
                 scores = bm25_idx.get_scores(_tokenize(query))
-                top_indices = sorted(range(len(scores)), key=lambda i: -scores[i])[
-                    :fetch_k
-                ]
+                top_indices = sorted(range(len(scores)), key=lambda i: -scores[i])[:fetch_k]
                 for rank, idx in enumerate(top_indices):
                     if scores[idx] > 0:
                         doc = all_docs[idx]

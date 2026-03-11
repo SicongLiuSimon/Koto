@@ -155,70 +155,14 @@ _OPEN_TASK_PATTERNS = [
 
 # ── 任务类型语义（取代浅层用词追踪，关注行为意图而非表面词汇）─────────────────────
 _TASK_TYPE_KEYWORDS: Dict[str, List[str]] = {
-    "分析": [
-        "分析",
-        "评估",
-        "比较",
-        "对比",
-        "解读",
-        "解释",
-        "review",
-        "analyze",
-        "compare",
-        "evaluate",
-    ],
-    "创作": [
-        "写",
-        "创作",
-        "生成",
-        "起草",
-        "撰写",
-        "write",
-        "create",
-        "generate",
-        "draft",
-        "compose",
-    ],
-    "执行": [
-        "运行",
-        "执行",
-        "打开",
-        "启动",
-        "关闭",
-        "安装",
-        "下载",
-        "run",
-        "execute",
-        "open",
-        "install",
-    ],
-    "问答": [
-        "是什么",
-        "怎么",
-        "为什么",
-        "如何",
-        "能解释",
-        "what is",
-        "how to",
-        "why",
-        "explain",
-    ],
-    "修改": [
-        "修改",
-        "优化",
-        "改进",
-        "润色",
-        "修复",
-        "调整",
-        "edit",
-        "fix",
-        "improve",
-        "refine",
-        "revise",
-    ],
-    "搜索": ["找", "搜", "查找", "查一下", "find", "search", "look for"],
-    "翻译": ["翻译", "译成", "translate", "翻成"],
-    "讨论": ["讲讲", "聊聊", "谈谈", "discuss", "your thoughts", "opinion"],
+    "分析":  ["分析", "评估", "比较", "对比", "解读", "解释", "review", "analyze", "compare", "evaluate"],
+    "创作":  ["写", "创作", "生成", "起草", "撰写", "write", "create", "generate", "draft", "compose"],
+    "执行":  ["运行", "执行", "打开", "启动", "关闭", "安装", "下载", "run", "execute", "open", "install"],
+    "问答":  ["是什么", "怎么", "为什么", "如何", "能解释", "what is", "how to", "why", "explain"],
+    "修改":  ["修改", "优化", "改进", "润色", "修复", "调整", "edit", "fix", "improve", "refine", "revise"],
+    "搜索":  ["找", "搜", "查找", "查一下", "find", "search", "look for"],
+    "翻译":  ["翻译", "译成", "translate", "翻成"],
+    "讨论":  ["讲讲", "聊聊", "谈谈", "discuss", "your thoughts", "opinion"],
 }
 
 # ── 对话风格特征（追踪行为模式，服务于智能推荐和技能生成）─────────────────────────
@@ -228,18 +172,18 @@ _CONV_STYLE_SIGNALS: Dict[str, str] = {
     # 提供背景上下文后再提问
     "context_heavy": r"背景[是：:]|目前[^，。\n]{0,20}|我在做|基于|前提是",
     # 礼貌请求标记
-    "polite": r"请[帮给做写]|麻烦|能帮|可以吗|请问|能否",
+    "polite":        r"请[帮给做写]|麻烦|能帮|可以吗|请问|能否",
     # 多步任务结构
-    "multistep": r"第一[步个]|首先.{1,20}然后|分.*?步骤|step\s*1|先.*?再.*?最后",
+    "multistep":     r"第一[步个]|首先.{1,20}然后|分.*?步骤|step\s*1|先.*?再.*?最后",
 }
 
 # ── 输出格式偏好（追踪期望输出形式，供技能推荐和 Prompt 合成使用）─────────────────
 _OUTPUT_FORMAT_SIGNALS: Dict[str, str] = {
-    "代码": r"代码|脚本|函数|```|code|script|function",
-    "列表": r"列表|列出|清单|分条|bullet|numbered",
-    "表格": r"表格|对比表|table",
-    "详细": r"详细|详尽|全面|深入|step by step|逐步",
-    "简短": r"一句话|简洁|简短|brief|concise|tldr",
+    "代码":  r"代码|脚本|函数|```|code|script|function",
+    "列表":  r"列表|列出|清单|分条|bullet|numbered",
+    "表格":  r"表格|对比表|table",
+    "详细":  r"详细|详尽|全面|深入|step by step|逐步",
+    "简短":  r"一句话|简洁|简短|brief|concise|tldr",
 }
 
 # ── AI 拒绝/失败模式（用于检测 AI 无法完成的请求） ──────────────────────────────
@@ -275,21 +219,21 @@ def _default_obs() -> Dict[str, Any]:
         "last_updated": None,
         "total_observations": 0,
         "topics": {},
-        "active_hours": {},  # "9": count, "14": count …
-        "open_tasks": [],  # [{id, text, mentioned_at, session, done, revisited_at?, completed_at?}]
-        "failed_tasks": [],  # [{id, text, asked_at, session, retried, resolved}]
-        "topic_history": [],  # [{topic, date}] capped 500 — for recency calculation
-        "conversation_style": {  # 对话风格画像（增量更新，服务于技能推荐和 Prompt 生成）
-            "avg_query_len": 0,  # 用户消息平均字数
-            "polite_ratio": 0.5,  # 礼貌请求占比  [0=直接命令, 1=全部礼貌]
-            "context_ratio": 0.0,  # 提供背景上下文的对话占比
+        "active_hours": {},        # "9": count, "14": count …
+        "open_tasks": [],          # [{id, text, mentioned_at, session, done, revisited_at?, completed_at?}]
+        "failed_tasks": [],        # [{id, text, asked_at, session, retried, resolved}]
+        "topic_history": [],       # [{topic, date}] capped 500 — for recency calculation
+        "conversation_style": {    # 对话风格画像（增量更新，服务于技能推荐和 Prompt 生成）
+            "avg_query_len": 0,       # 用户消息平均字数
+            "polite_ratio": 0.5,      # 礼貌请求占比  [0=直接命令, 1=全部礼貌]
+            "context_ratio": 0.0,     # 提供背景上下文的对话占比
             "explicit_pref_ratio": 0.0,  # 明确声明输出格式偏好的占比
-            "multistep_ratio": 0.0,  # 提出多步任务的对话占比
+            "multistep_ratio": 0.0,   # 提出多步任务的对话占比
             "samples": 0,
         },
-        "task_style": {  # 任务风格分布（近期请求的语义分类统计）
-            "task_types": {},  # {task_type: count}  e.g. {"分析": 12, "创作": 5}
-            "output_format": {},  # {format: count}  e.g. {"代码": 8, "列表": 3}
+        "task_style": {            # 任务风格分布（近期请求的语义分类统计）
+            "task_types": {},         # {task_type: count}  e.g. {"分析": 12, "创作": 5}
+            "output_format": {},      # {format: count}  e.g. {"代码": 8, "列表": 3}
             "samples": 0,
         },
         "last_seen": None,
@@ -485,17 +429,10 @@ class ShadowWatcher:
         使用自适应 EMA：前 20 次对话用累积均值快速建立基线，
         之后固定 alpha=0.05（约 20 次对话内即可感知行为模式变化）。
         """
-        cs = self._obs.setdefault(
-            "conversation_style",
-            {
-                "avg_query_len": 0,
-                "polite_ratio": 0.5,
-                "context_ratio": 0.0,
-                "explicit_pref_ratio": 0.0,
-                "multistep_ratio": 0.0,
-                "samples": 0,
-            },
-        )
+        cs = self._obs.setdefault("conversation_style", {
+            "avg_query_len": 0, "polite_ratio": 0.5, "context_ratio": 0.0,
+            "explicit_pref_ratio": 0.0, "multistep_ratio": 0.0, "samples": 0,
+        })
         n = cs.get("samples", 0) + 1
         cs["samples"] = min(n, 9999)  # 防整数溢出，EMA 本身不依赖 n 的绝对值
 
@@ -512,31 +449,21 @@ class ShadowWatcher:
 
         lower = user_msg.lower()
         # 各风格维度：本次是否触发（1.0 or 0.0）
-        cs["polite_ratio"] = _ema(
-            cs.get("polite_ratio", 0.5),
-            1.0 if re.search(_CONV_STYLE_SIGNALS["polite"], lower) else 0.0,
-        )
-        cs["context_ratio"] = _ema(
-            cs.get("context_ratio", 0.0),
-            1.0 if re.search(_CONV_STYLE_SIGNALS["context_heavy"], lower) else 0.0,
-        )
-        cs["explicit_pref_ratio"] = _ema(
-            cs.get("explicit_pref_ratio", 0.0),
-            1.0 if re.search(_CONV_STYLE_SIGNALS["explicit_pref"], lower) else 0.0,
-        )
-        cs["multistep_ratio"] = _ema(
-            cs.get("multistep_ratio", 0.0),
-            1.0 if re.search(_CONV_STYLE_SIGNALS["multistep"], lower) else 0.0,
-        )
+        cs["polite_ratio"]        = _ema(cs.get("polite_ratio", 0.5),
+                                          1.0 if re.search(_CONV_STYLE_SIGNALS["polite"], lower) else 0.0)
+        cs["context_ratio"]       = _ema(cs.get("context_ratio", 0.0),
+                                          1.0 if re.search(_CONV_STYLE_SIGNALS["context_heavy"], lower) else 0.0)
+        cs["explicit_pref_ratio"] = _ema(cs.get("explicit_pref_ratio", 0.0),
+                                          1.0 if re.search(_CONV_STYLE_SIGNALS["explicit_pref"], lower) else 0.0)
+        cs["multistep_ratio"]     = _ema(cs.get("multistep_ratio", 0.0),
+                                          1.0 if re.search(_CONV_STYLE_SIGNALS["multistep"], lower) else 0.0)
 
     def _analyze_task_style(self, user_msg: str):
         """
         识别用户请求的任务类型和期望的输出格式，累积分布统计。
         数据供 ProactiveAgent 推荐技能、SkillAutoBuilder 生成画像使用。
         """
-        ts = self._obs.setdefault(
-            "task_style", {"task_types": {}, "output_format": {}, "samples": 0}
-        )
+        ts = self._obs.setdefault("task_style", {"task_types": {}, "output_format": {}, "samples": 0})
         ts["samples"] = ts.get("samples", 0) + 1
 
         lower = user_msg.lower()
@@ -570,15 +497,13 @@ class ShadowWatcher:
                     t["text"][:20] == task_text[:20] for t in tasks if not t.get("done")
                 ):
                     continue
-                tasks.append(
-                    {
-                        "id": str(uuid.uuid4())[:8],
-                        "text": task_text[:120],
-                        "mentioned_at": now.isoformat(timespec="seconds"),
-                        "session": session_id,
-                        "done": False,
-                    }
-                )
+                tasks.append({
+                    "id": str(uuid.uuid4())[:8],
+                    "text": task_text[:120],
+                    "mentioned_at": now.isoformat(timespec="seconds"),
+                    "session": session_id,
+                    "done": False,
+                })
 
     def _check_task_followup(
         self, user_msg: str, ai_msg: str, session_id: str, now: datetime
@@ -639,16 +564,14 @@ class ShadowWatcher:
         # 上限
         if sum(1 for f in failed if not f.get("resolved")) >= 50:
             return
-        failed.append(
-            {
-                "id": str(uuid.uuid4())[:8],
-                "text": user_msg[:150],
-                "asked_at": now.isoformat(timespec="seconds"),
-                "session": session_id,
-                "retried": False,
-                "resolved": False,
-            }
-        )
+        failed.append({
+            "id": str(uuid.uuid4())[:8],
+            "text": user_msg[:150],
+            "asked_at": now.isoformat(timespec="seconds"),
+            "session": session_id,
+            "retried": False,
+            "resolved": False,
+        })
 
     # ── 持久化 ────────────────────────────────────────────────────────────────
 
@@ -674,12 +597,12 @@ class ShadowWatcher:
                 # 裁剪已完成的 open_tasks（保留全部未完成 + 最近 20 条已完成）
                 open_tasks = self._obs.get("open_tasks", [])
                 undone = [t for t in open_tasks if not t.get("done")]
-                done = [t for t in open_tasks if t.get("done")]
+                done   = [t for t in open_tasks if t.get("done")]
                 self._obs["open_tasks"] = undone + done[-20:]
                 # 裁剪已解决的 failed_tasks（保留全部未解决 + 最近 10 条已解决）
                 failed_tasks = self._obs.get("failed_tasks", [])
                 unresolved = [f for f in failed_tasks if not f.get("resolved")]
-                resolved = [f for f in failed_tasks if f.get("resolved")]
+                resolved   = [f for f in failed_tasks if f.get("resolved")]
                 self._obs["failed_tasks"] = unresolved + resolved[-10:]
                 payload = json.dumps(self._obs, ensure_ascii=False, indent=2)
             _OBS_FILE.write_text(payload, encoding="utf-8")
