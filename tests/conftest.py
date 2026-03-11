@@ -73,11 +73,13 @@ def full_app(_koto_tmp_db):
     from app.api.ops_routes import ops_bp
     from app.api.file_hub_routes import file_hub_bp
     from app.api.agent_routes import agent_bp
+    from app.api.skill_marketplace_routes import marketplace_bp
 
     application = Flask(__name__)
     application.register_blueprint(skill_bp)
     application.register_blueprint(job_bp)
     application.register_blueprint(ops_bp)
+    application.register_blueprint(marketplace_bp)
     # Blueprints without built-in url_prefix need it provided here
     application.register_blueprint(task_bp,     url_prefix="/api/tasks")
     application.register_blueprint(goal_bp,     url_prefix="/api/goals")
