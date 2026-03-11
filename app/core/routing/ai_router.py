@@ -1,5 +1,7 @@
+﻿import threading
 import hashlib
-import threading
+import json
+from collections import OrderedDict
 
 # google.genai.types 延迟到 classify() 内部加载，避免启动时加载 (~4.7s)
 
@@ -42,8 +44,8 @@ class AIRouter:
 
 只输出类型名称，如: CHAT"""
 
-    # 缓存最近的分类结果（避免重复调用）
-    _cache = {}
+    # 缓存最近的分类结果（OrderedDict 实现标准 LRU 淡汰）
+    _cache: "OrderedDict" = OrderedDict()
     _cache_max_size = 100
 
     @classmethod
@@ -65,6 +67,7 @@ class AIRouter:
         # 检查缓存
         cache_key = hashlib.md5(user_input.encode()).hexdigest()[:16]
         if cache_key in cls._cache:
+            cls._cache.move_to_end(cache_key)  # 更新访问顺序
             cached = cls._cache[cache_key]
             print(f"[AIRouter] Cache hit: {cached}")
             return cached[0], cached[1], "Cache"
@@ -77,7 +80,7 @@ class AIRouter:
                     from google.genai import types
 
                     response = client.models.generate_content(
-                        model="gemini-2.0-flash-lite",  # 最快的模型
+                        model="gemini-2.5-flash",  # 最快的模型
                         contents=user_input,
                         config=types.GenerateContentConfig(
                             system_instruction=cls.ROUTER_INSTRUCTION,
@@ -125,13 +128,11 @@ class AIRouter:
 
             task = result_holder["task"]
             if task:
-                # 缓存结果
-                if len(cls._cache) >= cls._cache_max_size:
-                    # 清除一半缓存
-                    keys = list(cls._cache.keys())[: cls._cache_max_size // 2]
-                    for k in keys:
-                        del cls._cache[k]
+                # 写入缓存，淡汰最久未使用的条目（LRU）
                 cls._cache[cache_key] = (task, "🤖 AI")
+                cls._cache.move_to_end(cache_key)
+                if len(cls._cache) > cls._cache_max_size:
+                    cls._cache.popitem(last=False)
 
                 print(f"[AIRouter] Classified as: {task}")
                 return task, "🤖 AI", "AI"
@@ -181,6 +182,7 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
         """
         cache_key = "h:" + hashlib.md5(user_input.encode()).hexdigest()[:16]
         if cache_key in cls._cache:
+            cls._cache.move_to_end(cache_key)  # 更新访问顺序
             cached = cls._cache[cache_key]
             return cached[0], cached[1], "Cache", cached[2] if len(cached) > 2 else None
 
@@ -192,7 +194,7 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
                     from google.genai import types
 
                     response = client.models.generate_content(
-                        model="gemini-2.0-flash-lite",
+                        model="gemini-2.5-flash",
                         contents=user_input,
                         config=types.GenerateContentConfig(
                             system_instruction=cls.ROUTER_WITH_HINT_INSTRUCTION,
@@ -203,10 +205,8 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
                     )
                     if response.candidates and response.candidates[0].content.parts:
                         raw = response.candidates[0].content.parts[0].text.strip()
-                        import json as _json
-
                         try:
-                            data = _json.loads(raw)
+                            data = json.loads(raw)
                             task = str(data.get("task", "")).strip().upper()
                             hint_raw = data.get("hint") or None
                             valid_tasks = [
@@ -269,12 +269,11 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             task = result_holder["task"]
             hint = result_holder["hint"]
             if task:
-                # Cache: store task + hint
-                if len(cls._cache) >= cls._cache_max_size:
-                    keys = list(cls._cache.keys())[: cls._cache_max_size // 2]
-                    for k in keys:
-                        del cls._cache[k]
+                # 写入缓存（LRU）
                 cls._cache[cache_key] = (task, "🤖 AI+Hint", hint)
+                cls._cache.move_to_end(cache_key)
+                if len(cls._cache) > cls._cache_max_size:
+                    cls._cache.popitem(last=False)
                 print(
                     f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}"
                 )

@@ -205,14 +205,22 @@ class PlanExecutor:
     async def execute(self) -> Generator:
         """
         异步生成器：逐步执行计划，yield 进度事件 dict。
+        支持动态重规划：步骤失败时自动调用 LocalPlanner.replan() 生成修订步骤。
+
         事件格式与现有 SSE 体系兼容：
             {"type": "progress", "message": "...", "detail": "..."}
             {"type": "status",   "message": "..."}
+            {"type": "replan",   "message": "...", "new_step_count": N}
             {"type": "step_done","step_id": 1, "task_type": "WEB_SEARCH", "success": True, ...}
             {"type": "plan_done","final_output": "...", "saved_files": [...], "step_results": [...]}
         """
-        total = len(self.steps)
-        for idx, step in enumerate(self.steps):
+        # 使用可变队列支持动态注入新步骤（Reflexion 风格重规划）
+        step_queue: List[Dict] = list(self.steps)
+        idx = 0
+
+        while idx < len(step_queue):
+            total = len(step_queue)
+            step = step_queue[idx]
             step_id = step.get("id", idx + 1)
             task_type = step.get("task_type", "CHAT")
             description = step.get("description", f"步骤 {step_id}")
@@ -220,6 +228,8 @@ class PlanExecutor:
 
             yield {
                 "type": "progress",
+                "step_number": idx + 1,
+                "step_description": description,
                 "message": f"步骤 {idx+1}/{total}: {description}",
                 "detail": f"任务类型: {task_type}",
             }
@@ -231,18 +241,43 @@ class PlanExecutor:
                 result = {"success": False, "error": err, "output": ""}
                 self._record(step, result, output_key)
                 yield self._step_done_event(idx + 1, total, step, result)
+                idx += 1
                 continue
 
             enriched_input = _build_enriched_input(step, self.store)
             result = await self._run_with_retry(
                 handler, step, enriched_input, task_type, output_key, idx, total
             )
+
+            # ── 动态重规划（步骤失败时）────────────────────────────────────────
+            if not result.get("success"):
+                new_steps = await self._attempt_replan(
+                    user_input=self.store.get("user_input", ""),
+                    completed_results=self.step_results,
+                    failed_step=step,
+                    error=result.get("error", "未知错误"),
+                    remaining_steps=step_queue[idx + 1:],
+                    next_id=step.get("id", idx + 1) + 1,
+                )
+                if new_steps:
+                    step_queue = step_queue[: idx + 1] + new_steps
+                    logger.info(
+                        f"[PlanExecutor] 🔄 Re-plan: 注入 {len(new_steps)} 个新步骤"
+                    )
+                    yield {
+                        "type": "replan",
+                        "message": f"🔄 重新规划: 生成 {len(new_steps)} 个新步骤",
+                        "new_step_count": len(new_steps),
+                    }
+
             self._record(step, result, output_key)
             yield self._step_done_event(idx + 1, total, step, result)
 
             # 追加文件
             if result.get("saved_files"):
                 self.saved_files.extend(result["saved_files"])
+
+            idx += 1
 
         # 汇总最终输出
         final_output = self._merge_outputs()
@@ -297,6 +332,42 @@ class PlanExecutor:
                 if attempt < self.max_retry:
                     await asyncio.sleep(1.0)
         return last_result
+
+    async def _attempt_replan(
+        self,
+        user_input: str,
+        completed_results: List[Dict],
+        failed_step: Dict,
+        error: str,
+        remaining_steps: List[Dict],
+        next_id: int,
+    ) -> Optional[List[Dict]]:
+        """
+        在 off-thread 调用 LocalPlanner.replan()，返回新步骤列表或 None。
+        使用 asyncio.to_thread 将同步的 Ollama/Cloud 调用移出事件循环。
+        """
+        try:
+            from app.core.routing.local_planner import LocalPlanner
+            completed_steps_info = [r["step"] for r in completed_results]
+            completed_outputs = [
+                (r["result"].get("output") or r["result"].get("content") or "")[:200]
+                for r in completed_results
+            ]
+            plan = await asyncio.to_thread(
+                LocalPlanner.replan,
+                user_input=user_input,
+                completed_steps=completed_steps_info,
+                completed_outputs=completed_outputs,
+                failed_step=failed_step,
+                error=error,
+                remaining_steps=remaining_steps,
+                next_id=next_id,
+            )
+            if plan and plan.get("use_planner") and plan.get("steps"):
+                return plan["steps"]
+        except Exception as _e:
+            logger.warning(f"[PlanExecutor] _attempt_replan 异常: {_e}")
+        return None
 
     def _record(self, step: Dict, result: Dict, output_key: str) -> None:
         """把结果存入 ContextStore 和 step_results 列表。"""

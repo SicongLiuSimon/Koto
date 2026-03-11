@@ -1,7 +1,9 @@
 import json
+import logging
 import re
-
 from app.core.routing.local_model_router import LocalModelRouter
+
+logger = logging.getLogger(__name__)
 
 
 class LocalPlanner:
@@ -17,6 +19,34 @@ class LocalPlanner:
         "SYSTEM",
         "AGENT",
     }
+
+    # ── 重规划提示（用于 replan()）─────────────────────────────────────────────
+    REPLAN_PROMPT = """你是一个多步任务重规划器，只输出 JSON。
+任务执行中断，需要重新规划剩余步骤。
+
+允许的任务类型：WEB_SEARCH / RESEARCH / FILE_GEN / PAINTER / CODER / SYSTEM / AGENT
+
+【原始目标】
+{goal}
+
+【已完成步骤】
+{completed_summary}
+
+【失败步骤】
+{failed_desc}
+失败原因: {error}
+
+【原剩余步骤】（可参考调整）
+{remaining_desc}
+
+请分析失败原因，给出从当前状态出发完成目标的修订步骤。规则：
+- 如果可以绕过失败步骤，提供替代方案
+- 如果目标真的无法继续完成，输出 {{"use_planner": false, "steps": []}}
+- 步骤 id 从 {next_id} 开始递增，depends_on 可引用已完成步骤的 id
+
+只输出 JSON:
+{{"use_planner":true|false,"steps":[{{"id":{next_id},"task":"...","input":"...","description":"...","output_key":"...","depends_on":[],"context_keys":[]}}]}}
+"""
 
     PLAN_PROMPT = """你是一个多步任务规划器，只输出 JSON。
 
@@ -362,3 +392,127 @@ class LocalPlanner:
 
         except Exception:
             return {"status": "partial", "summary": "(自检异常)", "next_actions": []}
+
+    # ── 动态重规划（Reflexion 风格）─────────────────────────────────────────────
+
+    @classmethod
+    def replan(
+        cls,
+        user_input: str,
+        completed_steps: list,
+        completed_outputs: list,
+        failed_step: dict,
+        error: str,
+        remaining_steps: list,
+        next_id: int = 1,
+        timeout: float = 4.0,
+    ) -> dict:
+        """
+        动态重规划：某步骤失败后，根据失败原因生成修订的后续步骤。
+
+        Args:
+            user_input:        原始用户目标
+            completed_steps:   已完成步骤列表 (dict with task_type/description/id)
+            completed_outputs: 对应的输出摘要文本列表
+            failed_step:       失败步骤 dict
+            error:             失败错误信息
+            remaining_steps:   原计划中未执行的步骤（可参考调整）
+            next_id:           新生成步骤的起始 id
+            timeout:           Ollama 调用超时秒数
+
+        Returns:
+            {use_planner: bool, steps: list} — 新的剩余步骤，或 {use_planner: False} 表示放弃
+        """
+        # 构建摘要上下文
+        completed_summary = (
+            "\n".join(
+                f"  步骤{s.get('id', i + 1)} ({s.get('task_type', '?')}): "
+                f"{s.get('description', '')} → {out[:80]}"
+                for i, (s, out) in enumerate(zip(completed_steps, completed_outputs))
+            )
+            or "  (无已完成步骤)"
+        )
+
+        failed_desc = (
+            f"步骤{failed_step.get('id', '?')} "
+            f"({failed_step.get('task_type', '?')}): "
+            f"{failed_step.get('description', '')}"
+        )
+
+        remaining_desc = (
+            "\n".join(
+                f"  步骤{s.get('id', '?')} ({s.get('task_type', '?')}): {s.get('description', '')}"
+                for s in remaining_steps
+            )
+            or "  (无)"
+        )
+
+        prompt = cls.REPLAN_PROMPT.format(
+            goal=user_input[:400],
+            completed_summary=completed_summary[:800],
+            failed_desc=failed_desc,
+            error=str(error)[:300],
+            remaining_desc=remaining_desc[:400],
+            next_id=next_id,
+        )
+
+        # 尝试 Ollama 本地模型
+        try:
+            if LocalModelRouter.is_ollama_available() and LocalModelRouter.init_model():
+                raw, err = LocalModelRouter.call_ollama_chat(
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user_input[:400]},
+                    ],
+                    fmt="json",
+                    options={"temperature": 0.0, "num_predict": 500},
+                    timeout=timeout,
+                )
+                if not err:
+                    result = cls._parse_plan_json(raw)
+                    if result:
+                        logger.info(
+                            f"[LocalPlanner] ✅ Replan (Ollama): "
+                            f"{len(result.get('steps', []))} 新步骤"
+                        )
+                        return result
+        except Exception as _e:
+            logger.debug(f"[LocalPlanner] Replan Ollama 失败: {_e}")
+
+        # Cloud fallback
+        return cls._replan_with_cloud(prompt, user_input)
+
+    @classmethod
+    def _replan_with_cloud(cls, prompt: str, user_input: str) -> dict:
+        """Cloud fallback for replan()."""
+        try:
+            import sys
+            import importlib
+
+            _types = importlib.import_module("google.genai.types")
+            _app_module = sys.modules.get("web.app") or sys.modules.get("app")
+            _client = getattr(_app_module, "client", None) if _app_module else None
+            if not _client:
+                return {"use_planner": False, "steps": []}
+
+            resp = _client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=user_input[:400],
+                config=_types.GenerateContentConfig(
+                    system_instruction=prompt,
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                    max_output_tokens=600,
+                ),
+            )
+            raw = resp.text or ""
+            result = cls._parse_plan_json(raw)
+            if result:
+                logger.info(
+                    f"[LocalPlanner] ✅ Replan (Cloud): "
+                    f"{len(result.get('steps', []))} 新步骤"
+                )
+                return result
+        except Exception as e:
+            logger.warning(f"[LocalPlanner] Replan cloud fallback 失败: {e}")
+        return {"use_planner": False, "steps": []}
