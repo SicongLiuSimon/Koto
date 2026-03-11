@@ -189,6 +189,26 @@ class SkillAutoMatcher:
             ],
         },
         {
+            "skill_id": "complex_task_planner",
+            "patterns": [
+                "复杂任务",
+                "多步骤",
+                "分阶段",
+                "系统化",
+                "全套流程",
+                "综合执行",
+                "整体规划",
+                "complex task",
+                "multi-step",
+                "全流程",
+                "逐步完成",
+                "分步执行",
+                "帮我完成一个复杂",
+                "我需要分多步",
+                "step-by-step execution",
+            ],
+        },
+        {
             "skill_id": "data_analysis",
             "patterns": [
                 "数据分析",
@@ -1082,10 +1102,12 @@ class SkillAutoMatcher:
 
     @classmethod
     def _match_with_patterns(cls, user_input: str, candidates: List[dict]) -> List[str]:
-        """规则兜底：简单关键词匹配，返回匹配到的 skill_id 列表。"""
+        """规则屎底：先查静态 _PATTERN_MAP，册履查 SkillBindingManager 用户意图绑定。"""
         candidate_ids = {c["id"] for c in candidates}
         matched: List[str] = []
         lowered = user_input.lower()
+
+        # 静态内置匹配表
         for entry in cls._PATTERN_MAP:
             sid = entry["skill_id"]
             if sid not in candidate_ids:
@@ -1094,6 +1116,25 @@ class SkillAutoMatcher:
                 matched.append(sid)
                 if len(matched) >= _MAX_AUTO_SKILLS:
                     break
+
+        # 用户注册的意图绑定（导入失败时静默跳过）
+        if len(matched) < _MAX_AUTO_SKILLS:
+            try:
+                from app.core.skills.skill_trigger_binding import (
+                    get_skill_binding_manager,
+                )
+
+                user_matched = get_skill_binding_manager().match_intent(user_input)
+                seen = set(matched)
+                for sid in user_matched:
+                    if sid in candidate_ids and sid not in seen:
+                        matched.append(sid)
+                        seen.add(sid)
+                        if len(matched) >= _MAX_AUTO_SKILLS:
+                            break
+            except Exception:
+                pass
+
         return matched
 
     @classmethod

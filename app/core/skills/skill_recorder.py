@@ -157,6 +157,69 @@ def _make_skill_id(name: str) -> str:
     return slug or f"skill_{hashlib.md5(name.encode()).hexdigest()[:8]}"
 
 
+def _auto_register_intent_binding(skill_def) -> None:
+    """
+    从 intent_description 和 tags 中提取触发关键词，
+    并向 SkillBindingManager 注册意图绑定，使新 Skill 立即参与关键词自动匹配。
+    无论成功与否都不抛出异常，只记录日志。
+    """
+    # 收集候选关键词：tags 优先，再从 intent_description 提取短语
+    skip_generic = {"general", "custom", "style", "behavior", "domain", "workflow",
+                    "auto-extracted", "chat", "coder", "research"}
+    keywords: list = []
+
+    # 1. 有效 tags
+    for tag in (getattr(skill_def, "tags", None) or []):
+        tag = str(tag).strip()
+        if len(tag) >= 2 and tag.lower() not in skip_generic:
+            keywords.append(tag)
+
+    # 2. 从 intent_description 按常用分隔符拆出 2-8 字短语
+    intent = str(getattr(skill_def, "intent_description", "") or "").strip()
+    if intent:
+        parts = re.split(r"[、，；。/|或]", intent)
+        for part in parts:
+            # 去掉常见前缀
+            for prefix in ("用户需要", "用户想要", "当用户", "用于", "适用于", "用户"):
+                if part.startswith(prefix):
+                    part = part[len(prefix):]
+            part = part.strip()
+            if 2 <= len(part) <= 8:
+                keywords.append(part)
+
+    # 去重，最多 8 个
+    seen: set = set()
+    patterns: list = []
+    for kw in keywords:
+        if kw not in seen:
+            seen.add(kw)
+            patterns.append(kw)
+            if len(patterns) >= 8:
+                break
+
+    if not patterns:
+        return  # 无有效关键词，跳过
+
+    try:
+        from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+        mgr = get_skill_binding_manager()
+        # 检查是否已有同 Skill 的意图绑定，避免重复注册
+        existing = mgr.list_bindings(skill_id=skill_def.id, binding_type="intent")
+        if existing:
+            return
+        mgr.bind_intent(
+            skill_id=skill_def.id,
+            intent_patterns=patterns,
+            auto_disable_after_turns=3,
+        )
+        logger.info(
+            f"[skill_recorder] 自动注册意图绑定: {skill_def.id} "
+            f"keywords={patterns}"
+        )
+    except Exception as e:
+        logger.debug(f"[skill_recorder] 意图绑定注册跳过: {e}")
+
+
 # ── 核心类 ────────────────────────────────────────────────────────────────────
 
 
@@ -271,6 +334,9 @@ class SkillRecorder:
             logger.warning(
                 f"[skill_recorder] SkillManager 注册失败（已保存到磁盘）: {e}"
             )
+
+        # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
+        _auto_register_intent_binding(skill_def)
 
         return skill_def.id
 
