@@ -1,8 +1,7 @@
-﻿import hashlib
+﻿import threading
+import hashlib
 import json
-import threading
 from collections import OrderedDict
-
 # google.genai.types 延迟到 classify() 内部加载，避免启动时加载 (~4.7s)
 
 
@@ -44,11 +43,10 @@ class AIRouter:
 
 只输出类型名称，如: CHAT"""
 
-    # LRU cache for classification results — expanded to 256 and protected by a lock
+    # 缓存最近的分类结果（OrderedDict 实现标准 LRU 淡汰）
     _cache: "OrderedDict" = OrderedDict()
-    _cache_max_size = 256
-    _cache_lock = threading.Lock()
-
+    _cache_max_size = 100
+    
     @classmethod
     def classify(cls, client, user_input: str, timeout: float = 2.0) -> tuple:
         """
@@ -67,13 +65,12 @@ class AIRouter:
 
         # Check cache (thread-safe)
         cache_key = hashlib.md5(user_input.encode()).hexdigest()[:16]
-        with cls._cache_lock:
-            if cache_key in cls._cache:
-                cls._cache.move_to_end(cache_key)
-                cached = cls._cache[cache_key]
-                print(f"[AIRouter] Cache hit: {cached}")
-                return cached[0], cached[1], "Cache"
-
+        if cache_key in cls._cache:
+            cls._cache.move_to_end(cache_key)  # 更新访问顺序
+            cached = cls._cache[cache_key]
+            print(f"[AIRouter] Cache hit: {cached}")
+            return cached[0], cached[1], "Cache"
+        
         try:
             result_holder = {"task": None, "error": None}
 
@@ -130,13 +127,12 @@ class AIRouter:
 
             task = result_holder["task"]
             if task:
-                # Write to cache (thread-safe LRU eviction)
-                with cls._cache_lock:
-                    cls._cache[cache_key] = (task, "🤖 AI")
-                    cls._cache.move_to_end(cache_key)
-                    if len(cls._cache) > cls._cache_max_size:
-                        cls._cache.popitem(last=False)
-
+                # 写入缓存，淡汰最久未使用的条目（LRU）
+                cls._cache[cache_key] = (task, "🤖 AI")
+                cls._cache.move_to_end(cache_key)
+                if len(cls._cache) > cls._cache_max_size:
+                    cls._cache.popitem(last=False)
+                
                 print(f"[AIRouter] Classified as: {task}")
                 return task, "🤖 AI", "AI"
 
@@ -277,9 +273,7 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
                 cls._cache.move_to_end(cache_key)
                 if len(cls._cache) > cls._cache_max_size:
                     cls._cache.popitem(last=False)
-                print(
-                    f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}"
-                )
+                print(f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}")
                 return task, "🤖 AI+Hint", "AI", hint
 
             task, conf, src = cls.classify(client, user_input, timeout=timeout)
@@ -289,3 +283,5 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             print(f"[AIRouter] classify_with_hint exception: {e}")
             task, conf, src = cls.classify(client, user_input, timeout=timeout)
             return task, conf, src, None
+
+

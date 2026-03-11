@@ -6,7 +6,6 @@ from app.core.routing.local_model_router import LocalModelRouter
 
 logger = logging.getLogger(__name__)
 
-
 class LocalPlanner:
     """Local planner/controller using Ollama for multi-step task planning."""
 
@@ -22,7 +21,7 @@ class LocalPlanner:
     }
 
     # ── 重规划提示（用于 replan()）─────────────────────────────────────────────
-    REPLAN_PROMPT = """你是一个多步任务重规划器，只输出 JSON。
+    REPLAN_PROMPT = '''你是一个多步任务重规划器，只输出 JSON。
 任务执行中断，需要重新规划剩余步骤。
 
 允许的任务类型：WEB_SEARCH / RESEARCH / FILE_GEN / PAINTER / CODER / SYSTEM / AGENT
@@ -47,9 +46,9 @@ class LocalPlanner:
 
 只输出 JSON:
 {{"use_planner":true|false,"steps":[{{"id":{next_id},"task":"...","input":"...","description":"...","output_key":"...","depends_on":[],"context_keys":[]}}]}}
-"""
+'''
 
-    PLAN_PROMPT = """你是一个多步任务规划器，只输出 JSON。
+    PLAN_PROMPT = '''你是一个多步任务规划器，只输出 JSON。
 
 允许的任务类型（只从这里选）：
 - WEB_SEARCH : 联网搜索获取最新信息
@@ -425,14 +424,11 @@ class LocalPlanner:
             {use_planner: bool, steps: list} — 新的剩余步骤，或 {use_planner: False} 表示放弃
         """
         # 构建摘要上下文
-        completed_summary = (
-            "\n".join(
-                f"  步骤{s.get('id', i + 1)} ({s.get('task_type', '?')}): "
-                f"{s.get('description', '')} → {out[:80]}"
-                for i, (s, out) in enumerate(zip(completed_steps, completed_outputs))
-            )
-            or "  (无已完成步骤)"
-        )
+        completed_summary = "\n".join(
+            f"  步骤{s.get('id', i + 1)} ({s.get('task_type', '?')}): "
+            f"{s.get('description', '')} → {out[:80]}"
+            for i, (s, out) in enumerate(zip(completed_steps, completed_outputs))
+        ) or "  (无已完成步骤)"
 
         failed_desc = (
             f"步骤{failed_step.get('id', '?')} "
@@ -440,13 +436,10 @@ class LocalPlanner:
             f"{failed_step.get('description', '')}"
         )
 
-        remaining_desc = (
-            "\n".join(
-                f"  步骤{s.get('id', '?')} ({s.get('task_type', '?')}): {s.get('description', '')}"
-                for s in remaining_steps
-            )
-            or "  (无)"
-        )
+        remaining_desc = "\n".join(
+            f"  步骤{s.get('id', '?')} ({s.get('task_type', '?')}): {s.get('description', '')}"
+            for s in remaining_steps
+        ) or "  (无)"
 
         prompt = cls.REPLAN_PROMPT.format(
             goal=user_input[:400],
@@ -487,9 +480,8 @@ class LocalPlanner:
     def _replan_with_cloud(cls, prompt: str, user_input: str) -> dict:
         """Cloud fallback for replan()."""
         try:
-            import importlib
             import sys
-
+            import importlib
             _types = importlib.import_module("google.genai.types")
             _app_module = sys.modules.get("web.app") or sys.modules.get("app")
             _client = getattr(_app_module, "client", None) if _app_module else None
@@ -517,3 +509,4 @@ class LocalPlanner:
         except Exception as e:
             logger.warning(f"[LocalPlanner] Replan cloud fallback 失败: {e}")
         return {"use_planner": False, "steps": []}
+

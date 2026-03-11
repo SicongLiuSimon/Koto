@@ -256,7 +256,7 @@ class PlanExecutor:
                     completed_results=self.step_results,
                     failed_step=step,
                     error=result.get("error", "未知错误"),
-                    remaining_steps=step_queue[idx + 1 :],
+                    remaining_steps=step_queue[idx + 1:],
                     next_id=step.get("id", idx + 1) + 1,
                 )
                 if new_steps:
@@ -348,7 +348,6 @@ class PlanExecutor:
         """
         try:
             from app.core.routing.local_planner import LocalPlanner
-
             completed_steps_info = [r["step"] for r in completed_results]
             completed_outputs = [
                 (r["result"].get("output") or r["result"].get("content") or "")[:200]

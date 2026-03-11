@@ -83,25 +83,13 @@ class LocalModelRouter:
     # 模型系列基础分（家族名 = Ollama tag ":" 前段首段，忽略大小写）
     # 越高 = 越适合通用对话与路由任务
     _FAMILY_SCORES = {
-        "qwen3": 100,
-        "qwen2.5": 90,
-        "qwen2": 75,
-        "gemma3": 85,
-        "gemma2": 72,
-        "gemma": 65,
-        "llama3.3": 80,
-        "llama3.2": 72,
-        "llama3.1": 70,
-        "llama3": 65,
-        "llama2": 45,
-        "deepseek": 78,
-        "mistral": 60,
-        "mixtral": 68,
-        "phi4": 62,
-        "phi3": 55,
-        "phi": 45,
-        "yi": 62,
-        "command": 58,
+        "qwen3":    100,  "qwen2.5":  90,  "qwen2":    75,
+        "gemma3":    85,  "gemma2":   72,  "gemma":    65,
+        "llama3.3":  80,  "llama3.2": 72,  "llama3.1": 70,
+        "llama3":    65,  "llama2":   45,
+        "deepseek":  78,  "mistral":  60,  "mixtral":  68,
+        "phi4":      62,  "phi3":     55,  "phi":      45,
+        "yi":        62,  "command":  58,
     }
     # 仅用于路由分类的专用模型，不参与对话生成候选
     _ROUTER_ONLY = {"koto-router"}
@@ -425,9 +413,9 @@ class LocalModelRouter:
         # 2) 按 OLLAMA_MODELS 优先级列表精确匹配（base name 相同即可，兼容不同 tag 后缀）
         if not target_model:
             for want in cls.OLLAMA_MODELS:
-                base = want.split(":")[0].lower()
+                base = want.split(':')[0].lower()
                 for im in installed:
-                    if im.split(":")[0].lower() == base:
+                    if im.split(':')[0].lower() == base:
                         target_model = im
                         break
                 if target_model:
@@ -442,7 +430,7 @@ class LocalModelRouter:
 
         cls._model_name = target_model
         cls._initialized = True
-        logger.info(f"[LocalModelRouter] ✅ 使用本地模型: {target_model}")
+        print(f"[LocalModelRouter] ✅ 使用本地模型: {target_model}")
         return True
 
     # ══════════════════════════════════════════════════════════════════
@@ -456,7 +444,7 @@ class LocalModelRouter:
             resp = requests.get("http://localhost:11434/api/tags", timeout=2)
             if resp.status_code != 200:
                 return []
-            return [m["name"] for m in resp.json().get("models", [])]
+            return [m['name'] for m in resp.json().get('models', [])]
         except Exception:
             return []
 
@@ -464,16 +452,15 @@ class LocalModelRouter:
     def _parse_size_b(tag: str) -> float:
         """从 model tag 解析参数量（单位十亿），例 'qwen3:8b' → 8.0。未知返回 0。"""
         import re as _re
-
-        m = _re.search(r"(\d+(?:\.\d+)?)b", tag.lower())
+        m = _re.search(r'(\d+(?:\.\d+)?)b', tag.lower())
         return float(m.group(1)) if m else 0.0
 
     @classmethod
     def _score_for_chat(cls, full_tag: str) -> float:
         """对话生成质量评分（越高越优先）。_ROUTER_ONLY 模型返回 -inf。"""
-        base = full_tag.split(":")[0].lower()
+        base = full_tag.split(':')[0].lower()
         if base in cls._ROUTER_ONLY:
-            return float("-inf")
+            return float('-inf')
         family_score = next(
             (float(v) for k, v in cls._FAMILY_SCORES.items() if base.startswith(k)),
             40.0,  # 未知系列保底
@@ -488,8 +475,8 @@ class LocalModelRouter:
     @classmethod
     def _score_for_routing(cls, full_tag: str) -> float:
         """路由分类评分（越高越优先）。koto-router 最高分，偏好 3–8B 快速小模型。"""
-        base = full_tag.split(":")[0].lower()
-        if base == "koto-router":
+        base = full_tag.split(':')[0].lower()
+        if base == 'koto-router':
             return 9999.0
         family_score = next(
             (float(v) for k, v in cls._FAMILY_SCORES.items() if base.startswith(k)),
@@ -513,9 +500,8 @@ class LocalModelRouter:
         if installed is None:
             installed = cls.list_installed_models()
         candidates = [
-            (cls._score_for_chat(t), t)
-            for t in installed
-            if cls._score_for_chat(t) > float("-inf")
+            (cls._score_for_chat(t), t) for t in installed
+            if cls._score_for_chat(t) > float('-inf')
         ]
         return max(candidates, key=lambda x: x[0])[1] if candidates else None
 
@@ -949,9 +935,9 @@ class LocalModelRouter:
 
         # 1) 按 OLLAMA_RESPONSE_MODELS 优先级列表精确匹配
         for want in cls.OLLAMA_RESPONSE_MODELS:
-            base = want.split(":")[0].lower()
+            base = want.split(':')[0].lower()
             for im in installed:
-                if im.split(":")[0].lower() == base:
+                if im.split(':')[0].lower() == base:
                     cls._response_model = im
                     cls._response_model_inited = True
                     logger.info(f"[LocalModelRouter] ✅ 响应生成模型: {im}")
@@ -962,7 +948,7 @@ class LocalModelRouter:
         if best:
             cls._response_model = best
             cls._response_model_inited = True
-            logger.info(f"[LocalModelRouter] ✅ 响应生成模型（动态选择）: {best}")
+            print(f"[LocalModelRouter] ✅ 响应生成模型（动态选择）: {best}")
             return True
 
         # 3) 最终回退到路由分类模型
