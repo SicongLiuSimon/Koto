@@ -643,13 +643,13 @@ class TrainingDataBuilder:
                 print("[TrainingBuilder] ℹ️ Ollama 未运行，跳过 Modelfile 生成")
             return
 
-        # 找到可用的基底模型
+        # 找到可用的基底模型（动态评分选择）
         base_model = None
-        preferred = ["qwen3:8b", "qwen3:4b", "qwen3:1.7b", "qwen2.5:7b", "qwen2.5:3b"]
-        for m in preferred:
-            if any(m in tag for tag in models):
-                base_model = m
-                break
+        try:
+            from app.core.routing.local_model_router import LocalModelRouter
+            base_model = LocalModelRouter.pick_best_chat_model(models)
+        except Exception:
+            pass
         if not base_model and models:
             base_model = models[0]
         if not base_model:

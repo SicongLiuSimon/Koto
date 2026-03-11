@@ -614,19 +614,10 @@ class DataHarvester:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _detect_best_base_model() -> Optional[str]:
-    """检测 Ollama 中最适合做底座的模型"""
+    """检测 Ollama 中最适合做底座的模型（动态评分选择）"""
     try:
-        import requests
-        resp = requests.get("http://localhost:11434/api/tags", timeout=3)
-        if resp.status_code != 200:
-            return None
-        tags = [m["name"] for m in resp.json().get("models", [])]
-        preferred = ["qwen3:8b", "qwen3:4b", "qwen3:1.7b", "qwen2.5:7b",
-                     "qwen2.5:3b", "llama3.1:8b", "llama3.2:3b", "gemma3:4b"]
-        for p in preferred:
-            if any(p in t for t in tags):
-                return p
-        return tags[0] if tags else None
+        from app.core.routing.local_model_router import LocalModelRouter
+        return LocalModelRouter.pick_best_chat_model()
     except Exception:
         return None
 
