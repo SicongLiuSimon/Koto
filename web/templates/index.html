@@ -47,23 +47,121 @@
             color: var(--text-muted); cursor: pointer; transition: all 0.15s;
         }
         .skill-edit-btn:hover { color: var(--accent); border-color: var(--accent); }
+        /* ── Skill Editor Modal (redesigned) ──────────────────── */
         .skill-editor-modal {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.5);
-            display: flex; align-items: center; justify-content: center; z-index: 3000;
+            position: fixed; inset: 0; background: rgba(0,0,0,.6);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 3000; backdrop-filter: blur(3px);
         }
+        .ske-panel {
+            background: #111827; border-radius: 14px; width: min(640px,95vw);
+            border: 1px solid rgba(99,198,255,.18); box-shadow: 0 28px 70px rgba(0,0,0,.7);
+            display: flex; flex-direction: column; max-height: 88vh; overflow: hidden;
+        }
+        .ske-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 16px 20px 14px; border-bottom: 1px solid rgba(255,255,255,.07); flex-shrink: 0;
+        }
+        .ske-title-row { display: flex; align-items: center; gap: 12px; }
+        .ske-icon { font-size: 26px; line-height: 1; }
+        .ske-name { font-size: 15px; font-weight: 700; color: #e8eefc; }
+        .ske-meta { font-size: 11px; color: #6c7a91; margin-top: 3px; }
+        .ske-close {
+            background: none; border: none; color: #6c7a91; font-size: 22px;
+            cursor: pointer; padding: 0 4px; line-height: 1; border-radius: 4px;
+        }
+        .ske-close:hover { color: #e8eefc; background: rgba(255,255,255,.08); }
+        .ske-tabs {
+            display: flex; gap: 0; padding: 0 16px;
+            border-bottom: 1px solid rgba(255,255,255,.07); flex-shrink: 0;
+        }
+        .ske-tab {
+            background: none; border: none; border-bottom: 2px solid transparent;
+            color: #8b9ab0; font-size: 12px; padding: 9px 14px 8px;
+            cursor: pointer; transition: all .15s; white-space: nowrap;
+        }
+        .ske-tab.active { color: #63c6ff; border-bottom-color: #63c6ff; }
+        .ske-tab:hover:not(.active) { color: #c9d6e8; }
+        .ske-body { padding: 16px 20px; flex: 1; overflow-y: auto; min-height: 0; }
+        .ske-hint { font-size: 11px; color: #6c7a91; margin-bottom: 10px; line-height: 1.6; }
+        .ske-textarea {
+            width: 100%; box-sizing: border-box; background: #0d1420;
+            border: 1px solid rgba(99,198,255,.15); border-radius: 9px;
+            color: #c9d6e8; font-family: 'JetBrains Mono', monospace;
+            font-size: 12.5px; line-height: 1.65; padding: 13px 15px;
+            resize: vertical; min-height: 210px; outline: none; transition: border-color .15s;
+        }
+        .ske-textarea:focus { border-color: rgba(99,198,255,.4); }
+        .ske-count { text-align: right; font-size: 10px; color: #4a5568; margin-top: 5px; }
+        .ske-ai-btn, .ske-extract-btn {
+            margin-top: 10px; padding: 7px 18px;
+            background: linear-gradient(135deg,#1a3d6b,#1e4d8c);
+            border: 1px solid rgba(99,198,255,.3); border-radius: 8px;
+            color: #63c6ff; font-size: 12px; cursor: pointer; transition: all .15s;
+        }
+        .ske-ai-btn:hover, .ske-extract-btn:hover { background: linear-gradient(135deg,#1e4d8c,#2563aa); }
+        .ske-ai-preview {
+            margin-top: 12px; border: 1px solid rgba(99,198,255,.2); border-radius: 9px; overflow: hidden;
+        }
+        .ske-ai-preview-title {
+            padding: 8px 13px; background: rgba(99,198,255,.07);
+            font-size: 11px; color: #8b9ab0;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .ske-apply-btn {
+            background: none; border: 1px solid rgba(99,198,255,.3);
+            border-radius: 6px; color: #63c6ff; font-size: 11px;
+            padding: 2px 10px; cursor: pointer;
+        }
+        .ske-apply-btn:hover { background: rgba(99,198,255,.1); }
+        .ske-ai-pre {
+            margin: 0; padding: 13px 15px; font-size: 11.5px; color: #a0b0c8;
+            white-space: pre-wrap; line-height: 1.6; max-height: 170px; overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .ske-session-list { display: flex; flex-direction: column; gap: 5px; max-height: 240px; overflow-y: auto; }
+        .ske-session-item {
+            padding: 9px 13px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.07); color: #a0b0c8;
+            font-size: 12px; cursor: pointer; transition: all .15s;
+        }
+        .ske-session-item:hover { background: rgba(99,198,255,.07); border-color: rgba(99,198,255,.2); }
+        .ske-session-item.selected { background: rgba(99,198,255,.12); border-color: rgba(99,198,255,.4); color: #63c6ff; }
+        .ske-extract-zone { margin-top: 10px; }
+        .ske-footer {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 20px; border-top: 1px solid rgba(255,255,255,.07); flex-shrink: 0;
+        }
+        .ske-btn-ghost {
+            background: none; border: none; color: #8b9ab0;
+            font-size: 12px; cursor: pointer; padding: 6px 10px; border-radius: 7px;
+        }
+        .ske-btn-ghost:hover { color: #e8eefc; background: rgba(255,255,255,.06); }
+        .ske-btn-secondary {
+            background: transparent; border: 1px solid rgba(255,255,255,.12);
+            color: #a0b0c8; font-size: 13px; padding: 7px 18px; border-radius: 8px; cursor: pointer;
+        }
+        .ske-btn-secondary:hover { border-color: rgba(255,255,255,.24); color: #e8eefc; }
+        .ske-btn-primary {
+            background: linear-gradient(135deg,#1e4d8c,#2563aa);
+            border: 1px solid rgba(99,198,255,.4); color: #fff;
+            font-size: 13px; padding: 7px 22px; border-radius: 8px;
+            cursor: pointer; font-weight: 600; transition: all .15s;
+        }
+        .ske-btn-primary:hover { background: linear-gradient(135deg,#2563aa,#2e74c0); }
+        /* legacy class kept for other modals that use skill-editor-inner */
         .skill-editor-inner {
-            background: var(--bg-card); border-radius: var(--radius-lg);
-            padding: 20px; width: min(540px, 92vw);
-            border: 1px solid var(--border-color); box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            background: #111827; border-radius: 14px; padding: 20px; width: min(540px, 92vw);
+            border: 1px solid rgba(99,198,255,.18); box-shadow: 0 24px 60px rgba(0,0,0,.65);
         }
         .skill-editor-header {
             display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 8px; font-weight: 600; font-size: 14px; color: var(--text-primary);
+            margin-bottom: 8px; font-weight: 600; font-size: 14px; color: #e8eefc;
         }
         .skill-editor-textarea {
             width: 100%; padding: 10px; border-radius: 8px; box-sizing: border-box;
-            border: 1px solid var(--border-color); background: var(--bg-tertiary);
-            color: var(--text-primary); font-size: 12px; font-family: 'JetBrains Mono', monospace;
+            border: 1px solid rgba(99,198,255,.15); background: #0d1420;
+            color: #c9d6e8; font-size: 12px; font-family: 'JetBrains Mono', monospace;
             resize: vertical; min-height: 170px; line-height: 1.5;
         }
         .skill-editor-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
@@ -1359,16 +1457,66 @@
 
         <!-- Skill Prompt Editor modal (outside settings panel, full-screen overlay) -->
         <div id="skillEditorModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeSkillEditor()">
-            <div class="skill-editor-inner">
-                <div class="skill-editor-header">
-                    <span id="skillEditorTitle">编辑 Skill Prompt</span>
-                    <button class="close-panel" onclick="closeSkillEditor()">×</button>
+            <div class="ske-panel">
+                <!-- Header: skill icon + name + meta -->
+                <div class="ske-header">
+                    <div class="ske-title-row">
+                        <span id="skeIcon" class="ske-icon">🤖</span>
+                        <div>
+                            <div id="skeTitle" class="ske-name">编辑 Skill</div>
+                            <div id="skeMeta" class="ske-meta"></div>
+                        </div>
+                    </div>
+                    <button class="ske-close" onclick="closeSkillEditor()">×</button>
                 </div>
-                <p class="setting-hint" style="margin:0 0 8px;">编辑该技能注入到系统指令的内容。空白且保存则恢复默认。</p>
-                <textarea id="skillEditorContent" class="skill-editor-textarea" rows="9" placeholder="输入 Prompt 内容，留空则恢复默认…"></textarea>
-                <div class="skill-editor-actions">
-                    <button class="btn-secondary btn-sm" onclick="resetSkillPromptEdit()">🔄 恢复默认</button>
-                    <button class="btn-primary btn-sm" onclick="saveSkillPromptEdit()">&#x1f4be; 保存</button>
+                <!-- Tab bar -->
+                <div class="ske-tabs">
+                    <button class="ske-tab active" data-tab="edit" onclick="skeSwitchTab('edit')">✏️ 编辑 Prompt</button>
+                    <button class="ske-tab" data-tab="ai" onclick="skeSwitchTab('ai')">✨ AI 生成</button>
+                    <button class="ske-tab" data-tab="extract" onclick="skeSwitchTab('extract')">💬 从对话提取</button>
+                </div>
+                <!-- Tab: 编辑 Prompt -->
+                <div class="ske-body" id="skeTabEdit">
+                    <p class="ske-hint">在此编辑注入到系统指令中的内容。留空并保存，将恢复为该 Skill 的默认 Prompt。</p>
+                    <textarea id="skillEditorContent" class="ske-textarea"
+                        placeholder="在这里编辑 Skill Prompt…" oninput="skeUpdateCount()"></textarea>
+                    <div class="ske-count"><span id="skeCharCount">0</span> 字符</div>
+                </div>
+                <!-- Tab: AI 生成 -->
+                <div class="ske-body" id="skeTabAi" style="display:none;">
+                    <p class="ske-hint">用自然语言描述你的需求，AI 自动生成 Prompt 预览，确认后一键应用到编辑器。</p>
+                    <textarea id="skeAiDesc" class="ske-textarea" rows="3"
+                        style="min-height:80px;resize:vertical;"
+                        placeholder="例：我希望这个 Skill 更严格地区分已知事实和推测，遇到不确定的内容要明确标注…"></textarea>
+                    <button class="ske-ai-btn" onclick="skeGeneratePrompt()">✨ 生成预览</button>
+                    <div id="skeAiPreview" style="display:none;" class="ske-ai-preview">
+                        <div class="ske-ai-preview-title">
+                            <span>生成结果预览</span>
+                            <button class="ske-apply-btn" onclick="skeApplyGenerated()">↓ 应用到编辑器</button>
+                        </div>
+                        <pre id="skeAiPreviewContent" class="ske-ai-pre"></pre>
+                    </div>
+                </div>
+                <!-- Tab: 从对话提取 -->
+                <div class="ske-body" id="skeTabExtract" style="display:none;">
+                    <p class="ske-hint">选择一段高质量对话，AI 从中提取沟通风格并生成 Prompt，然后应用到当前 Skill。</p>
+                    <div id="skeSessionList" class="ske-session-list">
+                        <div style="color:#6c7a91;font-size:12px;padding:6px;">正在加载对话列表…</div>
+                    </div>
+                    <div id="skeExtractZone" class="ske-extract-zone" style="display:none;">
+                        <button class="ske-extract-btn" style="width:100%;" onclick="skeExtractFromSession()">
+                            ⚡ 从选中的对话提取风格 → 应用到编辑器
+                        </button>
+                        <div id="skeExtractMsg" style="font-size:11px;color:#6c7a91;margin-top:6px;"></div>
+                    </div>
+                </div>
+                <!-- Footer -->
+                <div class="ske-footer">
+                    <button class="ske-btn-ghost" onclick="resetSkillPromptEdit()">🔄 恢复默认</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="ske-btn-secondary" onclick="closeSkillEditor()">取消</button>
+                        <button class="ske-btn-primary" onclick="saveSkillPromptEdit()">💾 保存</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2380,6 +2528,9 @@
                 spRenderCards();
             }
         };
+
+        window.getSpSkills = function() { return _spSkills; };
+        window.spRenderCards = spRenderCards;
 
     })();
     </script>

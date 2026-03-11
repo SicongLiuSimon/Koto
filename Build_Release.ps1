@@ -9,9 +9,10 @@
       3. 将便携包压缩为带版本号的 zip（dist/Koto_v*.zip）
 
     使用方法：
-      .\Build_Release.ps1                    # 正常构建
-      .\Build_Release.ps1 -SkipBuild         # 跳过 PyInstaller，直接重打包
-      .\Build_Release.ps1 -Version "1.2.0"   # 指定版本号（默认读 config/user_settings.json）
+      .\Build_Release.ps1                    # 正常构建（含 --clean，完整重建）
+      .\Build_Release.ps1 -Incremental       # 增量构建：跳过 --clean，只重编译变更的 .py
+      .\Build_Release.ps1 -SkipBuild         # 跳过 PyInstaller，直接重打包（仅资源/配置变动时用）
+      .\Build_Release.ps1 -Version "1.2.0"   # 指定版本号（默认读根目录 VERSION 文件）
 
     常见问题：
       - ModuleNotFoundError  → 在 koto.spec 的 hiddenimports 里补模块名
@@ -21,6 +22,7 @@
 
 param(
     [switch]$SkipBuild,
+    [switch]$Incremental,   # 增量构建：不加 --clean，保留上次缓存（只改了 .py 时快很多）
     [string]$Version = ""
 )
 
@@ -53,14 +55,11 @@ if (-not (Test-Path $PYTHON)) {
 if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR | Out-Null }
 Write-OK "虚拟环境 OK"
 
-# ─── 版本号 ──────────────────────────────────
+# ─── 版本号（单一来源：根目录 VERSION 文件）──────────
 if ([string]::IsNullOrWhiteSpace($Version)) {
-    $settingsFile = Join-Path $REPO_ROOT "config\user_settings.json"
-    if (Test-Path $settingsFile) {
-        try {
-            $settings = Get-Content $settingsFile -Raw | ConvertFrom-Json
-            if ($settings.version) { $Version = $settings.version }
-        } catch { }
+    $versionFile = Join-Path $REPO_ROOT "VERSION"
+    if (Test-Path $versionFile) {
+        $Version = (Get-Content $versionFile -Raw).Trim()
     }
 }
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = Get-Date -Format "yyyy.MM.dd" }
@@ -68,9 +67,14 @@ Write-OK "版本号: $Version"
 
 # ─── 步骤 1：PyInstaller 构建 ─────────────────
 if (-not $SkipBuild) {
-    Write-Step "步骤 1/3  PyInstaller 构建（输出日志至 logs\build_latest.log）"
     $buildLog = Join-Path $LOG_DIR "build_latest.log"
-    & $VENV_PIP $SPEC_FILE --clean -y *> $buildLog
+    if ($Incremental) {
+        Write-Step "步骤 1/3  PyInstaller 增量构建（无 --clean，输出日志至 logs\build_latest.log）"
+        & $VENV_PIP $SPEC_FILE -y *> $buildLog
+    } else {
+        Write-Step "步骤 1/3  PyInstaller 完整构建（--clean，输出日志至 logs\build_latest.log）"
+        & $VENV_PIP $SPEC_FILE --clean -y *> $buildLog
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "PyInstaller 失败，查看详细日志：$buildLog"
         Write-Host "(最后 30 行)" -ForegroundColor Yellow

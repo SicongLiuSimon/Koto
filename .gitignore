@@ -9,6 +9,8 @@ __pycache__/
 dist/
 build/
 build/*.spec
+# 例外：Inno Setup 中文语言文件需要随源码一起提交（CI 构建安装包依赖它）
+!build/ChineseSimplified.isl
 
 # Virtual environment
 .venv/
@@ -24,6 +26,18 @@ config/token_usage.json
 config/skill_bindings.json
 config/model_setup_done.json
 config/koto_checkpoints.sqlite*
+config/local_model_prompted.json
+
+# Runtime / personal data (generated at runtime, not for repo)
+config/proactive_queue.json
+config/shadow_observations.json
+config/notifications.db
+config/proactive_dialogue.db
+config/proactive_triggers.db
+config/insights.db
+config/context_awareness.db
+config/knowledge_graph.db
+config/concepts.db
 
 # IDE
 .vscode/

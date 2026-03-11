@@ -1,0 +1,234 @@
+name: Build & Release Koto
+
+# ─── 触发条件 ───────────────────────────────────────────────────────────────
+# 1. 推送版本标签（如 v1.2.0）→ 自动构建 + 创建 GitHub Release
+# 2. 手动触发（workflow_dispatch） → 只构建 + 上传 artifact，不发布 Release
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 1.2.0）。留空则读 VERSION 文件'
+        required: false
+        default: ''
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # 创建 GitHub Release 需要写权限
+
+    steps:
+      # ── 1. 检出代码 ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 完整历史，供 softprops 生成 changelog
+
+      # ── 2. 配置 Python ───────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 3. 确定版本号（单一来源：VERSION 文件 → tag → 手动输入）────────
+      - name: Determine version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "push") {
+            # tag push：去掉前缀 v（v1.2.0 → 1.2.0）
+            $v = "${{ github.ref_name }}" -replace '^v', ''
+          } elseif ("${{ github.event.inputs.version }}" -ne "") {
+            $v = "${{ github.event.inputs.version }}"
+          } else {
+            # 读根目录 VERSION 文件
+            $v = (Get-Content VERSION -Raw -ErrorAction SilentlyContinue).Trim()
+            if (-not $v) { $v = Get-Date -Format "yyyy.MM.dd" }
+          }
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Building Koto version: $v"
+
+      # ── 4. 缓存 pip ──────────────────────────────────────────────────────
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('config/requirements.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      # ── 5. 安装核心依赖 ──────────────────────────────────────────────────
+      #    PyAudio 需要 PortAudio，Windows runner 上用预编译 wheel 安装。
+      #    可选包（vosk、edge-tts 等）安装失败时跳过；
+      #    rth_voice_fallback.py 在运行时会优雅降级。
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\pip install --upgrade pip wheel
+
+          # PyInstaller
+          .\.venv\Scripts\pip install pyinstaller
+
+          # 核心依赖（去掉语音可选包，单独处理）
+          $reqContent = Get-Content config\requirements.txt
+          $coreReqs = $reqContent | Where-Object {
+            $_ -notmatch '^\s*#' -and
+            $_ -notmatch 'PyAudio' -and
+            $_ -notmatch 'SpeechRecognition' -and
+            $_ -notmatch 'vosk' -and
+            $_ -notmatch 'edge.tts' -and
+            $_ -notmatch 'sounddevice' -and
+            $_ -notmatch 'faster.whisper' -and
+            $_ -notmatch 'openai.whisper' -and
+            $_ -notmatch 'gunicorn'   # Linux-only
+          }
+          $coreReqs | Set-Content .venv\core_reqs.txt
+          .\.venv\Scripts\pip install -r .venv\core_reqs.txt
+
+          # PyAudio：Windows runner 支持预编译 wheel，失败时跳过
+          .\.venv\Scripts\pip install PyAudio ; if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::PyAudio 安装失败，语音功能将在运行时降级（rth_voice_fallback.py）"
+          }
+
+          Write-Host "依赖安装完成"
+
+      # ── 6. PyInstaller 构建 ──────────────────────────────────────────────
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path logs | Out-Null
+          .\.venv\Scripts\pyinstaller.exe koto.spec --clean -y *> logs\build_latest.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::PyInstaller 构建失败，最后 60 行日志："
+            Get-Content logs\build_latest.log -Tail 60
+            exit 1
+          }
+          $exeMB = [math]::Round((Get-Item dist\Koto\Koto.exe).Length / 1MB, 1)
+          Write-Host "PyInstaller 构建成功 -> dist\Koto\Koto.exe ($exeMB MB)"
+
+      # ── 7. 上传 build log（永远上传，方便排查失败）───────────────────────
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: logs\build_latest.log
+          retention-days: 7
+
+      # ── 8. 组装便携包 ────────────────────────────────────────────────────
+      - name: Assemble portable bundle
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe src\deploy_portable.py --allow-missing-installer
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::deploy_portable.py 失败"
+            exit 1
+          }
+          Write-Host "便携包已生成 -> dist\Koto_Portable\"
+
+      # ── 9. 构建 Windows 安装程序（Inno Setup）──────────────────────────
+      - name: Install Inno Setup (if missing)
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Inno Setup 未找到，通过 winget 安装..."
+            winget install --id JRSoftware.InnoSetup --silent --accept-source-agreements --accept-package-agreements
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "winget 安装失败，尝试 Chocolatey..."
+              choco install innosetup -y --no-progress
+            }
+          } else {
+            Write-Host "Inno Setup 已存在: $iscc"
+          }
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          # 检测 Inno Setup 安装路径（system-level 优先，user-level 兼容）
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            # Chocolatey 安装路径
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            Write-Host "::error::未找到 Inno Setup 6，跳过安装包构建"
+            exit 1
+          }
+          & $iscc /DAppVersion=$env:VERSION koto_installer.iss
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Inno Setup 构建失败"
+            exit 1
+          }
+          $setupName = "Koto_v$($env:VERSION)_Setup.exe"
+          $setupPath = "dist\$setupName"
+          "SETUP_NAME=$setupName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SETUP_PATH=$setupPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $sizeMB = [math]::Round((Get-Item $setupPath).Length / 1MB, 1)
+          Write-Host "安装包生成: $setupName ($sizeMB MB)"
+
+      # ── 10. 压缩便携版为 zip ─────────────────────────────────────────────
+      - name: Compress to zip
+        shell: pwsh
+        run: |
+          $zipName = "Koto_v$($env:VERSION)_Windows.zip"
+          $zipPath = "dist\$zipName"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path "dist\Koto_Portable\*" -DestinationPath $zipPath -CompressionLevel Optimal
+          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ZIP_PATH=$zipPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
+          Write-Host "便携包压缩: $zipName ($sizeMB MB)"
+
+      # ── 11. 上传便携 zip 为 artifact（保留 30 天）────────────────────────
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Koto_v${{ env.VERSION }}_Portable
+          path: ${{ env.ZIP_PATH }}
+          retention-days: 30
+
+      # ── 12. 上传安装包为 artifact（保留 30 天）───────────────────────────
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Koto_v${{ env.VERSION }}_Setup
+          path: ${{ env.SETUP_PATH }}
+          retention-days: 30
+
+      # ── 13. 创建 GitHub Release（仅 tag push 触发）───────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Koto v${{ env.VERSION }}
+          body: |
+            ## Koto v${{ env.VERSION }} — Windows
+
+            ### 下载
+            | 文件 | 推荐场景 |
+            |------|---------|
+            | 🔧 `Koto_v${{ env.VERSION }}_Setup.exe` | **普通用户推荐** — 双击安装，自动创建桌面 / 开始菜单快捷方式，可从"添加或删除程序"卸载 |
+            | 📦 `Koto_v${{ env.VERSION }}_Windows.zip` | 进阶用户 — 解压即用，不写入注册表，适合 U 盘 / 临时使用 |
+
+            ### 安装包使用方法
+            1. 双击 `Koto_v${{ env.VERSION }}_Setup.exe`
+            2. Next → 选择安装目录（默认 `%LocalAppData%\Koto`）→ Install → Finish
+            3. 从**桌面**或**开始菜单**启动 Koto
+            4. **首次启动**按向导填写 Gemini API Key（[点此获取](https://aistudio.google.com/apikey)）
+
+            ### 系统要求
+            - Windows 10 / 11（64-bit）
+            - 无需安装 Python 或任何运行时
+
+            > **可选**：安装完成后双击 `Install_Local_Model.bat` 可安装本地 AI 模型（Ollama）以支持离线使用。
+          files: |
+            ${{ env.SETUP_PATH }}
+            ${{ env.ZIP_PATH }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
