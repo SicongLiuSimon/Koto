@@ -216,7 +216,7 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "speed": 1,  "quality": 10, "reasoning": 10,
         "context": 10, "multimodal": False, "function_calling": False,
         "grounding": True, "image_gen": False,
-        "interactions_only": True,   # 必须走 Interactions API，不支持 generate_content
+        "interactions_only": True,
         "display": "Deep Research Pro 🔬",
         "strengths": ["深度研究", "学术分析", "综合报告"],
     },
@@ -694,17 +694,22 @@ class ModelManager:
     def _static_default_map() -> Dict[str, str]:
         """API 不可用时的静态兜底映射（与原 MODEL_MAP 保持一致）。"""
         defaults = {
-            "CHAT":       "gemini-3-flash-preview",
-            "CODER":      "gemini-3.1-pro-preview",
-            "WEB_SEARCH": "gemini-2.5-flash",
-            "VISION":     "gemini-3-flash-preview",
-            "RESEARCH":   "deep-research-pro-preview-12-2025",
-            "FILE_GEN":   "gemini-3-flash-preview",
-            "PAINTER":    "gemini-3.1-flash-image-preview",
-            "AGENT":      "gemini-3-flash-preview",
-            "SYSTEM":     "local-executor",
-            "FILE_OP":    "local-executor",
-            "COMPLEX":    "gemini-3.1-pro-preview",
+            "CHAT":               "gemini-3-flash-preview",
+            "CODER":              "gemini-3-pro-preview",
+            "WEB_SEARCH":         "gemini-2.5-flash",
+            "VISION":             "gemini-3-flash-preview",
+            "RESEARCH":           "gemini-2.5-pro-preview",
+            "FILE_GEN":           "gemini-3-flash-preview",
+            "FILE_GEN_COMPLEX":   "gemini-3-pro-preview",
+            "DOC_ANNOTATE":       "gemini-3-flash-preview",
+            "DOC_ANNOTATE_COMPLEX":"gemini-3-pro-preview",
+            "CODER_COMPLEX":      "gemini-3-pro-preview",
+            "MULTI_STEP":         "gemini-3-pro-preview",
+            "PAINTER":            "gemini-3.1-flash-image-preview",
+            "AGENT":              "gemini-3-flash-preview",
+            "SYSTEM":             "local-executor",
+            "FILE_OP":            "local-executor",
+            "COMPLEX":            "gemini-3-pro-preview",
         }
         return defaults
 

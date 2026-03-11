@@ -793,46 +793,25 @@ class _TrackedModels:
         # 兼容旧式位置调用
         if model is None and args:
             model, args = args[0], args[1:]
-
-        model_str = str(model or "")
+        # 安全守卫：Interactions-only 模型不能调用 generate_content，自动降级
+        if model in _INTERACTIONS_ONLY_MODELS:
+            import sys as _sys
+            _caller = getattr(_sys, '_getframe', lambda n: None)(1)
+            _loc = f"{getattr(_caller, 'f_code', None) and _caller.f_code.co_filename}:{getattr(_caller, 'f_lineno', '?')}" if _caller else "?"
+            print(f"[TrackedModels] ⚠️ model '{model}' 仅支持 Interactions API，自动降级为 '{_INTERACTIONS_FALLBACK_MODEL}' (caller: {_loc})")
+            model = _INTERACTIONS_FALLBACK_MODEL
+        # 合并剩余位置参数到 kwargs（新 SDK 不接受位置参数，args 应始终为空）
         real = object.__getattribute__(self, '_real')
-
-        # ① 前置路由：interactions-only 模型直接走 Interactions API
-        if _is_interactions_only(model_str):
-            _logger_tracked.debug(
-                "[TrackedModels] %s → Interactions API (pre-check)", model_str
-            )
-            try:
-                return self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
-            except Exception as _ia_err:
-                _logger_tracked.warning(
-                    "[TrackedModels] Interactions API failed for %s: %s — retrying generate_content as last resort",
-                    model_str, _ia_err,
-                )
-                # 强行尝试 generate_content（极少数情况模型实际支持）
-
-        # ② 标准调用 + 异常兜底
         try:
             response = real.generate_content(model=model, **kwargs)
-        except Exception as _gc_err:
-            _err_str = str(_gc_err)
-            if "Interactions API" in _err_str or (
-                "only supports" in _err_str and "Interactions" in _err_str
-            ):
-                _logger_tracked.warning(
-                    "[TrackedModels] 400 Interactions-API error for model=%s — retrying via Interactions API",
-                    model_str,
-                )
-                try:
-                    return self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
-                except Exception as _ia_retry_err:
-                    _logger_tracked.error(
-                        "[TrackedModels] Interactions API retry also failed for %s: %s",
-                        model_str, _ia_retry_err,
-                    )
-            raise  # 非 Interactions 错误，或 retry 也失败后，重新抛出原始异常
-
-        # ③ Token 记录
+        except Exception as _e:
+            if "Interactions API" in str(_e) and model != _INTERACTIONS_FALLBACK_MODEL:
+                print(f"[TrackedModels] 🔄 运行时发现 '{model}' 为 Interactions-only，降级到 '{_INTERACTIONS_FALLBACK_MODEL}'")
+                _INTERACTIONS_ONLY_MODELS.add(model)
+                model = _INTERACTIONS_FALLBACK_MODEL
+                response = real.generate_content(model=model, **kwargs)
+            else:
+                raise
         if _TOKEN_TRACKER_ENABLED:
             try:
                 usage = getattr(response, "usage_metadata", None)
@@ -857,58 +836,36 @@ class _TrackedModels:
         """
         if model is None and args:
             model, args = args[0], args[1:]
-
-        model_str = str(model or "")
+        # 安全守卫：Interactions-only 模型不支持流式 generate_content，自动降级
+        if model in _INTERACTIONS_ONLY_MODELS:
+            print(f"[TrackedModels] ⚠️ generate_content_stream: model '{model}' 仅支持 Interactions API，自动降级为 '{_INTERACTIONS_FALLBACK_MODEL}'")
+            model = _INTERACTIONS_FALLBACK_MODEL
         real = object.__getattribute__(self, '_real')
-
-        # ① 前置路由：interactions-only 模型 → 同步调用后单 chunk 输出
-        if _is_interactions_only(model_str):
-            _logger_tracked.debug(
-                "[TrackedModels] %s → Interactions API stream-adapter (pre-check)", model_str
-            )
-            try:
-                fake_resp = self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
-                yield fake_resp   # 调用方 for chunk in stream: chunk.text 仍能工作
-                return
-            except Exception as _ia_err:
-                _logger_tracked.warning(
-                    "[TrackedModels] Interactions API stream-adapter failed for %s: %s — raising",
-                    model_str, _ia_err,
-                )
-                raise
-
-        # ② 标准流式调用 + 异常兜底（首个 chunk 前触发）
+        # 运行时自愈：若 API 返回"Interactions API"错误，动态标记该模型并降级重试
         try:
             stream = real.generate_content_stream(model=model, **kwargs)
-            first_chunk = True
-            for chunk in stream:
-                yield chunk
-                if first_chunk:
-                    first_chunk = False
-                if _TOKEN_TRACKER_ENABLED:
-                    try:
-                        usage = getattr(chunk, 'usage_metadata', None)
-                        if usage and (getattr(usage, 'prompt_token_count', 0) or 0) > 0:
-                            _record_token_usage(
-                                model=model_str,
-                                prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
-                                completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
-                            )
-                    except Exception:
-                        pass
-        except Exception as _stream_err:
-            _err_str = str(_stream_err)
-            if "Interactions API" in _err_str or (
-                "only supports" in _err_str and "Interactions" in _err_str
-            ):
-                _logger_tracked.warning(
-                    "[TrackedModels] 400 Interactions-API error in stream for model=%s — retrying via Interactions API",
-                    model_str,
-                )
-                fake_resp = self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
-                yield fake_resp
-                return
-            raise
+        except Exception as _e:
+            if "Interactions API" in str(_e) and model != _INTERACTIONS_FALLBACK_MODEL:
+                print(f"[TrackedModels] 🔄 运行时发现 '{model}' 为 Interactions-only，降级到 '{_INTERACTIONS_FALLBACK_MODEL}'")
+                _INTERACTIONS_ONLY_MODELS.add(model)
+                stream = real.generate_content_stream(model=_INTERACTIONS_FALLBACK_MODEL, **kwargs)
+                model = _INTERACTIONS_FALLBACK_MODEL
+            else:
+                raise
+        _model_str = str(model or 'unknown')
+        for chunk in stream:
+            yield chunk
+            if _TOKEN_TRACKER_ENABLED:
+                try:
+                    usage = getattr(chunk, 'usage_metadata', None)
+                    if usage and (getattr(usage, 'prompt_token_count', 0) or 0) > 0:
+                        _record_token_usage(
+                            model=_model_str,
+                            prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
+                            completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
+                        )
+                except Exception:
+                    pass
 
     def generate_images(self, model=None, *args, **kwargs):
         """拦截 generate_images（Imagen），按图片数量记录合成 token 用量"""
@@ -2007,20 +1964,28 @@ except ImportError:
 
 # 静态默认值（API 不可用时的兜底，也是启动时的初始值）
 MODEL_MAP = {
-    "CHAT":        "gemini-3-flash-preview",
-    "CODER":       "gemini-3.1-pro-preview",   # generate_content 兼容，最强直调模型
-    "WEB_SEARCH":  "gemini-2.5-flash",
-    "VISION":      "gemini-3-flash-preview",
-    "RESEARCH":    "deep-research-pro-preview-12-2025",
-    "FILE_GEN":    "gemini-3-flash-preview",
-    "PAINTER":     "gemini-3.1-flash-image-preview",
-    "SYSTEM":      "local-executor",
-    "FILE_OP":     "local-executor",
-    "AGENT":       "gemini-3-flash-preview",
-    "FILE_SEARCH": "gemini-3-flash-preview",  # 文件搜索/整理始终 Flash
-    "DOC_ANNOTATE":"gemini-3.1-pro-preview",  # 强模型标注，complex 由 get_model_for_task 确认
-    "COMPLEX":     "gemini-3.1-pro-preview",  # 复杂度升级兜底：3.1 Pro
+    "CHAT":               "gemini-3-flash-preview",
+    "CODER":              "gemini-3-pro-preview",
+    "WEB_SEARCH":         "gemini-2.5-flash",
+    "VISION":             "gemini-3-flash-preview",
+    "RESEARCH":           "gemini-2.5-flash",
+    "FILE_GEN":           "gemini-3-flash-preview",
+    "FILE_GEN_COMPLEX":   "gemini-3-pro-preview",    # FILE_GEN 复杂度变体
+    "DOC_ANNOTATE":       "gemini-3-flash-preview",
+    "DOC_ANNOTATE_COMPLEX":"gemini-3-pro-preview",   # DOC_ANNOTATE 复杂度变体
+    "CODER_COMPLEX":      "gemini-3-pro-preview",
+    "MULTI_STEP":         "gemini-3-pro-preview",
+    "PAINTER":            "gemini-3.1-flash-image-preview",
+    "SYSTEM":             "local-executor",
+    "FILE_OP":            "local-executor",
+    "AGENT":              "gemini-3-flash-preview",
+    "FILE_SEARCH":        "gemini-3-flash-preview",  # 文件搜索/整理始终 Flash
+    "COMPLEX":            "gemini-3-pro-preview",    # 通用复杂度升级兜底
 }
+
+# 用户手动覆盖的任务→模型映射（优先级高于动态发现，重启后清除）
+# 通过 /api/v1/models/override 端点写入
+_MANUAL_OVERRIDES: dict = {}
 
 # ─── Interactions-API-only 模型（动态更新，静态默认兜底）──────────────────────
 # 这些模型不支持 client.models.generate_content()，必须走 Interactions API
@@ -3060,7 +3025,7 @@ class WebSearcher:
             return "\n".join(dedup).strip()
 
         # 深度研究专用：Interactions API（deep-research-pro-preview-*）
-        preferred_model = MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025")
+        preferred_model = MODEL_MAP.get("RESEARCH", "gemini-2.5-flash")
         if preferred_model.startswith("deep-research-pro-preview"):
             try:
                 research_client = create_research_client()
@@ -3100,7 +3065,7 @@ class WebSearcher:
 
         _app_logger.debug(f"[PPT-RESEARCH] 🔄 切换到备用模型进行研究...")
         research_models = [
-            MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025"),
+            MODEL_MAP.get("RESEARCH", "gemini-2.5-flash"),
             "gemini-3-pro-preview",
             "gemini-2.5-flash",
         ]
@@ -4642,6 +4607,9 @@ class TaskOrchestrator:
 
             # 调用模型生成内容
             model_id = SmartDispatcher.get_model_for_task("FILE_GEN", complexity="complex" if is_complex else "normal")
+            # Interactions-only 模型不支持 generate_content；降级到兼容模型
+            if model_id in _INTERACTIONS_ONLY_MODELS:
+                model_id = _INTERACTIONS_FALLBACK_MODEL
             
             _report(f"正在撰写内容...", f"模型: {model_id}")
 
@@ -5230,7 +5198,7 @@ class TaskOrchestrator:
                     "success": True,
                     "output": f"深度研究完成，获取 {len(research_text)} 字专业分析",
                     "content": research_text,
-                    "model_id": MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025")
+                    "model_id": MODEL_MAP.get("RESEARCH", "gemini-2.5-flash")
                 }
             else:
                 _report("⚠️ 研究产出为空", "回退到基础搜索结果")
@@ -5425,7 +5393,7 @@ class TaskOrchestrator:
                 "请评估输出是否满足了用户需求。只输出一个 0~30 的整数（30为完全满足）。"
             )
             resp = await asyncio.to_thread(lambda: client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash",
                 contents=check_prompt,
                 config=types.GenerateContentConfig(
                     max_output_tokens=8,
@@ -5606,40 +5574,57 @@ class Utils:
 
     @staticmethod
     def quick_self_check(task_type: str, user_input: str, output_text: str) -> dict:
-        """使用快速模型进行自检，返回 {'pass': bool, 'fix_prompt': str}。"""
+        """
+        使用快速模型进行自适应自检。
+        返回: {'pass': bool, 'action': 'pass'|'continue'|'fix', 'fix_prompt': str}
+          - pass:     输出完整且质量达标
+          - continue: 输出被截断/未完成，内容本身无误但需要续写
+          - fix:      输出有明显质量问题，需要重写修正
+        """
         try:
+            task_criteria = {
+                "CHAT":     "对话是否直接回答了用户问题，语义是否完整自然",
+                "CODER":    "代码是否完整可运行，函数/类/括号是否全部闭合",
+                "RESEARCH": "分析是否全面深入，是否有明显未展开的论点或结论",
+                "FILE_GEN": "文档内容是否完整，结构是否完善",
+            }.get(task_type, "输出是否完整地回应了用户需求")
+            # 只取末尾500字做完整性判断，避免无谓的token消耗
+            tail = output_text[-500:] if len(output_text) > 500 else output_text
             check_prompt = (
-                "你是质量检查器。判断输出是否满足用户需求。\n"
-                "只输出以下格式之一：\n"
-                "PASS\n"
-                "或\n"
-                "FAIL\nFIX_PROMPT: <用于修正的提示词>\n\n"
+                "你是输出质量检查器。判断模型输出质量，只输出以下三种格式之一（不要输出其他内容）：\n\n"
+                "PASS          （输出完整且满足需求）\n"
+                "CONTINUE      （输出中途被截断，内容本身无误但不完整）\n"
+                "FIX\n"
+                "FIX_PROMPT: <具体修正指令>  （输出有明显质量问题）\n\n"
                 f"任务类型: {task_type}\n"
-                f"用户需求: {user_input}\n"
-                f"模型输出:\n{output_text}\n"
+                f"检查重点: {task_criteria}\n"
+                f"用户需求: {user_input[:300]}\n"
+                f"输出末尾内容:\n{tail}\n"
             )
             response = client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash",
                 contents=check_prompt,
                 config=types.GenerateContentConfig(
-                    max_output_tokens=300,
+                    max_output_tokens=200,
                     temperature=0.1,
                 ),
             )
             text = (response.text or "").strip()
             if text.startswith("PASS"):
-                return {"pass": True, "fix_prompt": ""}
-            if text.startswith("FAIL"):
+                return {"pass": True, "action": "pass", "fix_prompt": ""}
+            if text.startswith("CONTINUE"):
+                return {"pass": False, "action": "continue", "fix_prompt": ""}
+            if text.startswith("FIX"):
                 fix = ""
                 for line in text.splitlines():
                     if line.startswith("FIX_PROMPT:"):
                         fix = line.replace("FIX_PROMPT:", "").strip()
                         break
-                return {"pass": False, "fix_prompt": fix}
-            return {"pass": True, "fix_prompt": ""}
+                return {"pass": False, "action": "fix", "fix_prompt": fix}
+            return {"pass": True, "action": "pass", "fix_prompt": ""}
         except Exception as e:
-            _app_logger.debug(f"[SELF_CHECK] Failed: {e}")
-            return {"pass": True, "fix_prompt": ""}
+            print(f"[SELF_CHECK] Failed: {e}")
+            return {"pass": True, "action": "pass", "fix_prompt": ""}
 
     @staticmethod
     def detect_required_packages(text: str) -> list:
@@ -6140,7 +6125,7 @@ def get_memory_manager():
                 prompt: str, temperature: float = 0.2, max_tokens: int = 300
             ) -> str:
                 resp = client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
+                    model="gemini-2.5-flash",
                     contents=prompt,
                     config=types.GenerateContentConfig(
                         temperature=temperature,
@@ -6203,7 +6188,7 @@ def _start_memory_extraction(
         """Synchronous LLM call for reflection / summarization."""
         try:
             resp = client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.1,
@@ -6813,10 +6798,17 @@ class KotoBrain:
                         _app_logger.debug(f"[RAG]正在检索知识库: {original_input[:50]}...")
                         rag_results = kb_inst.search(original_input, top_k=3)
                         
+                        # 过滤低相关度结果，并对每个片段文本设置长度上限，
+                        # 避免原始大文本块把 prompt 撑到数千 token
+                        rag_results = [
+                            r for r in rag_results
+                            if r.get("similarity", 1.0) >= 0.35
+                        ]
                         if rag_results:
                             _app_logger.debug(f"[RAG] 检索到 {len(rag_results)} 个相关片段")
                             context_str = "\n".join([
-                                f"--- 来源: {r['file_name']} (相似度: {r['similarity']:.2f}) ---\n{r['text']}"
+                                f"--- 来源: {r['file_name']} (相似度: {r['similarity']:.2f}) ---\n"
+                                + (r['text'][:600] + "…" if len(r.get('text','')) > 600 else r.get('text',''))
                                 for r in rag_results
                             ])
                             
@@ -6883,25 +6875,19 @@ class KotoBrain:
                     )
                     accumulated_text = response.text if response.text else ""
                 elif model_id in _INTERACTIONS_ONLY_MODELS:
-                    # 图片文件 + gemini-3-preview 模型：走 Interactions API
-                    try:
-                        accumulated_text = _call_interactions_api_sync(
-                            model_id,
-                            original_input,
-                            sys_instruction=_brain_sys_instruction,
-                        )
-                        if not accumulated_text:
-                            raise ValueError("Interactions API 返回空响应")
-                    except Exception as _ia_err:
-                        _app_logger.info(f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+                    # 图片文件 + gemini-3-preview 模型
+                    # Interactions API 是纯文本接口，不支持二进制附件（图片字节会被丢弃）
+                    # → 直接降级到 gemini-2.5-flash，用 generate_content() 携带图片字节
+                    if model_id != _INTERACTIONS_FALLBACK_MODEL:
+                        print(f"[brain.chat] 图片文件 + Interactions-only 模型 ({model_id}): 降级到 {_INTERACTIONS_FALLBACK_MODEL} 以保留图片数据")
                         model_id = _INTERACTIONS_FALLBACK_MODEL
                         result["model"] = model_id
-                        _fb_resp = client.models.generate_content(
-                            model=model_id,
-                            contents=[original_input, doc_part],
-                            config=types.GenerateContentConfig(system_instruction=_brain_sys_instruction)
-                        )
-                        accumulated_text = _fb_resp.text if _fb_resp.text else ""
+                    response = client.models.generate_content(
+                        model=model_id,
+                        contents=[original_input, doc_part],
+                        config=types.GenerateContentConfig(system_instruction=_brain_sys_instruction)
+                    )
+                    accumulated_text = response.text if response.text else ""
                 else:
                     # 图片文件 + 普通 generate_content 模型
                     response = client.models.generate_content(
@@ -6997,11 +6983,13 @@ class KotoBrain:
 
         except Exception as e:
             err_str = str(e)
-            # 自动降级：如果模型返回"只支持 Interactions API"错误，用 2.0-flash 重试一次
-            if "Interactions API" in err_str and model_id not in (_INTERACTIONS_ONLY_MODELS | {_INTERACTIONS_FALLBACK_MODEL}):
-                _app_logger.info(f"[brain.chat] Interactions API 错误，自动降级 {model_id} → {_INTERACTIONS_FALLBACK_MODEL}")
+            # 自动降级：如果模型返回"只支持 Interactions API"错误，自动选择可用模型重试
+            if "Interactions API" in err_str:
+                # 若当前是 fallback 本身仍报错，尝试 gemini-1.5-flash 作终极兜底
+                _retry_model = "gemini-1.5-flash" if model_id in (_INTERACTIONS_ONLY_MODELS | {_INTERACTIONS_FALLBACK_MODEL}) else _INTERACTIONS_FALLBACK_MODEL
+                print(f"[brain.chat] Interactions API 错误 (model={model_id})，自动降级 → {_retry_model}")
                 try:
-                    model_id = _INTERACTIONS_FALLBACK_MODEL
+                    model_id = _retry_model
                     _fb = client.models.generate_content(
                         model=model_id,
                         contents=(
@@ -7363,10 +7351,26 @@ def chat_stream():
         )
         history = _cw_out["history"]
         _cw_paged_context = _cw_out.get("paged_in_context", "")
-        if _cw_paged_context:
-            system_instruction += f"\n\n{_cw_paged_context}"
     except Exception as _cw_err:
         _app_logger.warning(f"[CWM] ⚠️ 上下文管理器异常: {_cw_err}")
+
+    # 🧠 MemoryRouter — UserProfile + 长期记忆 + 分页会话上下文 一体注入
+    try:
+        from app.core.memory.memory_router import MemoryRouter as _MR
+        _mem_block = _MR.read(
+            query=user_input,
+            session_name=session_name,
+            get_memory_fn=get_memory_manager,
+            extra_context=_cw_paged_context,
+            task_type=locked_task or "CHAT",
+        )
+        if _mem_block:
+            system_instruction += _mem_block
+    except Exception as _mr_err:
+        print(f"[MemoryRouter] ⚠️ 记忆注入失败: {_mr_err}")
+        # 降级：至少保留分页会话上下文
+        if _cw_paged_context:
+            system_instruction += f"\n\n{_cw_paged_context}"
 
     # 🕵️‍♀️ 检测是否有最近上传的文件 (5分钟内)
     has_recent_upload = False
@@ -7584,28 +7588,65 @@ def chat_stream():
                         model_id=_ma_model,
                         max_revisions=1,
                     )
-                    _agent_labels = {
-                        "researcher": "📚 研究专员",
-                        "writer":     "✍️ 写作专员",
-                        "critic":     "🔍 审核专员",
-                        "revise":     "🔧 修订专员",
-                        "finalize":   "✅ 整合完成",
+                    # 执行顺序（与 preset_content_pipeline 一致）
+                    _agent_order = ["researcher", "writer", "critic", "revise"]
+                    _agent_action_labels = {
+                        "researcher": "📚 研究专员 正在分析资料…",
+                        "writer":     "✍️ 写作专员 正在撰写初稿…",
+                        "critic":     "🔍 审核专员 正在检查质量…",
+                        "revise":     "🔧 修订专员 正在优化内容…",
                     }
+                    _agent_done_labels = {
+                        "researcher": "📚 研究分析完成",
+                        "writer":     "✍️ 初稿撰写完成",
+                        "critic":     "🔍 内容审核完成",
+                        "revise":     "🔧 修订优化完成",
+                    }
+
+                    # 显示执行计划
+                    _plan_lines = ["🤖 多Agent执行计划\n"]
+                    _plan_roles = [("📚 研究分析", "researcher"), ("✍️ 撰写初稿", "writer"),
+                                   ("🔍 内容审核", "critic"), ("🔧 修订优化", "revise")]
+                    for _pi, (_pl, _) in enumerate(_plan_roles):
+                        _prefix = "└─" if _pi == len(_plan_roles) - 1 else "├─"
+                        _plan_lines.append(f"  {_prefix} {_pi+1}. {_pl}")
+                    yield f"data: {json.dumps({'type': 'status', 'message': chr(10).join(_plan_lines)})}\n\n"
+
+                    # 发出第一个步骤（研究专员启动）
+                    _step_counter = 1
+                    yield f"data: {json.dumps({'type': 'agent_step', 'step_type': 'ACTION', 'step_number': _step_counter, 'label': _agent_action_labels['researcher'], 'tool_name': 'researcher'})}\n\n"
+
                     final_output = ""
+                    _seen_agents: set = set()
+
                     for event in orch.stream(user_input=user_input, session_id=session_name):
                         agent_name = event.get("agent", "unknown")
                         content = event.get("content", "")
                         done = event.get("done", False)
-                        label = _agent_labels.get(agent_name, f"[{agent_name}]")
 
                         if agent_name == "error":
                             raise RuntimeError(content)
 
                         if done:
                             final_output = content
+                            # 完成最后一个状态卡片
+                            yield f"data: {json.dumps({'type': 'agent_step_done', 'step_number': _step_counter, 'label': '✅ 整合完成', 'success': True})}\n\n"
                             yield f"data: {json.dumps({'type': 'token', 'content': content}, ensure_ascii=False)}\n\n"
-                        else:
-                            yield f"data: {json.dumps({'type': 'status', 'message': f'{label} 处理中...'})}\n\n"
+                        elif agent_name not in _seen_agents:
+                            _seen_agents.add(agent_name)
+                            # 完成当前步骤卡片
+                            _done_lbl = _agent_done_labels.get(agent_name, f"✅ {agent_name} 完成")
+                            yield f"data: {json.dumps({'type': 'agent_step_done', 'step_number': _step_counter, 'label': _done_lbl, 'success': True})}\n\n"
+                            # 找下一个待执行的 Agent，发出新步骤卡片
+                            try:
+                                _next_idx = _agent_order.index(agent_name) + 1
+                                if _next_idx < len(_agent_order):
+                                    _next_agent = _agent_order[_next_idx]
+                                    _step_counter += 1
+                                    _next_lbl = _agent_action_labels.get(_next_agent, f"⏳ {_next_agent} 正在处理…")
+                                    yield f"data: {json.dumps({'type': 'agent_step', 'step_type': 'ACTION', 'step_number': _step_counter, 'label': _next_lbl, 'tool_name': _next_agent})}\n\n"
+                            except (ValueError, IndexError):
+                                pass
 
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
                     try:
@@ -7813,15 +7854,18 @@ def chat_stream():
         def generate_multi_step():
             # === 立即发送任务分类信息 ===
             pattern = multi_step_info.get("pattern", "unknown")
-            classification_msg = f"🎯 任务分类: 🔄 多步任务\n"
+            classification_msg = f"🎯 任务分类: 🔄 多步任务"
             yield f"data: {json.dumps({'type': 'classification', 'task_type': 'MULTI_STEP', 'pattern': pattern, 'route_method': route_method, 'message': classification_msg})}\n\n"
             
-            # 显示所有子任务
-            status_msg = f"📋 任务分解:\n"
+            # 显示完整任务计划（Copilot 风格）
+            total_subtasks = len(subtasks)
+            plan_lines = [f"🗂️ 任务计划（共 {total_subtasks} 步）\n"]
             for i, subtask in enumerate(subtasks):
-                status_msg += f"  {i+1}. {subtask['description']}\n"
-            status_msg += "\n"
-            yield f"data: {json.dumps({'type': 'status', 'message': status_msg})}\n\n"
+                prefix = "└─" if i == total_subtasks - 1 else "├─"
+                plan_lines.append(f"  {prefix} 步骤 {i+1}：{subtask['description']}")
+            plan_lines.append("\n开始执行...")
+            _plan_text = "\n".join(plan_lines) + "\n"
+            yield f"data: {json.dumps({'type': 'status', 'message': _plan_text})}\n\n"
             
             # 执行所有子任务（逐步流式反馈）
             try:
@@ -7888,7 +7932,16 @@ def chat_stream():
                     etype = evt.get("type", "")
 
                     if etype == "progress":
-                        yield f"data: {json.dumps({'type': 'progress', 'message': evt.get('message', ''), 'detail': evt.get('detail', '')})}\n\n"
+                        _sn = evt.get("step_number", 0)
+                        _sdesc = evt.get("step_description", "")
+                        _prog_msg = evt.get('message', '')
+                        if _sn and _sdesc:
+                            # 每步开始时发出步骤卡片（Copilot 风格）
+                            yield f"data: {json.dumps({'type': 'agent_step', 'step_type': 'ACTION', 'step_number': _sn, 'label': f'⚙️ 步骤{_sn}：{_sdesc[:50]}', 'tool_name': evt.get('detail', '')})}\n\n"
+                        else:
+                            _prog_pct = evt.get('progress', 0)
+                            _prog_stage = evt.get('stage', 'running')
+                            yield f"data: {json.dumps({'type': 'progress', 'message': _prog_msg, 'detail': evt.get('detail',''), 'progress': _prog_pct, 'stage': _prog_stage})}\n\n"
 
                     elif etype == "step_done":
                         step_idx = evt.get("step_index", 0)
@@ -7896,19 +7949,17 @@ def chat_stream():
                         success = evt.get("success", False)
                         preview = evt.get("output_preview", "")
                         if success:
-                            yield f"data: {json.dumps({'type': 'progress', 'message': f'步骤 {step_idx} 完成', 'detail': preview[:80]})}\n\n"
+                            yield f"data: {json.dumps({'type': 'agent_step_done', 'step_number': step_idx, 'label': f'✅ 步骤{step_idx} 完成', 'success': True})}\n\n"
                         else:
                             err_msg = evt.get("error") or "执行失败"
-                            yield f"data: {json.dumps({'type': 'progress', 'message': f'步骤 {step_idx} 遇到问题', 'detail': err_msg[:80]})}\n\n"
-                        # 回补 subtasks 状态（用于后续自检）
+                            yield f"data: {json.dumps({'type': 'agent_step_done', 'step_number': step_idx, 'label': f'⚠️ 步骤{step_idx} 未完成', 'success': False})}\n\n"
+                        # 回补 subtasks 状态
                         for _st in subtasks:
                             if str(_st.get("id")) == str(evt.get("step_id")):
                                 _st["status"] = "completed" if success else "failed"
                                 _st["result"] = {"success": success, "output": preview, "error": evt.get("error")}
-                                # 收集输出
                                 if success:
                                     step_results.append({"success": success, "output": preview})
-                                    # 从 ContextStore 获取完整结果后更新 saved_files
                                 break
 
                     elif etype == "status":
@@ -7963,8 +8014,12 @@ def chat_stream():
                 if not check.get("pass") and check.get("fix_prompt"):
                     yield f"data: {json.dumps({'type': 'status', 'message': '🩺 自检未通过，正在修正最终输出...'})}\n\n"
                     try:
+                        # 使用 _INTERACTIONS_FALLBACK_MODEL，避免 gemini-3-*-preview 仅支持 Interactions API
+                        _selfcheck_model = SmartDispatcher.get_model_for_task("MULTI_STEP")
+                        if _selfcheck_model in _INTERACTIONS_ONLY_MODELS:
+                            _selfcheck_model = _INTERACTIONS_FALLBACK_MODEL
                         fix_resp = client.models.generate_content(
-                            model=SmartDispatcher.get_model_for_task("MULTI_STEP"),
+                            model=_selfcheck_model,
                             contents=check["fix_prompt"],
                             config=types.GenerateContentConfig(
                                 system_instruction=system_instruction,
@@ -8064,6 +8119,7 @@ def chat_stream():
 
             # ── 优先：LangGraphAgent（StateGraph + CheckpointSaver）────────────
             _lg_ok = False
+            _lg_step_counter = 0
             try:
                 from app.core.agent.factory import create_langgraph_agent
 
@@ -8083,8 +8139,30 @@ def chat_stream():
                     if ctype == "answer":
                         final_answer = content
                         step_data = {"step_type": "ANSWER", "content": content, "tool": None}
+                    elif ctype == "step_status":
+                        # Copilot 风格：工具调用前后的状态通知
+                        # 直接作为 status 事件发给前端（显示在步骤面板中）
+                        phase = chunk.get("phase", "before")
+                        tool_name = chunk.get("tool", "")
+                        if phase == "before":
+                            _lg_step_counter += 1
+                            step_data = {
+                                "step_type": "ACTION",
+                                "content": content,
+                                "tool": tool_name,
+                                "args": chunk.get("args", {}),
+                                "step_number": _lg_step_counter,
+                            }
+                        else:
+                            step_data = {
+                                "step_type": "STEP_DONE",
+                                "content": content,
+                                "tool": tool_name,
+                                "step_number": _lg_step_counter,
+                            }
                     elif ctype == "tool_call":
-                        step_data = {"step_type": "TOOL_CALL", "content": f"调用工具: {content}", "tool": content, "args": chunk.get("args", {})}
+                        # tool_call 已由 step_status(before) 处理，这里跳过避免重复
+                        continue
                     elif ctype == "tool_result":
                         step_data = {
                             "step_type": "TOOL_RESULT",
@@ -8235,7 +8313,10 @@ def chat_stream():
             if _rag_hits:
                 for _rc in _rag_hits:
                     _src = os.path.basename(_rc.get("source", "unknown"))
-                    _rag_context_block += f"[{_src} | 相似度: {_rc.get('score', 0):.3f}]\n{_rc['content']}\n\n"
+                    # 每个片段截断至 600 字符，防止大块文本撑爆 system_instruction
+                    _content = _rc.get("content", "")
+                    _content_cap = _content[:600] + "…" if len(_content) > 600 else _content
+                    _rag_context_block += f"[{_src} | 相似度: {_rc.get('score', 0):.3f}]\n{_content_cap}\n\n"
                 # 同时注入 system_instruction（供 ToT 、AGENT 路径使用）
                 _rag_sys_block = (
                     "\n\n─────────────────────────────────────────"
@@ -9919,7 +10000,7 @@ def chat_stream():
                         f"用户需求: {user_input}"
                     )
                     fix_query_resp = client.models.generate_content(
-                        model="gemini-2.0-flash-lite",
+                        model="gemini-2.5-flash",
                         contents=fix_query_prompt,
                         config=types.GenerateContentConfig(
                             temperature=0.2,
@@ -12557,7 +12638,7 @@ def chat_stream():
                                 task=task_type,
                                 model_name=f"ollama/{LocalModelRouter._response_model}",
                             )
-                            _reflect_types_local = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT"}
+                            _reflect_types_local = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT", "WEB_SEARCH"}
                             if task_type in _reflect_types_local:
                                 _start_memory_extraction(
                                     user_input,
@@ -12837,31 +12918,55 @@ def chat_stream():
                     yield f"data: {json.dumps({'type': 'token', 'content': corrected_msg})}\n\n"
                     full_text = corrected_text
             else:
-                # 复杂任务进行快速自检
-                is_complex_task = (
-                    task_type in ["RESEARCH", "FILE_GEN", "CODER"] or
-                    (context_info and context_info.get("complexity") == "complex") or
-                    len(user_input) > 200
-                )
-                if is_complex_task:
-                    check = Utils.quick_self_check(task_type, user_input, full_text)
-                    if not check.get("pass") and check.get("fix_prompt"):
-                        status_msg = "🩺 自检未通过，正在修正..."
-                        yield f"data: {json.dumps({'type': 'progress', 'message': status_msg, 'detail': '快速模型自检'})}\n\n"
-                        fix_resp = client.models.generate_content(
-                            model=model_id,
-                            contents=check["fix_prompt"],
-                            config=types.GenerateContentConfig(
-                                system_instruction=use_instruction,
-                                temperature=0.4,
-                                max_output_tokens=4000,
+                # ── 自适应自检（覆盖所有任务类型）──────────────────────────────
+                check = Utils.quick_self_check(task_type, user_input, full_text)
+                _check_action = check.get("action", "pass")
+
+                if _check_action == "continue":
+                    # 响应被截断：自动续写，最多 3 轮
+                    MAX_CONTINUATIONS = 3
+                    for _cont_round in range(MAX_CONTINUATIONS):
+                        yield f"data: {json.dumps({'type': 'progress', 'message': f'📝 响应未完整，正在续写（第{_cont_round+1}轮）...', 'detail': ''})}\n\n"
+                        try:
+                            cont_resp = client.models.generate_content_stream(
+                                model=model_id,
+                                contents=formatted_history + [
+                                    types.Content(role="user", parts=[types.Part.from_text(text=_rag_augmented_input)]),
+                                    types.Content(role="model", parts=[types.Part.from_text(text=full_text)]),
+                                    types.Content(role="user", parts=[types.Part.from_text(text="请继续，从刚才中断的地方接着写。")]),
+                                ],
+                                config=types.GenerateContentConfig(system_instruction=use_instruction),
                             )
+                            cont_text = ""
+                            for cont_chunk in cont_resp:
+                                if cont_chunk.text:
+                                    cont_text += cont_chunk.text
+                                    yield f"data: {json.dumps({'type': 'token', 'content': cont_chunk.text})}\n\n"
+                            full_text += cont_text
+                        except Exception as _cont_err:
+                            print(f"[SELF_CHECK] 续写失败: {_cont_err}")
+                            break
+                        # 续写后再次检查是否已完整
+                        recheck = Utils.quick_self_check(task_type, user_input, full_text)
+                        if recheck.get("action") != "continue":
+                            break
+
+                elif _check_action == "fix" and check.get("fix_prompt"):
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '🩺 自检未通过，正在修正...', 'detail': '自适应自检'})}\n\n"
+                    fix_resp = client.models.generate_content(
+                        model=model_id,
+                        contents=check["fix_prompt"],
+                        config=types.GenerateContentConfig(
+                            system_instruction=use_instruction,
+                            temperature=0.4,
+                            max_output_tokens=4000,
                         )
-                        corrected_text = fix_resp.text or full_text
-                        if corrected_text and corrected_text != full_text:
-                            corrected_msg = f"\n\n🔁 修正版本:\n{corrected_text}"
-                            yield f"data: {json.dumps({'type': 'token', 'content': corrected_msg})}\n\n"
-                            full_text = corrected_text
+                    )
+                    corrected_text = fix_resp.text or full_text
+                    if corrected_text and corrected_text != full_text:
+                        corrected_msg = f"\n\n🔁 修正版本:\n{corrected_text}"
+                        yield f"data: {json.dumps({'type': 'token', 'content': corrected_msg})}\n\n"
+                        full_text = corrected_text
 
             # 处理自动保存的文件
             saved_files = Utils.auto_save_files(full_text)
@@ -12904,7 +13009,7 @@ def chat_stream():
                 saved_files=saved_files,
             )
             # 2-B: Memory reflection for all supported task types
-            _reflect_types = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT"}
+            _reflect_types = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT", "WEB_SEARCH"}
             if task_type in _reflect_types:
                 _start_memory_extraction(
                     user_input,
@@ -14811,6 +14916,10 @@ def chat_with_file():
                         file_data is not None
                         and not (file_data.get("mime_type") or "").lower().startswith("image/")
                     )
+                    # 所有二进制文档在 generate_content_stream 中必须使用支持字节的模型
+                    if _has_binary_doc and _stream_model in _INTERACTIONS_ONLY_MODELS:
+                        print(f"[FILE STREAM] 📄 Binary-Doc: Interactions-only model '{_stream_model}' 降级为 '{_INTERACTIONS_FALLBACK_MODEL}'")
+                        _stream_model = _INTERACTIONS_FALLBACK_MODEL
                     if _has_binary_doc and _captured_task in ("CHAT", "RESEARCH"):
                         # 强制降级到支持文件字节的模型（Interactions API 不支持附件字节）
                         _stream_model = _INTERACTIONS_FALLBACK_MODEL
@@ -15207,6 +15316,63 @@ def api_refresh_models():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route('/api/v1/models/override', methods=['POST'])
+def api_override_model():
+    """
+    手动覆盖指定任务的模型分配（运行时生效，重启后还原动态发现结果）。
+    POST body: {"task": "CODER", "model_id": "gemini-2.5-flash"}
+    model_id 为空字符串表示移除覆盖，恢复动态/静态默认值。
+    """
+    global _MANUAL_OVERRIDES
+    data = request.get_json(silent=True) or {}
+    task = (data.get('task') or '').upper().strip()
+    model_id = (data.get('model_id') or '').strip()
+
+    if not task:
+        return jsonify({"error": "缺少 task 参数"}), 400
+
+    if model_id:
+        # 写入覆盖
+        _MANUAL_OVERRIDES[task] = model_id
+        MODEL_MAP[task] = model_id
+        print(f"[ModelOverride] ✏️  {task} → {model_id}（手动覆盖）")
+    else:
+        # 移除覆盖，回退到动态发现或静态默认值
+        _MANUAL_OVERRIDES.pop(task, None)
+        if _model_manager:
+            orig = _model_manager.get_model_map().get(task)
+            if orig:
+                MODEL_MAP[task] = orig
+        print(f"[ModelOverride] 🔄 {task} 覆盖已移除，当前值: {MODEL_MAP.get(task, '(无)')}")
+
+    # 同步更新 SmartDispatcher
+    try:
+        SmartDispatcher._dependencies["MODEL_MAP"] = MODEL_MAP
+    except Exception:
+        pass
+
+    return jsonify({
+        "status":    "ok",
+        "task":      task,
+        "model_id":  MODEL_MAP.get(task),
+        "overrides": _MANUAL_OVERRIDES,
+        "model_map": {t: m for t, m in MODEL_MAP.items()},
+    })
+
+@app.route('/api/v1/models/overrides', methods=['GET'])
+def api_get_overrides():
+    """返回当前所有手动覆盖列表。"""
+    return jsonify({
+        "overrides":  _MANUAL_OVERRIDES,
+        "model_map":  {t: {
+            "model_id": m,
+            "display":  get_model_display_name(m),
+            "overridden": t in _MANUAL_OVERRIDES,
+        } for t, m in MODEL_MAP.items()},
+        "fallback":   _INTERACTIONS_FALLBACK_MODEL,
+        "interactions_only": list(_INTERACTIONS_ONLY_MODELS),
+    })
+
 @app.route('/api/analyze', methods=['POST'])
 def analyze_task():
     """预分析任务类型和模型选择 - 让前端立即显示"""
@@ -15295,6 +15461,47 @@ def analyze_task():
 # ================= Settings API =================
 
 
+# ================= Local Model API =================
+
+@app.route('/api/local/models', methods=['GET'])
+def get_local_models():
+    """查询 Ollama 已安装的本地模型列表，并返回推荐与当前选择。"""
+    try:
+        from app.core.routing.local_model_router import LocalModelRouter
+        installed = LocalModelRouter.list_installed_models()
+        best = LocalModelRouter.pick_best_chat_model() if installed else None
+        _, current = _get_local_model_config()
+        return jsonify({
+            "ollama_running": len(installed) > 0,
+            "models": installed,
+            "recommended": best or "",
+            "current": current or best or "",
+        })
+    except Exception as e:
+        return jsonify({"ollama_running": False, "models": [], "recommended": "", "current": "", "error": str(e)})
+
+@app.route('/api/local/model', methods=['POST'])
+def set_local_model():
+    """设置本地模型以及运行模式（local/cloud）。"""
+    try:
+        data = request.json or {}
+        tag = data.get('tag', '')
+        mode = data.get('mode', 'cloud')
+        if mode not in ('local', 'cloud'):
+            return jsonify({"success": False, "error": "mode must be 'local' or 'cloud'"}), 400
+        settings_path = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
+        with open(settings_path, 'r', encoding='utf-8') as f:
+            s = json.load(f)
+        s['model_mode'] = mode
+        if tag:
+            s['local_model'] = tag
+        with open(settings_path, 'w', encoding='utf-8') as f:
+            json.dump(s, f, indent=2, ensure_ascii=False)
+        _user_settings_cache.clear()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # ================= Mini Mode Switch API =================
 
 
@@ -15349,7 +15556,7 @@ def mini_chat():
                 )
                 try:
                     fix_query_resp = client.models.generate_content(
-                        model="gemini-2.0-flash-lite",
+                        model="gemini-2.5-flash",
                         contents=fix_query_prompt,
                         config=types.GenerateContentConfig(
                             temperature=0.2, max_output_tokens=64
@@ -15462,7 +15669,203 @@ def mini_chat():
 # ================= Setup & Initialization API =================
 
 
-@app.route("/api/chat/interrupt", methods=["POST"])
+@app.route('/api/setup/apikey', methods=['POST'])
+def setup_api_key():
+    """设置 API Key"""
+    data = request.json
+    api_key = data.get('api_key', '').strip()
+    
+    if not api_key or len(api_key) < 10:
+        return jsonify({"success": False, "error": "Invalid API key"})
+    
+    config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    
+    try:
+        # 写入配置文件（同时写入两个变量名，避免优先级错乱）
+        with open(config_path, 'w', encoding='utf-8') as f:
+            f.write(f"# Koto Configuration\nGEMINI_API_KEY={api_key}\nAPI_KEY={api_key}\n")
+        
+        # 更新环境变量
+        os.environ['GEMINI_API_KEY'] = api_key
+        os.environ['API_KEY'] = api_key
+        global API_KEY, client
+        API_KEY = api_key
+        client = create_client()
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/setup/workspace', methods=['POST'])
+def setup_workspace():
+    """设置工作区目录"""
+    data = request.json
+    workspace_path = data.get('path', '').strip()
+    
+    if not workspace_path:
+        workspace_path = os.path.join(PROJECT_ROOT, "workspace")
+    
+    try:
+        os.makedirs(workspace_path, exist_ok=True)
+        os.makedirs(os.path.join(workspace_path, "documents"), exist_ok=True)
+        os.makedirs(os.path.join(workspace_path, "images"), exist_ok=True)
+        os.makedirs(os.path.join(workspace_path, "code"), exist_ok=True)
+        
+        # 更新设置
+        settings_manager.set('storage', 'workspace_dir', workspace_path)
+        
+        return jsonify({"success": True, "path": workspace_path})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/setup/test', methods=['GET'])
+def test_api_connection():
+    """测试 API 连接"""
+    try:
+        start = time.time()
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents="Say 'Koto is ready!' in one short sentence."
+        )
+        latency = time.time() - start
+        return jsonify({
+            "success": True,
+            "message": response.text,
+            "latency": round(latency, 2)
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/api/diagnose', methods=['GET'])
+def diagnose_models():
+    """诊断所有模型的可用性"""
+    import threading
+    
+    results = {
+        "proxy": {
+            "detected": get_detected_proxy(),
+            "force": FORCE_PROXY or None,
+            "custom_endpoint": GEMINI_API_BASE or None
+        },
+        "models": {}
+    }
+    
+    # 测试模型列表
+    test_models = [
+        ("gemini-2.5-flash", "路由分类"),
+        ("gemini-3-flash-preview", "日常对话"),
+        ("gemini-3-pro-preview", "代码生成"),
+        ("gemini-2.5-flash", "联网搜索"),
+        ("gemini-3.1-flash-image-preview", "图像生成"),
+    ]
+    
+    def test_model(model_id, purpose):
+        try:
+            start = time.time()
+            if "image-generation" in model_id or "imagen" in model_id:
+                # 图像模型只测试连通性
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents="test",
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=10
+                    )
+                )
+            else:
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents="Reply with only: OK",
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=10
+                    )
+                )
+            latency = time.time() - start
+            return {
+                "status": "✅ 可用",
+                "latency": round(latency, 2),
+                "purpose": purpose
+            }
+        except Exception as e:
+            error_msg = str(e)
+            if "location is not supported" in error_msg:
+                status = "❌ 地区限制"
+            elif "not found" in error_msg.lower():
+                status = "❌ 模型不存在"
+            elif "quota" in error_msg.lower():
+                status = "⚠️ 配额耗尽"
+            elif "timeout" in error_msg.lower():
+                status = "⚠️ 超时"
+            else:
+                status = f"❌ 错误"
+            return {
+                "status": status,
+                "error": error_msg[:150],
+                "purpose": purpose
+            }
+    
+    # 并行测试（带超时）
+    threads = []
+    for model_id, purpose in test_models:
+        def run_test(m=model_id, p=purpose):
+            results["models"][m] = test_model(m, p)
+        t = threading.Thread(target=run_test, daemon=True)
+        threads.append(t)
+        t.start()
+    
+    # 等待所有线程完成（最多 15 秒）
+    for t in threads:
+        t.join(timeout=15)
+    
+    # 检查是否所有模型都不可用
+    all_failed = all(
+        "❌" in results["models"].get(m, {}).get("status", "")
+        for m, _ in test_models
+    )
+    
+    if all_failed:
+        results["recommendation"] = "所有模型均不可用。建议：\n1. 检查代理配置是否正确\n2. 考虑使用 API 中转服务\n3. 在 gemini_config.env 中配置 GEMINI_API_BASE"
+    
+    return jsonify(results)
+
+@app.route('/api/browse', methods=['GET'])
+def browse_folders():
+    import os
+    path = request.args.get('path', 'C:\\')
+    
+    try:
+        if not os.path.exists(path):
+            return jsonify({"error": "路径不存在", "folders": [], "parent": None})
+        
+        if not os.path.isdir(path):
+            return jsonify({"error": "不是文件夹", "folders": [], "parent": None})
+        
+        folders = []
+        try:
+            for item in os.listdir(path):
+                item_path = os.path.join(path, item)
+                if os.path.isdir(item_path):
+                    folders.append({"name": item, "path": item_path})
+        except PermissionError:
+            return jsonify({"error": "没有权限访问", "folders": [], "parent": None})
+        
+        folders.sort(key=lambda x: x['name'].lower())
+        
+        # Get parent path
+        parent = os.path.dirname(path)
+        if parent == path:  # Root drive
+            parent = None
+        
+        return jsonify({
+            "folders": folders,
+            "parent": parent,
+            "current": path
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "folders": [], "parent": None})
+
+
+@app.route('/api/chat/interrupt', methods=['POST'])
 def interrupt_chat():
     """中断当前对话生成"""
     payload = request.json or {}
@@ -15523,6 +15926,248 @@ def reset_interrupt():
 # === 浏览器自动化 API ===
 # === 智能搜索 API ===
 # ================= 语音识别 API (新架构) =================
+@app.route('/api/voice/engines', methods=['GET'])
+def voice_engines():
+    """获取可用语音引擎列表"""
+    try:
+        from web.voice_fast import get_available_engines
+        result = get_available_engines()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "engines": [],
+            "message": f"获取引擎列表失败: {str(e)}"
+        }), 500
+
+@app.route('/api/voice/record', methods=['POST'])
+def voice_record():
+    """录制音频"""
+    try:
+        data = request.json or {}
+        duration = data.get('duration', 5)
+        
+        from web.voice_input import record_audio
+        result = record_audio(duration=int(duration))
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"录音失败: {str(e)}",
+            "audio_file": None
+        }), 500
+
+@app.route('/api/voice/recognize', methods=['POST'])
+def voice_recognize():
+    """识别音频文件"""
+    try:
+        data = request.json or {}
+        audio_path = data.get('audio_path')
+        engine = data.get('engine', None)
+        
+        if not audio_path:
+            return jsonify({
+                "success": False,
+                "message": "缺少音频文件路径"
+            }), 400
+        
+        from web.voice_input import recognize_audio
+        result = recognize_audio(audio_path, engine)
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"识别失败: {str(e)}"
+        }), 500
+
+@app.route('/api/voice/listen', methods=['POST'])
+def voice_listen():
+    """一键麦克风识别（本地模式 - 优化版：立即启动）"""
+    try:
+        data = request.json or {}
+        timeout = data.get('timeout', 5)
+        language = data.get('language', 'zh-CN')
+        
+        # 使用快速本地识别
+        from web.voice_fast import recognize_voice
+        result = recognize_voice(timeout=int(timeout), language=language)
+        
+        # 优化：设置响应头加快传输
+        response = jsonify(result)
+        response.headers['Cache-Control'] = 'no-cache, no-store'
+        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        return response
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        response = jsonify({
+            "success": False,
+            "text": "",
+            "message": f"语音识别出错: {str(e)}",
+            "engine": "error"
+        })
+        response.status_code = 500
+        response.headers['Cache-Control'] = 'no-cache'
+        return response
+
+
+@app.route('/api/voice/stream')
+def voice_stream():
+    """流式语音识别 - Vosk 本地离线，实时返回部分/最终结果（SSE）"""
+    import json as _json
+    from flask import Response, stream_with_context
+
+    @stream_with_context
+    def generate():
+        try:
+            from web.voice_engine import recognize_stream
+            for event in recognize_stream(max_wait=8.0, max_speech=30.0):
+                yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get('type') in ('final', 'error'):
+                    break
+        except GeneratorExit:
+            pass
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache, no-transform',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+            'Transfer-Encoding': 'chunked',
+        }
+    )
+
+
+@app.route('/api/voice/stop', methods=['POST'])
+def voice_stop():
+    """停止当前语音识别流（通知 voice_engine 停止）"""
+    try:
+        from web.voice_engine import request_stop
+        request_stop()
+    except Exception:
+        pass
+    return jsonify({"success": True, "message": "已发送停止信号"})
+
+
+@app.route('/api/voice/commands', methods=['GET'])
+def voice_commands():
+    """返回内置语音命令列表（供语音面板展示）"""
+    commands = [
+        {"name": "发送消息", "description": "说出消息后自动发送",        "keyword": ""},
+        {"name": "新对话",   "description": "说'新对话'开始新聊天",     "keyword": "新对话"},
+        {"name": "清空输入", "description": "说'清空'清除输入框",        "keyword": "清空"},
+        {"name": "重新识别", "description": "再次点击麦克风重新说",      "keyword": ""},
+    ]
+    return jsonify({"success": True, "commands": commands})
+
+
+@app.route('/api/voice/stt_status', methods=['GET'])
+def voice_stt_status():
+    """查询当前语音引擎状态（使用新 voice_engine）。"""
+    try:
+        from web.voice_engine import get_status
+        fast = get_status()
+    except Exception:
+        fast = {"available": False, "engine": "unavailable", "label": "无引擎"}
+
+    return jsonify({
+        "fast":   fast,
+        "local":  fast,   # 兼容前端旧字段
+        "active": fast.get("engine", "none"),
+    })
+
+
+@app.route('/api/voice/gemini_stt', methods=['POST'])
+@app.route('/api/voice/stt',        methods=['POST'])   # 统一入口别名
+def voice_gemini_stt():
+    """
+    统一语音转文字 (STT) 入口：本地 Whisper 优先 → Gemini STT 备用。
+
+    - 若安装了 faster-whisper 或 openai-whisper：完全本地转写，无 API 消耗
+    - 否则：发送至 Gemini gemini-2.0-flash-lite 转写
+    - 始终返回 JSON，绝不返回 HTML 错误页面。
+    """
+    try:
+        data      = request.get_json(silent=True) or {}
+        audio_b64 = data.get('audio', '')
+        mime_type = data.get('mime', 'audio/webm')
+
+        if not audio_b64:
+            return jsonify({"success": False, "text": "", "message": "缺少 audio 字段"}), 400
+
+        import base64 as _b64
+        try:
+            audio_bytes = _b64.b64decode(audio_b64)
+        except Exception:
+            return jsonify({"success": False, "text": "", "message": "音频 base64 解码失败"}), 400
+
+        if len(audio_bytes) < 300:
+            return jsonify({"success": False, "text": "", "message": "录音太短，请重新说话"})
+
+        print(f"[STT] 收到音频 {len(audio_bytes)/1024:.1f}KB  MIME={mime_type}")
+
+        # ── 优先尝试本地 Whisper ──────────────────────────────────────────────
+        try:
+            from web.local_stt import is_available, transcribe
+            if is_available():
+                ok, text, engine = transcribe(audio_bytes, mime_type)
+                if ok and text:
+                    return jsonify({"success": True,  "text": text,
+                                    "engine": engine, "message": "识别成功（本地）"})
+                # 本地识别出空文本 → 也直接返回（不回退，避免重复计费）
+                return jsonify({"success": False, "text": "",
+                                "engine": engine, "message": "未检测到语音"})
+        except Exception as _le:
+            print(f"[STT] 本地 STT 异常，回退 Gemini: {_le}")
+
+        # ── 回退：Gemini STT ──────────────────────────────────────────────────
+        if client is None:
+            return jsonify({"success": False, "text": "",
+                            "message": "Gemini 客户端未初始化，请检查 API Key；"
+                                       "或安装 faster-whisper 使用本地识别"}), 503
+
+        stt_model = "gemini-2.5-flash"
+        prompt_parts = [
+            types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+            types.Part.from_text(text=(
+                "请将上面音频中的语音内容完整转写为文字。"
+                "只输出转写结果，不要加任何解释、标点修饰或前缀（如「转写：」等）。"
+                "如果听不清或没有语音，只输出空字符串。"
+            )),
+        ]
+
+        resp = client.models.generate_content(
+            model=stt_model,
+            contents=[types.Content(role="user", parts=prompt_parts)],
+            config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=512)
+        )
+
+        text = (resp.text or "").strip()
+        for prefix in ("转写：", "转写:", "识别：", "识别:", "文字：", "文字:"):
+            if text.startswith(prefix):
+                text = text[len(prefix):].strip()
+
+        print(f"[STT] Gemini 识别结果: {text[:80]!r}")
+        return jsonify({
+            "success": bool(text),
+            "text":    text,
+            "engine":  f"Gemini/{stt_model}",
+            "message": "识别成功" if text else "未检测到语音内容"
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "text": "", "message": f"STT 失败: {str(e)[:200]}"}), 500
+
+
 # ================= 增强功能 API (场景1-3) =================
 
 
@@ -16112,5 +16757,6 @@ except ImportError:
 
 # ══════════════════════════════════════════════════════════════════════════════
 # RAG 向量检索 API
+
 
 

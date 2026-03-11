@@ -109,7 +109,7 @@ class ImageManager:
             # ========================================
             try:
                 model_name = "gemini-3.1-flash-image-preview"
-                logger.info(f"[ImageManager] 尝试模型: {model_name}")
+                print(f"[ImageManager] 尝试模型: {model_name}")
                 response = self.client.models.generate_content(
                     model=model_name,
                     contents=refined_prompt,
