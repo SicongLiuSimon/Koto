@@ -2,6 +2,7 @@ import logging
 import time
 import json
 import uuid
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Generator, List, Optional, Union
 
@@ -236,6 +237,14 @@ class UnifiedAgent(Agent):
                         )
         except Exception as _se:
             logger.debug(f"[UnifiedAgent] Skill 注入跳过: {_se}")
+
+        # ── 注入本地时间（每次请求动态注入，确保模型感知当前时间）──────────────
+        _now = datetime.now()
+        _weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][_now.weekday()]
+        _time_prefix = (
+            f"当前本地时间：{_now.strftime('%Y年%m月%d日 %H:%M')}（{_weekday}）\n\n"
+        )
+        _effective_instruction = _time_prefix + _effective_instruction
 
         while steps_taken < self.MAX_STEPS:
             steps_taken += 1
