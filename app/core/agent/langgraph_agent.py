@@ -5,9 +5,9 @@ Koto LangGraph ReAct Agent
 用 LangGraph StateGraph 重新实现 UnifiedAgent 的 while 循环，
 获得：
   ✅ 明确的节点 / 边 状态机（可视化、可调试）
-  ✅ MemorySaver 检查点 → 支持多轮会话 / 断点续跑
+  ✅ SqliteSaver 检查点 → 跨重启持久化，多轮会话 / 断点续跑
   ✅ 原生流式 token 推送
-  ✅ 并发 tool 调用（fanout edges）
+  ✅ 并发 tool 调用（ThreadPoolExecutor fanout）
   ✅ 内置超时 / 最大步数限制
   ✅ 保留 Koto 现有的 PII 脱敏 + 输出验收护栏
 
@@ -155,13 +155,14 @@ def _make_nodes(
         }
 
     def node_call_tools(state: "AgentState") -> Dict:
-        """工具执行节点：并行执行所有 tool_calls。"""
+        """工具执行节点：使用 ThreadPoolExecutor 并发执行所有 tool_calls。"""
         last = state["messages"][-1]
         if not isinstance(last, AIMessage) or not last.tool_calls:
             return {}
 
-        tool_messages: List[ToolMessage] = []
-        for tc in last.tool_calls:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _run_one(tc) -> ToolMessage:
             t_name = tc["name"]
             t_args = tc.get("args", {})
             t_id = tc.get("id", t_name)
@@ -175,11 +176,13 @@ def _make_nodes(
             except Exception as exc:
                 result_str = f"[工具错误] {t_name}: {exc}"
                 logger.warning(f"[LangGraphAgent] 工具 {t_name} 执行失败: {exc}")
+            return ToolMessage(tool_call_id=t_id, content=result_str)
 
-            tool_messages.append(ToolMessage(
-                tool_call_id=t_id,
-                content=result_str,
-            ))
+        tool_calls = last.tool_calls
+        with ThreadPoolExecutor(max_workers=min(len(tool_calls), 4)) as executor:
+            # 提交全部任务，按原始顺序收集结果
+            futures = [executor.submit(_run_one, tc) for tc in tool_calls]
+            tool_messages = [f.result() for f in futures]
 
         return {"messages": tool_messages}
 
@@ -274,7 +277,7 @@ def _route_after_validate(state: "AgentState") -> Literal["reason", "__end__"]:
 
 def build_graph(
     registry,
-    model_id: str = "gemini-2.5-flash",
+    model_id: str = "gemini-3-flash-preview",
     system_instruction: Optional[str] = None,
     enable_pii: bool = True,
     enable_validation: bool = True,
@@ -383,7 +386,7 @@ class LangGraphAgent:
     def __init__(
         self,
         registry=None,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "gemini-3-flash-preview",
         system_instruction: Optional[str] = None,
         skill_id: Optional[str] = None,
         task_type: Optional[str] = None,
@@ -492,13 +495,77 @@ class LangGraphAgent:
     ) -> Generator[Dict, None, None]:
         """
         流式调用。每个 yield 是一个事件字典：
-            {"type": "token"|"tool_call"|"tool_result"|"answer", "content": "..."}
+            {"type": "token"|"tool_call"|"tool_result"|"answer"|"step_status", "content": "..."}
+
+        step_status 事件（Copilot 风格）：
+            {"type": "step_status", "content": "⏳ 正在搜索网络...", "phase": "before"|"after"}
         """
+        # ── 工具名 → 中文描述 ──────────────────────────────────────────────
+        _TOOL_ACTION_LABELS = {
+            "web_search":        "🌐 正在搜索网络",
+            "search_web":        "🌐 正在搜索网络",
+            "get_weather":       "☁️ 正在获取天气数据",
+            "read_file":         "📂 正在读取文件",
+            "write_file":        "💾 正在写入文件",
+            "patch_file":        "✏️ 正在修改文件",
+            "replace_text":      "✏️ 正在替换文件内容",
+            "list_files":        "📁 正在列出文件",
+            "execute_code":      "⚡ 正在执行代码",
+            "run_python":        "🐍 正在运行 Python",
+            "run_command":       "💻 正在执行命令",
+            "open_application":  "🚀 正在打开应用",
+            "get_system_info":   "🖥️ 正在获取系统信息",
+            "get_cpu_info":      "📊 正在获取 CPU 状态",
+            "get_memory_info":   "📊 正在获取内存状态",
+            "get_disk_info":     "💽 正在获取磁盘状态",
+            "get_network_info":  "🔌 正在获取网络状态",
+            "get_processes":     "📋 正在获取进程列表",
+            "take_screenshot":   "📸 正在截图",
+            "search_files":      "🔍 正在全盘搜索文件",
+            "create_document":   "📄 正在创建文档",
+            "generate_image":    "🎨 正在生成图像",
+            "memory_search":     "🧠 正在检索记忆",
+            "fetch_url":         "🌍 正在获取网页内容",
+            "calculate":         "🔢 正在计算",
+            "translate":         "🌐 正在翻译",
+        }
+        _TOOL_DONE_LABELS = {
+            "web_search":        "✅ 搜索完成",
+            "search_web":        "✅ 搜索完成",
+            "get_weather":       "✅ 天气数据已获取",
+            "read_file":         "✅ 文件读取完成",
+            "write_file":        "✅ 文件写入完成",
+            "patch_file":        "✅ 文件修改完成",
+            "replace_text":      "✅ 内容替换完成",
+            "list_files":        "✅ 文件列举完成",
+            "execute_code":      "✅ 代码执行完成",
+            "run_python":        "✅ Python 运行完成",
+            "run_command":       "✅ 命令执行完成",
+            "open_application":  "✅ 应用已打开",
+            "get_system_info":   "✅ 系统信息已获取",
+            "get_cpu_info":      "✅ CPU 状态已获取",
+            "get_memory_info":   "✅ 内存状态已获取",
+            "get_disk_info":     "✅ 磁盘状态已获取",
+            "get_network_info":  "✅ 网络状态已获取",
+            "get_processes":     "✅ 进程列表已获取",
+            "take_screenshot":   "✅ 截图完成",
+            "search_files":      "✅ 文件搜索完成",
+            "create_document":   "✅ 文档已创建",
+            "generate_image":    "✅ 图像生成完成",
+            "memory_search":     "✅ 记忆检索完成",
+            "fetch_url":         "✅ 网页内容已获取",
+            "calculate":         "✅ 计算完成",
+            "translate":         "✅ 翻译完成",
+        }
+
         state = self._build_initial_state(input_text, history, session_id, **kwargs)
         config = {
             "configurable": {"thread_id": state["session_id"]},
             "stream_mode": "messages",
         }
+
+        # 追踪上一个 tool_call 的名称（用于生成 tool_result 时的完成通知）
+        _last_tool_names: List[str] = []
 
         try:
             for event in self._graph.stream(
@@ -510,11 +577,43 @@ class LangGraphAgent:
                         if isinstance(msg, AIMessage):
                             if msg.tool_calls:
                                 for tc in msg.tool_calls:
-                                    yield {"type": "tool_call", "content": tc["name"],
-                                           "args": tc.get("args", {})}
+                                    t_name = tc["name"]
+                                    t_args = tc.get("args", {})
+                                    _last_tool_names.append(t_name)
+                                    # Copilot 风格：生成操作前的状态通知
+                                    _action_label = _TOOL_ACTION_LABELS.get(
+                                        t_name, f"⚙️ 正在调用 {t_name}"
+                                    )
+                                    _arg_hint = ""
+                                    for _key in ("query", "keyword", "path", "filename",
+                                                 "url", "command", "code"):
+                                        if _key in t_args:
+                                            _val = str(t_args[_key])[:40]
+                                            _arg_hint = f"：{_val}"
+                                            break
+                                    yield {
+                                        "type": "step_status",
+                                        "content": _action_label + _arg_hint,
+                                        "phase": "before",
+                                        "tool": t_name,
+                                        "args": t_args,
+                                    }
+                                    yield {"type": "tool_call", "content": t_name,
+                                           "args": t_args}
                             elif msg.content:
                                 yield {"type": "token", "content": msg.content}
                         elif isinstance(msg, ToolMessage):
+                            # 工具结果到达时：先发送完成通知，再发结果
+                            _done_tool = _last_tool_names.pop(0) if _last_tool_names else ""
+                            _done_label = _TOOL_DONE_LABELS.get(
+                                _done_tool, f"✅ {_done_tool} 执行完成" if _done_tool else "✅ 工具执行完成"
+                            )
+                            yield {
+                                "type": "step_status",
+                                "content": _done_label,
+                                "phase": "after",
+                                "tool": _done_tool,
+                            }
                             yield {"type": "tool_result", "content": msg.content}
 
                     if node_update.get("final_answer"):
