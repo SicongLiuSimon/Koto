@@ -122,6 +122,79 @@ _RECOMMENDED_INTENT_BINDINGS = [
         "patterns": ["计划", "安排", "待办", "路线图", "拆解任务", "里程碑"],
         "auto_disable_after_turns": 2,
     },
+    # ── 文件/工作区 ──
+    {
+        "skill_id": "workspace_context",
+        "patterns": ["当前目录", "项目结构", "我的项目", "工程目录", "工作目录",
+                     "这个项目", "目录结构", "项目里有哪些"],
+        "auto_disable_after_turns": 3,
+    },
+    {
+        "skill_id": "archive_assistant",
+        "patterns": ["整理文件", "归档文件", "清理下载", "整理文件夹", "整理桌面",
+                     "文件夹整理", "自动分类文件"],
+        "auto_disable_after_turns": 1,
+    },
+    # ── 高价值商业 Workflow ──
+    {
+        "skill_id": "email_composer",
+        "patterns": ["写邮件", "帮我写邮件", "邮件正文", "回复邮件", "邮件草稿",
+                     "起草邮件", "客户邮件", "一封邮件", "封邮件", "封邮", "邮件范文"],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "meeting_minutes",
+        "patterns": ["会议纪要", "整理会议", "会议记录", "帮我整理会议", "会议总结"],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "negotiation_assist",
+        "patterns": ["谈判", "砍价", "商务谈判", "谈条件", "价格谈判", "谈判话术",
+                     "谈判策略", "谈判技巧"],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "root_cause",
+        "patterns": ["根因分析", "根本原因", "问题溯源", "rca", "故障复盘",
+                     "追溯问题", "为什么会发生"],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "brainstorm",
+        "patterns": ["头脑风暴", "想法发散", "帮我想想", "有什么方案", "想点子",
+                     "有哪些思路", "集思广益"],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "pros_cons",
+        "patterns": ["优缺点", "利弊分析", "正反两面", "帮我比较", "方案对比",
+                     "权衡利弊", "做决策"],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "contract_reviewer",
+        "patterns": ["审合同", "看合同", "合同条款", "合同风险", "审核合同",
+                     "合同有没有问题", "协议审查"],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "interview_prep",
+        "patterns": ["面试准备", "面试题", "帮我准备面试", "模拟面试", "面试技巧",
+                     "面试常见问题", "面试自我介绍"],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "social_copy",
+        "patterns": ["朋友圈文案", "小红书文案", "社媒文案", "营销文案", "推广文案",
+                     "抖音文案", "种草文案", "公众号文案"],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "prompt_engineer",
+        "patterns": ["写prompt", "优化prompt", "提示词", "写提示词", "提示词优化",
+                     "system prompt", "如何写prompt", "ai提示词"],
+        "auto_disable_after_turns": 2,
+    },
 ]
 
 
@@ -256,7 +329,12 @@ class SkillBindingManager:
         return binding
 
     def ensure_recommended_bindings(self, force: bool = False) -> Dict[str, Any]:
-        """Seed curated built-in intent bindings so runtime skill resolution works out of the box."""
+        """Seed curated built-in intent bindings so runtime skill resolution works out of the box.
+
+        Strategy: index existing intent bindings by skill_id. If a preset's skill_id already has
+        a binding with IDENTICAL patterns → skip. If patterns differ (preset was updated) → remove
+        old binding and create fresh one. This prevents stale duplicate bindings after updates.
+        """
         created = []
         skipped = []
 
@@ -268,10 +346,15 @@ class SkillBindingManager:
             return {"created": created, "skipped": [f"init_failed:{exc}"]}
 
         existing_intents = self.list_bindings(binding_type="intent")
-        existing_by_key = {
-            (binding.skill_id, tuple(sorted(p.lower() for p in binding.intent_patterns))): binding
-            for binding in existing_intents
+        # Index by (skill_id, sorted_patterns) for exact match check
+        existing_by_exact_key = {
+            (b.skill_id, tuple(sorted(p.lower() for p in b.intent_patterns))): b
+            for b in existing_intents
         }
+        # Index by skill_id for stale-pattern cleanup
+        existing_by_skill: Dict[str, List] = {}
+        for b in existing_intents:
+            existing_by_skill.setdefault(b.skill_id, []).append(b)
 
         for preset in _RECOMMENDED_INTENT_BINDINGS:
             skill_id = preset["skill_id"]
@@ -280,24 +363,32 @@ class SkillBindingManager:
                 continue
 
             patterns = [pattern.strip() for pattern in preset["patterns"] if pattern.strip()]
-            preset_key = (skill_id, tuple(sorted(pattern.lower() for pattern in patterns)))
-            existing = existing_by_key.get(preset_key)
-            if not force and existing:
+            preset_key = (skill_id, tuple(sorted(p.lower() for p in patterns)))
+
+            # Exact match exists and not forcing → skip
+            if not force and existing_by_exact_key.get(preset_key):
                 skipped.append(skill_id)
                 continue
 
-            if force and existing:
-                self.remove(existing.binding_id)
+            # Remove ALL existing intent bindings for this skill_id (stale or forced update)
+            for old_binding in existing_by_skill.get(skill_id, []):
+                try:
+                    self.remove(old_binding.binding_id)
+                except Exception:
+                    pass
+            existing_by_skill.pop(skill_id, None)
 
             self.bind_intent(
                 skill_id=skill_id,
                 intent_patterns=patterns,
                 auto_disable_after_turns=int(preset.get("auto_disable_after_turns", 2)),
             )
+            # Refresh local index
             refreshed = self.list_bindings(skill_id=skill_id, binding_type="intent")
-            for binding in refreshed:
-                key = (binding.skill_id, tuple(sorted(p.lower() for p in binding.intent_patterns)))
-                existing_by_key[key] = binding
+            for b in refreshed:
+                key = (b.skill_id, tuple(sorted(p.lower() for p in b.intent_patterns)))
+                existing_by_exact_key[key] = b
+                existing_by_skill.setdefault(b.skill_id, []).append(b)
             created.append(skill_id)
 
         return {"created": created, "skipped": skipped}

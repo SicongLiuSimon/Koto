@@ -9,7 +9,9 @@
   "input_variables": [],
   "output_spec": {
     "format": "markdown",
-    "must_contain": ["修改建议"],
+    "must_contain": [
+      "修改建议"
+    ],
     "must_not_contain": [],
     "min_chars": null,
     "max_chars": null,
@@ -17,11 +19,18 @@
     "description": "以逐段批注格式输出，包含修改建议和修改理由"
   },
   "bound_tools": [],
-  "task_types": ["DOC_ANNOTATE"],
-  "enabled": true,
+  "task_types": [
+    "DOC_ANNOTATE"
+  ],
+  "enabled": false,
   "prompt": "\n\n## 📚 领域要求：学术批注\n- 采用「原文 → 修改建议 → 修改理由」三段式逐段批注\n- 重点关注：措辞精确性、被动语态使用、逻辑连接词、数据引用格式（APA/GB/MLA）\n- 标注可能引发审稿人质疑的逻辑断层或过度主张\n- 区分「必须修改」（❌）和「建议优化」（⚠️）两个层级\n- 最终附「总体评估」：语言水平评分、逻辑严密性评分、是否符合期刊投稿规范",
   "version": "1.0.0",
   "author": "koto",
   "created_at": "2026-03-07T00:00:00Z",
-  "tags": ["academic", "annotation", "polishing", "research"]
+  "tags": [
+    "academic",
+    "annotation",
+    "polishing",
+    "research"
+  ]
 }

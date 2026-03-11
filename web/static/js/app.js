@@ -3544,17 +3544,142 @@ async function toggleSkill(skillId, enabled) {
 }
 
 function openSkillEditor(skillId) {
-    const skill = _allSkills.find(s => s.id === skillId);
+    const spSkills = typeof window.getSpSkills === 'function' ? window.getSpSkills() : [];
+    const skill = _allSkills.find(s => s.id === skillId) || spSkills.find(s => s.id === skillId);
     if (!skill) return;
     _editingSkillId = skillId;
-    document.getElementById('skillEditorTitle').textContent = `编辑 Prompt：${skill.icon} ${skill.name}`;
+    // Populate header
+    document.getElementById('skeIcon').textContent = skill.icon || '🤖';
+    document.getElementById('skeTitle').textContent = skill.name;
+    const catLabels = { behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域',
+                        custom: '🔧 自定义', workflow: '⚡ 工作流', memory: '🧠 记忆' };
+    document.getElementById('skeMeta').textContent =
+        (catLabels[skill.category] || skill.category) + (skill.is_builtin ? '  ·  内置 Skill' : '  ·  自定义 Skill');
+    // Populate textarea
     document.getElementById('skillEditorContent').value = skill.prompt || '';
+    skeUpdateCount();
+    // AI tab: clear previous state
+    document.getElementById('skeAiDesc').value = '';
+    document.getElementById('skeAiPreview').style.display = 'none';
+    // Extract tab: clear
+    _skeSelectedSession = null;
+    document.getElementById('skeExtractZone').style.display = 'none';
+    document.getElementById('skeExtractMsg').textContent = '';
+    // Open on edit tab
+    skeSwitchTab('edit');
     document.getElementById('skillEditorModal').style.display = 'flex';
+}
+
+function skeSwitchTab(tab) {
+    ['edit', 'ai', 'extract'].forEach(t => {
+        const btn = document.querySelector(`.ske-tab[data-tab="${t}"]`);
+        const body = document.getElementById('skeTab' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (btn) btn.classList.toggle('active', t === tab);
+        if (body) body.style.display = t === tab ? 'block' : 'none';
+    });
+    if (tab === 'extract') skeLoadSessions();
+}
+
+function skeUpdateCount() {
+    const el = document.getElementById('skeCharCount');
+    const ta = document.getElementById('skillEditorContent');
+    if (el && ta) el.textContent = ta.value.length;
+}
+
+async function skeGeneratePrompt() {
+    const desc = (document.getElementById('skeAiDesc').value || '').trim();
+    if (!desc) { alert('请先描述你的需求'); return; }
+    const previewEl = document.getElementById('skeAiPreview');
+    const previewContent = document.getElementById('skeAiPreviewContent');
+    previewEl.style.display = 'block';
+    previewContent.textContent = '⏳ AI 正在生成…';
+    try {
+        const resp = await fetch('/api/skillmarket/preview-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: desc }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '生成失败');
+        previewContent.textContent = data.prompt || data.system_prompt || '（空）';
+    } catch (e) {
+        previewContent.textContent = '⚠️ ' + e.message;
+    }
+}
+
+function skeApplyGenerated() {
+    const text = document.getElementById('skeAiPreviewContent').textContent;
+    if (!text || text.startsWith('⏳') || text.startsWith('⚠️')) return;
+    document.getElementById('skillEditorContent').value = text;
+    skeUpdateCount();
+    skeSwitchTab('edit');
+}
+
+let _skeSelectedSession = null;
+
+async function skeLoadSessions() {
+    const list = document.getElementById('skeSessionList');
+    if (!list) return;
+    list.innerHTML = '<div style="color:#6c7a91;font-size:12px;padding:6px;">正在加载对话列表…</div>';
+    try {
+        const resp = await fetch('/api/skillmarket/sessions');
+        const data = await resp.json();
+        const sessions = data.sessions || [];
+        if (!sessions.length) {
+            list.innerHTML = '<div style="color:#6c7a91;font-size:12px;padding:6px;">暂无对话记录，请先进行一些对话。</div>';
+            return;
+        }
+        list.innerHTML = sessions.map(s => `
+            <div class="ske-session-item" data-sid="${s.id}" onclick="skeSelectSession('${s.id}', this)">
+                💬 ${s.title || s.id}
+                <span style="float:right;color:#4a5568;font-size:10px;">${s.message_count || 0} 条</span>
+            </div>
+        `).join('');
+    } catch (e) {
+        list.innerHTML = `<div style="color:#e06c75;font-size:12px;padding:6px;">⚠️ ${e.message}</div>`;
+    }
+}
+
+function skeSelectSession(sessionId, el) {
+    _skeSelectedSession = sessionId;
+    document.querySelectorAll('.ske-session-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('skeExtractZone').style.display = 'block';
+    document.getElementById('skeExtractMsg').textContent = '';
+}
+
+async function skeExtractFromSession() {
+    if (!_skeSelectedSession || !_editingSkillId) return;
+    const msgEl = document.getElementById('skeExtractMsg');
+    const btn = document.querySelector('#skeExtractZone .ske-extract-btn');
+    if (btn) btn.disabled = true;
+    msgEl.style.color = '#6c7a91';
+    msgEl.textContent = '⏳ AI 正在分析对话风格…';
+    try {
+        const resp = await fetch('/api/skillmarket/from-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: _skeSelectedSession, skill_name: _editingSkillId, icon: '', auto_enable: false }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '提取失败');
+        const prompt = data.prompt || data.skill?.prompt || '';
+        document.getElementById('skillEditorContent').value = prompt;
+        skeUpdateCount();
+        skeSwitchTab('edit');
+        msgEl.textContent = '';
+    } catch (e) {
+        msgEl.style.color = '#e06c75';
+        msgEl.textContent = '⚠️ ' + e.message;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 function closeSkillEditor() {
     document.getElementById('skillEditorModal').style.display = 'none';
     _editingSkillId = null;
+    _skeSelectedSession = null;
 }
 
 async function saveSkillPromptEdit() {
@@ -3568,14 +3693,22 @@ async function saveSkillPromptEdit() {
         });
         const data = await resp.json();
         if (!data.success) throw new Error(data.error);
-        // Update cache
+        // Update _allSkills cache
         const skill = _allSkills.find(s => s.id === _editingSkillId);
         if (skill) {
             skill.prompt = prompt;
             skill.has_custom_prompt = prompt.trim() !== '';
         }
+        // Also sync _spSkills cache in the Skills Panel
+        const spSkills = typeof window.getSpSkills === 'function' ? window.getSpSkills() : [];
+        const spSkill = spSkills.find(s => s.id === _editingSkillId);
+        if (spSkill) {
+            spSkill.prompt = prompt;
+            spSkill.has_custom_prompt = prompt.trim() !== '';
+        }
         closeSkillEditor();
         renderSkills(_currentSkillFilter);
+        if (typeof window.spRenderCards === 'function') window.spRenderCards();
     } catch (e) {
         alert('保存失败: ' + e.message);
     }
@@ -3594,7 +3727,10 @@ async function resetSkillPromptEdit() {
         if (listData.success) {
             _allSkills = listData.skills;
             const skill = _allSkills.find(s => s.id === _editingSkillId);
-            if (skill) document.getElementById('skillEditorContent').value = skill.prompt || '';
+            if (skill) {
+                document.getElementById('skillEditorContent').value = skill.prompt || '';
+                skeUpdateCount();
+            }
         }
         renderSkills(_currentSkillFilter);
     } catch (e) {

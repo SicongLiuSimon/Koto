@@ -210,7 +210,10 @@ class OutputValidator:
         Returns:
             ValidationResult 对象
         """
+        logger.debug("[OutputValidator] validate() text_len=%d skill_id=%s", len(text) if text else 0, skill_id)
+
         if not text or not text.strip():
+            logger.debug("[OutputValidator] action=RETRY reason=empty_input")
             return ValidationResult(
                 action="RETRY",
                 text=text or "",
@@ -236,6 +239,7 @@ class OutputValidator:
 
         # ── 2. 完整性检测：模型拒绝 ────────────────────────────────
         if cls._is_refusal(text):
+            logger.info("[OutputValidator] action=RETRY reason=refusal text_preview=%.50r", text[:50])
             reasons.append("模型拒绝执行请求")
             return ValidationResult(
                 action="RETRY",
@@ -281,6 +285,7 @@ class OutputValidator:
 
         # ── 3. 完整性检测：截断 ─────────────────────────────────────
         if cls._is_truncated(text):
+            logger.info("[OutputValidator] action=WARN reason=truncation")
             reasons.append("响应可能被截断（末尾有截断标志）")
             # 截断通常是 token limit 问题，WARN 而非 RETRY（可能用户不在意）
             return ValidationResult(
@@ -294,6 +299,7 @@ class OutputValidator:
         # ── 4. 完整性检测：异常重复 ─────────────────────────────────
         repetition_reason = cls._check_repetition(text)
         if repetition_reason:
+            logger.info("[OutputValidator] action=RETRY reason=repetition: %s", repetition_reason)
             reasons.append(repetition_reason)
             return ValidationResult(
                 action="RETRY",
@@ -320,6 +326,7 @@ class OutputValidator:
                 )
 
         # ── 6. 通过 ─────────────────────────────────────────────────
+        logger.debug("[OutputValidator] action=PASS skill_id=%s", skill_id)
         return ValidationResult(
             action="PASS",
             text=current_text,

@@ -56,10 +56,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
+
+logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════
 # 枚举类型
@@ -179,17 +182,25 @@ class OutputSpec:
         返回 (passed: bool, reason: str)
         """
         if self.min_chars and len(text) < self.min_chars:
-            return False, f"输出过短: {len(text)} < {self.min_chars} 字符"
+            reason = f"输出过短: {len(text)} < {self.min_chars} 字符"
+            logger.debug("[OutputSpec] validate() failed: %s", reason)
+            return False, reason
         if self.max_chars and len(text) > self.max_chars:
-            return False, f"输出过长: {len(text)} > {self.max_chars} 字符"
+            reason = f"输出过长: {len(text)} > {self.max_chars} 字符"
+            logger.debug("[OutputSpec] validate() failed: %s", reason)
+            return False, reason
 
         for token in self.must_contain:
             if token not in text:
-                return False, f"输出缺少必要内容: '{token}'"
+                reason = f"输出缺少必要内容: '{token}'"
+                logger.debug("[OutputSpec] validate() failed: %s", reason)
+                return False, reason
 
         for token in self.must_not_contain:
             if token in text:
-                return False, f"输出包含禁止内容: '{token}'"
+                reason = f"输出包含禁止内容: '{token}'"
+                logger.warning("[OutputSpec] validate() blocked forbidden content: %s", reason)
+                return False, reason
 
         fmt = self.format.value if isinstance(self.format, OutputFormat) else self.format
         if fmt == "json" and self.required_json_keys:
@@ -197,12 +208,18 @@ class OutputSpec:
                 obj = json.loads(text)
                 for key in self.required_json_keys:
                     if key not in obj:
-                        return False, f"JSON 输出缺少字段: '{key}'"
+                        reason = f"JSON 输出缺少字段: '{key}'"
+                        logger.debug("[OutputSpec] validate() failed: %s", reason)
+                        return False, reason
             except json.JSONDecodeError:
-                return False, "期望 JSON 格式但输出不可解析"
+                reason = "期望 JSON 格式但输出不可解析"
+                logger.debug("[OutputSpec] validate() failed: %s", reason)
+                return False, reason
 
         if fmt == "table" and "|" not in text:
-            return False, "期望 Markdown 表格但输出中无 '|' 符号"
+            reason = "期望 Markdown 表格但输出中无 '|' 符号"
+            logger.debug("[OutputSpec] validate() failed: %s", reason)
+            return False, reason
 
         return True, "OK"
 
@@ -334,7 +351,7 @@ class SkillDefinition:
         try:
             return template.format(**variables)
         except KeyError as e:
-            # 缺少变量时不崩溃，保留占位符原样
+            logger.warning("[SkillDefinition] render_prompt() missing variable %s for skill=%s", e, self.id)
             return template
 
     def to_mcp_tool(self) -> Dict[str, Any]:
@@ -354,6 +371,7 @@ class SkillDefinition:
 
         参考: https://spec.modelcontextprotocol.io/specification/server/tools/
         """
+        logger.debug("[SkillDefinition] to_mcp_tool() skill=%s input_variables=%d", self.id, len(self.input_variables))
         properties: Dict[str, Any] = {}
         required_fields: List[str] = []
 
@@ -454,6 +472,7 @@ class SkillDefinition:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SkillDefinition":
         """从 dict 反序列化（用于从 JSON 文件加载自定义 Skill）"""
+        logger.debug("[SkillDefinition] from_dict() id=%s", data.get("id", "?"))
         input_variables = [
             InputVariable(
                 name=v["name"],

@@ -217,6 +217,7 @@ class PIIFilter:
             MaskResult 对象，包含脱敏文本和还原映射
         """
         if not text or not text.strip():
+            logger.debug("[PIIFilter] mask() skipped: empty text")
             return MaskResult(
                 masked_text=text,
                 original_text=text,
@@ -224,6 +225,7 @@ class PIIFilter:
                 stats={},
             )
 
+        logger.debug("[PIIFilter] mask() text_len=%d", len(text))
         cfg = config or PIIConfig()
         mask_map: Dict[str, str] = {}
         stats: Dict[str, int] = {}
@@ -256,8 +258,11 @@ class PIIFilter:
                 stats["自定义"] = stats.get("自定义", 0) + 1
                 result = result.replace(keyword, placeholder)
 
-        if cfg.log_stats and stats:
-            logger.info(f"[PIIFilter] 脱敏统计: {stats} | 共 {len(mask_map)} 处")
+        if stats:
+            if cfg.log_stats:
+                logger.info("[PIIFilter] 脱敏统计: %s | 共 %d 处", stats, len(mask_map))
+        else:
+            logger.debug("[PIIFilter] mask() no PII detected text_len=%d", len(text))
 
         return MaskResult(
             masked_text=result,
@@ -272,6 +277,7 @@ class PIIFilter:
         将已脱敏文本中的占位符还原为原始值。
         可传入 MaskResult.mask_map 或自定义映射。
         """
+        logger.debug("[PIIFilter] restore() %d placeholder(s)", len(mask_map))
         result = masked_text
         for placeholder, original in sorted(mask_map.items(), key=lambda x: -len(x[0])):
             result = result.replace(placeholder, original)

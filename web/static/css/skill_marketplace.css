@@ -284,7 +284,11 @@ a:hover { text-decoration: underline; }
 .sm-tag.category-behavior { border-color: rgba(31,111,235,0.4); color: var(--text-link); }
 .sm-tag.category-style    { border-color: rgba(137,87,229,0.4); color: #a371f7; }
 .sm-tag.category-domain   { border-color: rgba(218,202,47,0.4); color: #e3b341; }
+.sm-tag.category-workflow { border-color: rgba(255,140,0,0.4);  color: #f0883e; }
 .sm-tag.category-custom   { border-color: rgba(43,200,106,0.4); color: #3fb950; }
+/* Skill nature badges */
+.sm-tag.nature-model_hint   { border-color: rgba(31,111,235,0.35); color: #79c0ff; background: rgba(31,111,235,0.08); }
+.sm-tag.nature-domain_skill { border-color: rgba(255,140,0,0.35);  color: #f0883e; background: rgba(255,140,0,0.08); }
 .sm-rating { display: flex; align-items: center; gap: 3px; font-size: 12px; color: #e3b341; margin-left: auto; }
 .sm-card-actions { display: flex; gap: 8px; margin-top: auto; }
 
