@@ -139,13 +139,8 @@ if _LANGCHAIN_AVAILABLE:
         class Config:
             arbitrary_types_allowed = True
 
-        def __init__(
-            self,
-            model_id: str = "gemini-3-flash-preview",
-            temperature: float = 0.7,
-            max_tokens: int = 8192,
-            **kwargs,
-        ):
+        def __init__(self, model_id: str = "gemini-3-flash-preview",
+                     temperature: float = 0.7, max_tokens: int = 8192, **kwargs):
             _assert_langchain()
             super().__init__(
                 model_id=model_id,
