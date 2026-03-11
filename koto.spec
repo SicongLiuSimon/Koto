@@ -328,7 +328,7 @@ def _filter_datas(datas_list):
         else:
             kept.append((src, dst))
     if dropped:
-        print(f'[koto.spec] 已过滤 {dropped} 条测试/文档数据文件')
+        print(f'[koto.spec] Filtered {dropped} test/doc data files')
     return kept
 
 datas = _filter_datas(datas)
@@ -348,7 +348,7 @@ a = Analysis(
     runtime_hooks=[os.path.join(ROOT, 'src', 'rth_voice_fallback.py')],
     excludes=[
         'tkinter.test', 'unittest', 'test', 'tests',
-        'setuptools', 'pip', 'distutils',
+        'setuptools', 'pip',
         'matplotlib', 'scipy', 'IPython', 'notebook',
         'pytest', 'pylint', 'black', 'mypy', 'flake8',
         'jupyter', 'nbconvert', 'nbformat',
