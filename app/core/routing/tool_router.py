@@ -1,13 +1,20 @@
 """
-ToolRouter — 动态工具子集选择器
+ToolRouter — 双层工具子集选择器 (v2)
 
 作用：根据用户意图，从全量工具列表中筛选出最相关的工具子集，
       传给 LLM 以减少 tokens 消耗，同时降低 LLM 误选工具的概率。
 
 策略：
-  1. 关键词匹配（O(1) 分类，无需 LLM）
-  2. 未能命中任何分类时，返回核心工具集（而非全量，避免超出 context window）
-  3. 支持强制返回全量（force_all=True）
+  Tier 1 (快速路径): 关键词正则规则 → 工具名集合（O(1)，无延迟，无依赖）
+  Tier 2 (语义匹配): 字符 n-gram + 词汇重叠评分 → 按相似度排序 Top-K
+                     纯 stdlib 实现，延迟 < 1ms，无外部依赖，自动缓存索引
+
+  最终结果：两层合并，关键词命中工具排在前面（LLM 优先可见），截断至 max_tools。
+
+  优点：
+  - Tier 1 维持原有精度（已知分类）
+  - Tier 2 覆盖模糊意图 / 新加入工具 / 未命中分类的情况
+  - 工具描述索引懒加载，工具集变化时自动重建（hash 对比）
 
 分类参考（可持续扩充）：
   • communication  → 微信、邮件
@@ -25,6 +32,54 @@ import logging
 from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tier 2 Helpers: 纯 stdlib 语义匹配
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_tokens(text: str) -> frozenset:
+    """
+    混合分词器：提取中文单字 + 英文词（含下划线分割）+ 字符 bigram。
+    对中英混合的工具名/描述和中文用户查询均有良好覆盖。
+
+    示例:
+      "分析这个CSV里的趋势" → {"分","析","这","个","C","S","V","里","的","趋","势",
+                               "分析","析这","这个","csv","趋势", ...}
+      "analyze_excel_data"  → {"analyze","excel","data","an","na","al","ly",...}
+    """
+    tokens: set = set()
+    text_lower = text.lower()
+
+    # 英文词 + 下划线碎片（工具名如 analyze_excel_data → analyze, excel, data）
+    for w in re.findall(r'[a-z_]+', text_lower):
+        tokens.add(w)
+        for part in w.split('_'):
+            if len(part) > 1:
+                tokens.add(part)
+
+    # 中文单字
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff':
+            tokens.add(ch)
+
+    # 字符 bigram（捕获「分析」「搜索」「查询」等2字中文词，以及英文2-gram）
+    clean = re.sub(r'\s+', '', text_lower)
+    for i in range(len(clean) - 1):
+        bg = clean[i:i + 2]
+        if bg.strip():
+            tokens.add(bg)
+
+    return frozenset(tokens)
+
+
+def _overlap_score(query_toks: frozenset, desc_toks: frozenset) -> float:
+    """
+    召回偏置重叠系数: |intersection| / |query|。
+    衡量"工具描述覆盖了用户查询多少语义"，避免长描述被 Jaccard 惩罚。
+    """
+    if not query_toks:
+        return 0.0
+    return len(query_toks & desc_toks) / len(query_toks)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 工具分类表：category → 工具名称集合
@@ -138,21 +193,32 @@ _CORE_TOOLS: Set[str] = {
 
 class ToolRouter:
     """
-    使用关键词规则将用户意图映射到工具子集。
+    双层工具子集选择器。
+
+    Tier 1 — 关键词正则（快速路径，O(1)，无额外延迟）
+    Tier 2 — 描述语义匹配（n-gram overlap，纯 stdlib，< 1ms，自动缓存）
+
+    两层结果合并：关键词命中的工具排在前面（LLM 优先读取），
+    语义匹配的工具补充尾部，共同截断至 max_tools。
 
     用法::
-
         router = ToolRouter()
         selected = router.select(all_tool_defs, user_message)
-        # selected 是过滤后的工具 schema 列表，传给 LLM
     """
 
-    def __init__(self, max_tools: int = 20):
+    def __init__(self, max_tools: int = 20, semantic_topk: int = 12):
         """
         Args:
-            max_tools: 单次能向 LLM 暴露的工具上限（防止 token 爆炸）
+            max_tools:     单次向 LLM 暴露的工具上限（防止 token 爆炸）
+            semantic_topk: Tier 2 语义匹配保留的 Top-K 候选数
         """
         self.max_tools = max_tools
+        self._semantic_topk = semantic_topk
+        # 懒加载的描述索引 {tool_name: frozenset(tokens)}
+        self._desc_index: Optional[Dict[str, frozenset]] = None
+        self._index_cache_key: Optional[int] = None
+
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def select(
         self,
@@ -161,7 +227,7 @@ class ToolRouter:
         force_all: bool = False,
     ) -> List[Dict]:
         """
-        根据 user_message 从 all_definitions 中筛选最相关的工具。
+        两层筛选：Tier1 关键词 → Tier2 语义，合并后截断至 max_tools。
 
         Args:
             all_definitions: ToolRegistry.get_definitions() 返回的完整列表
@@ -169,43 +235,52 @@ class ToolRouter:
             force_all:       True 则跳过过滤，返回全量（截断至 max_tools）
 
         Returns:
-            过滤并截断后的工具定义列表
+            过滤并截断后的工具定义列表（关键词命中的排在前面）
         """
         if force_all:
             result = all_definitions[: self.max_tools]
             logger.debug(f"[ToolRouter] force_all → {len(result)} 工具")
             return result
 
-        # 1. 识别意图分类
+        # ── Tier 1: 关键词规则 ────────────────────────────────────────────────
         matched_categories = self._match_categories(user_message)
+        keyword_names: Set[str] = set()
+        for cat in matched_categories:
+            keyword_names |= TOOL_CATEGORIES.get(cat, set())
+        # 永远包含锚点工具（时间/通知几乎所有场景都需要）
+        keyword_names |= {"get_current_time", "get_current_datetime", "notify_user"}
 
-        # 2. 合并对应工具名称集合
-        if matched_categories:
-            allowed_names: Set[str] = set()
-            for cat in matched_categories:
-                allowed_names |= TOOL_CATEGORIES.get(cat, set())
-            label = "+".join(sorted(matched_categories))
-        else:
-            allowed_names = _CORE_TOOLS
-            label = "core"
+        keyword_defs = [d for d in all_definitions if d.get("name") in keyword_names]
+        seen_names: Set[str] = {d["name"] for d in keyword_defs}
 
-        # 3. 始终包含核心工具（calendar/datetime 几乎所有任务都可能需要）
-        allowed_names |= {"get_current_time", "get_current_datetime", "notify_user"}
-
-        # 4. 过滤
-        filtered = [d for d in all_definitions if d.get("name") in allowed_names]
-
-        # 5. 若过滤后工具数 < 3（可能是新工具未入分类表），追加全量兜底
-        if len(filtered) < 3:
-            filtered = all_definitions
-
-        # 6. 截断
-        result = filtered[: self.max_tools]
-        logger.debug(
-            f"[ToolRouter] intent={label!r} → "
-            f"{len(result)}/{len(all_definitions)} 工具暴露给 LLM"
+        # ── Tier 2: 语义 n-gram 匹配 ─────────────────────────────────────────
+        semantic_ranked = self._semantic_select(
+            user_message, all_definitions, topk=self._semantic_topk
         )
-        return result
+        semantic_defs = [
+            d for d in all_definitions
+            if d.get("name") in set(semantic_ranked) and d.get("name") not in seen_names
+        ]
+        rank_order = {name: i for i, name in enumerate(semantic_ranked)}
+        semantic_defs.sort(key=lambda d: rank_order.get(d.get("name", ""), 999))
+
+        # ── 合并与截断 ────────────────────────────────────────────────────────
+        merged = (keyword_defs + semantic_defs)[: self.max_tools]
+
+        # 兜底：两层都没命中任何工具时（通常是新添加的极少见工具集），使用核心集
+        if len(merged) == 0:
+            core_defs = [d for d in all_definitions if d.get("name") in _CORE_TOOLS]
+            merged = core_defs[: self.max_tools]
+
+        label = "+".join(sorted(matched_categories)) if matched_categories else "semantic-only"
+        logger.debug(
+            f"[ToolRouter] intent={label!r} "
+            f"keyword={len(keyword_defs)} semantic={len(semantic_defs)} "
+            f"→ {len(merged)}/{len(all_definitions)} 工具暴露给 LLM"
+        )
+        return merged
+
+    # ── Tier 1: 关键词规则 ────────────────────────────────────────────────────
 
     def _match_categories(self, text: str) -> List[str]:
         """返回命中的分类名列表（可多命中）"""
@@ -219,6 +294,48 @@ class ToolRouter:
                 matched.append(category)
                 seen.add(category)
         return matched
+
+    # ── Tier 2: 语义 n-gram 匹配 ─────────────────────────────────────────────
+
+    def _get_desc_index(self, definitions: List[Dict]) -> Dict[str, frozenset]:
+        """
+        返回 {tool_name: token_set} 索引。
+        当工具集发生变化（hash 不同）时自动重建，否则返回缓存。
+        """
+        cache_key = hash(tuple(d.get("name", "") for d in definitions))
+        if cache_key != self._index_cache_key or self._desc_index is None:
+            self._desc_index = {
+                d["name"]: _build_tokens(
+                    (d.get("description") or "")
+                    + " "
+                    + d.get("name", "").replace("_", " ")
+                )
+                for d in definitions if d.get("name")
+            }
+            self._index_cache_key = cache_key
+            logger.debug(f"[ToolRouter] 语义索引重建: {len(self._desc_index)} 个工具")
+        return self._desc_index
+
+    def _semantic_select(
+        self,
+        query: str,
+        definitions: List[Dict],
+        topk: int,
+    ) -> List[str]:
+        """
+        返回按语义相关度排序的 Top-K 工具名列表。
+        使用召回偏置重叠系数：|query_tokens ∩ desc_tokens| / |query_tokens|
+        """
+        query_toks = _build_tokens(query)
+        if not query_toks:
+            return []
+        index = self._get_desc_index(definitions)
+        scores = [
+            (name, _overlap_score(query_toks, desc_toks))
+            for name, desc_toks in index.items()
+        ]
+        scores.sort(key=lambda x: -x[1])
+        return [name for name, score in scores[:topk] if score > 0.0]
 
 
 # ── 模块级单例（工厂层直接 import 使用）────────────────────────────────────
