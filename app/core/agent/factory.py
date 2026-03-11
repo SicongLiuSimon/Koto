@@ -98,6 +98,13 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     except Exception as _e:
         logger.debug(f"[_build_registry] TemplateFillPlugin 跳过: {_e}")
 
+    # ── 文档生成工具（Word / PDF / Excel / PPT） ──────────────────────
+    try:
+        from app.core.agent.plugins.doc_gen_plugin import DocGenPlugin
+        registry.register_plugin(DocGenPlugin())
+    except Exception as _e:
+        logger.debug(f"[_build_registry] DocGenPlugin 跳过: {_e}")
+
     return registry
 
 
@@ -145,9 +152,12 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
     if not model:
         try:
             LocalModelRouter.init_model()
-            model = getattr(LocalModelRouter, "_model_name", None) or "qwen3:8b"
+            model = (
+                getattr(LocalModelRouter, "_model_name", None)
+                or LocalModelRouter.pick_best_chat_model()
+            )
         except Exception:
-            model = "qwen3:8b"
+            pass  # model 保持 None → OllamaLLMProvider 在调用时自动解析
 
     llm_kwargs = {}
     if base_url:
@@ -167,7 +177,7 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
 
 def create_langgraph_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-2.5-flash-preview-05-20",
+    model_id: str = "gemini-3-flash-preview",
     enable_pii_filter: bool = True,
     enable_output_validation: bool = True,
 ) -> "LangGraphAgent":

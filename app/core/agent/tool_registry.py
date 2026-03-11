@@ -1,10 +1,14 @@
 import inspect
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FuturesTimeout
 from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from app.core.agent.base import AgentPlugin
 
 logger = logging.getLogger(__name__)
+
+# 单个工具调用的最大允许执行秒数（超时后返回错误，不挂死 agent 循环）
+_TOOL_TIMEOUT: int = 60
 
 
 class ToolRegistry:
@@ -85,16 +89,24 @@ class ToolRegistry:
     def execute(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
         """
         Execute a tool by name with provided arguments.
+        Per-tool timeout: _TOOL_TIMEOUT seconds (prevents hung tools from stalling the agent loop).
         """
         func = self._tools.get(tool_name)
         if not func:
             raise ValueError(f"Tool '{tool_name}' not found.")
 
         try:
-            # Simply pass as kwargs. The function must handle them.
-            return func(**tool_args)
+            with ThreadPoolExecutor(max_workers=1) as _pool:
+                _future = _pool.submit(func, **tool_args)
+                try:
+                    return _future.result(timeout=_TOOL_TIMEOUT)
+                except _FuturesTimeout:
+                    raise RuntimeError(
+                        f"Tool '{tool_name}' timed out after {_TOOL_TIMEOUT}s"
+                    )
+        except (ValueError, RuntimeError):
+            raise
         except TypeError as e:
-            # Often caused by missing/extra arguments
             raise ValueError(f"Argument mismatch for tool '{tool_name}': {e}")
         except Exception as e:
             logger.error(f"Error executing tool '{tool_name}': {e}", exc_info=True)

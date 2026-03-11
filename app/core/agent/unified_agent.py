@@ -1,14 +1,14 @@
-import json
 import logging
 import time
+import json
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from app.core.agent.base import Agent
 from app.core.agent.tool_registry import ToolRegistry
-from app.core.agent.types import AgentAction, AgentResponse, AgentStep, AgentStepType
+from app.core.agent.types import AgentStep, AgentStepType, AgentAction, AgentResponse
 from app.core.llm.base import LLMProvider
 
 
@@ -20,14 +20,14 @@ def _get_task_ledger():
 
 
 def _get_progress_bus():
-    from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+    from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
 
     return get_progress_bus(), ProgressEvent
 
 
 # ── 阶段一护栏模块（懒加载，避免启动时开销）──────────────────────────
 def _get_pii_filter():
-    from app.core.security.pii_filter import PIIConfig, PIIFilter
+    from app.core.security.pii_filter import PIIFilter, PIIConfig
 
     return PIIFilter, PIIConfig
 
@@ -62,6 +62,82 @@ class UnifiedAgent(Agent):
     MAX_STEPS = 15
     # 输出验收最大重试次数（RETRY action 触发时）
     MAX_VALIDATION_RETRIES = 1
+    # 工具观测结果超过此长度时触发自动压缩（防止 context 积累膨胀）
+    _OBS_COMPRESS_THRESHOLD: int = 3000
+
+    # ── 工具名 → 中文人类可读描述（Copilot 风格状态通知）───────────────────────
+    _TOOL_ACTION_LABELS: Dict[str, str] = {
+        "web_search": "🌐 正在搜索网络",
+        "search_web": "🌐 正在搜索网络",
+        "get_weather": "☁️ 正在获取天气数据",
+        "read_file": "📂 正在读取文件",
+        "write_file": "💾 正在写入文件",
+        "patch_file": "✏️ 正在修改文件",
+        "replace_text": "✏️ 正在替换文件内容",
+        "list_files": "📁 正在列出文件",
+        "execute_code": "⚡ 正在执行代码",
+        "run_python": "🐍 正在运行 Python",
+        "run_command": "💻 正在执行命令",
+        "open_application": "🚀 正在打开应用",
+        "close_application": "⏹️ 正在关闭应用",
+        "get_system_info": "🖥️ 正在获取系统信息",
+        "get_cpu_info": "📊 正在获取 CPU 状态",
+        "get_memory_info": "📊 正在获取内存状态",
+        "get_disk_info": "💽 正在获取磁盘状态",
+        "get_network_info": "🔌 正在获取网络状态",
+        "get_processes": "📋 正在获取进程列表",
+        "take_screenshot": "📸 正在截图",
+        "search_files": "🔍 正在全盘搜索文件",
+        "read_clipboard": "📋 正在读取剪切板",
+        "write_clipboard": "📋 正在写入剪切板",
+        "send_email": "📧 正在发送邮件",
+        "create_document": "📄 正在创建文档",
+        "create_ppt": "🎞️ 正在生成 PPT",
+        "create_excel": "📊 正在生成 Excel",
+        "generate_image": "🎨 正在生成图像",
+        "memory_search": "🧠 正在检索记忆",
+        "memory_save": "💾 正在保存记忆",
+        "calculate": "🔢 正在计算",
+        "translate": "🌐 正在翻译",
+        "summarize": "📝 正在总结",
+        "analyze_image": "👁️ 正在分析图片",
+        "fetch_url": "🌍 正在获取网页内容",
+    }
+
+    _TOOL_DONE_LABELS: Dict[str, str] = {
+        "web_search": "✅ 搜索完成",
+        "search_web": "✅ 搜索完成",
+        "get_weather": "✅ 获取天气完成",
+        "read_file": "✅ 文件读取完成",
+        "write_file": "✅ 文件写入完成",
+        "patch_file": "✅ 文件修改完成",
+        "replace_text": "✅ 内容替换完成",
+        "list_files": "✅ 文件列举完成",
+        "execute_code": "✅ 代码执行完成",
+        "run_python": "✅ Python 运行完成",
+        "run_command": "✅ 命令执行完成",
+        "open_application": "✅ 应用已打开",
+        "close_application": "✅ 应用已关闭",
+        "get_system_info": "✅ 系统信息获取完成",
+        "get_cpu_info": "✅ CPU 状态获取完成",
+        "get_memory_info": "✅ 内存状态获取完成",
+        "get_disk_info": "✅ 磁盘状态获取完成",
+        "get_network_info": "✅ 网络状态获取完成",
+        "get_processes": "✅ 进程列表获取完成",
+        "take_screenshot": "✅ 截图完成",
+        "search_files": "✅ 文件搜索完成",
+        "create_document": "✅ 文档已创建",
+        "create_ppt": "✅ PPT 生成完成",
+        "create_excel": "✅ Excel 生成完成",
+        "generate_image": "✅ 图像生成完成",
+        "memory_search": "✅ 记忆检索完成",
+        "memory_save": "✅ 记忆已保存",
+        "calculate": "✅ 计算完成",
+        "translate": "✅ 翻译完成",
+        "summarize": "✅ 总结完成",
+        "analyze_image": "✅ 图片分析完成",
+        "fetch_url": "✅ 网页内容获取完成",
+    }
 
     def __init__(
         self,
@@ -122,6 +198,49 @@ class UnifiedAgent(Agent):
                 self._tool_router = None
         else:
             self._tool_router = None
+
+    # ─── 工具结果压缩（防止 context window 膨胀）──────────────────────────────
+
+    def _compress_observation(self, text: str, tool_name: str) -> str:
+        """
+        如果工具输出超过 _OBS_COMPRESS_THRESHOLD，调用轻量 LLM 压缩为关键摘要，
+        保留数值、链接、结论等关键信息，删除冗余说明。
+        超时或压缩失败时回退为硬截断。
+        """
+        if len(text) <= self._OBS_COMPRESS_THRESHOLD:
+            return text
+        target = self._OBS_COMPRESS_THRESHOLD // 2
+        try:
+            resp = self.llm.generate_content(
+                prompt=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"压缩以下工具输出为 {target} 字以内，"
+                            f"保留所有关键数据、数字、链接和结论，删除冗余说明：\n\n{text[:8000]}"
+                        ),
+                    }
+                ],
+                model="gemini-2.0-flash-lite",
+                system_instruction=(
+                    "你是文本压缩专家。只输出压缩后的内容，不添加任何说明或前缀。"
+                ),
+                tools=None,
+                stream=False,
+            )
+            compressed = (resp.get("content") or "").strip()
+            if compressed and len(compressed) < len(text):
+                logger.debug(
+                    f"[UnifiedAgent] 🗜 {tool_name} 观测压缩: "
+                    f"{len(text)} → {len(compressed)} 字符"
+                )
+                return compressed
+        except Exception as _ce:
+            logger.debug(f"[UnifiedAgent] 观测压缩跳过 ({tool_name}): {_ce}")
+        # 硬截断兜底
+        return text[: self._OBS_COMPRESS_THRESHOLD] + (
+            f"\n[···已截断，原始长度 {len(text)} 字符]"
+        )
 
     def run(
         self,
@@ -267,25 +386,29 @@ class UnifiedAgent(Agent):
         except Exception as _se:
             logger.debug(f"[UnifiedAgent] Skill 注入跳过: {_se}")
 
-        # ── 注入本地时间（每次请求动态注入，确保模型感知当前时间）──────────────
+        # ── 注入本地时间到用户消息（而非 system_instruction）──────────────────
+        # 保持 system_instruction 内容稳定，使 Gemini 服务端可对其做 context caching，
+        # 避免每分钟时间戳变化导致缓存失效、重复计费。
         _now = datetime.now()
         _weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
             _now.weekday()
         ]
-        _time_prefix = (
-            f"当前本地时间：{_now.strftime('%Y年%m月%d日 %H:%M')}（{_weekday}）\n\n"
-        )
-        _effective_instruction = _time_prefix + _effective_instruction
+        _time_str = f"当前本地时间：{_now.strftime('%Y年%m月%d日 %H:%M')}（{_weekday}）"
+        if current_history and current_history[-1]["role"] == "user":
+            current_history[-1]["content"] = (
+                _time_str + "\n\n" + current_history[-1]["content"]
+            )
+
+        # ── 工具集：在循环外选定一次，后续步骤复用，避免每步重复过滤 ──────────────
+        _all_tools_def = self.registry.get_definitions()
+        if self._tool_router and _all_tools_def:
+            _loop_tools_def = self._tool_router.select(_all_tools_def, safe_input)
+        else:
+            _loop_tools_def = _all_tools_def
 
         while steps_taken < self.MAX_STEPS:
             steps_taken += 1
-
-            all_tools_def = self.registry.get_definitions()
-            # v3: 用 ToolRouter 过滤工具，减少 token 消耗
-            if self._tool_router and all_tools_def:
-                tools_def = self._tool_router.select(all_tools_def, safe_input)
-            else:
-                tools_def = all_tools_def
+            tools_def = _loop_tools_def
 
             try:
                 response = self.llm.generate_content(
@@ -300,11 +423,25 @@ class UnifiedAgent(Agent):
                 tool_calls = response.get("tool_calls", [])
 
                 if content_text:
-                    yield AgentStep(
-                        step_type=AgentStepType.THOUGHT, content=content_text
+                    # 对过长的 chain-of-thought 进行截断展示（避免污染步骤面板）
+                    _display_thought = (
+                        content_text
+                        if len(content_text) <= 300
+                        else content_text[:300] + "…"
                     )
-                    _pub("THOUGHT", content_text)
-                    current_history.append({"role": "model", "content": content_text})
+                    yield AgentStep(
+                        step_type=AgentStepType.THOUGHT, content=_display_thought
+                    )
+                    _pub("THOUGHT", _display_thought)
+                    # 中间 Thought（后面跟着工具调用）截断至 150 字符入历史，
+                    # 减少后续每轮循环重新传给 LLM 的 token 量；
+                    # 最终答案（无工具调用）则完整保留。
+                    _hist_content = (
+                        content_text[:150] + "…"
+                        if tool_calls and len(content_text) > 150
+                        else content_text
+                    )
+                    current_history.append({"role": "model", "content": _hist_content})
 
                 if not tool_calls:
                     # ── 2. 输出质量验收 ──────────────────────────────
@@ -449,17 +586,39 @@ class UnifiedAgent(Agent):
                     tool_name = tool_call.get("name")
                     tool_args = tool_call.get("args", {})
 
+                    # Copilot 风格：用人类可读的中文描述替代原始工具名
+                    _action_label = self._TOOL_ACTION_LABELS.get(
+                        tool_name, f"⚙️ 正在调用 {tool_name}"
+                    )
+                    # 附加关键参数摘要（如搜索关键词、文件路径等）
+                    _arg_hint = ""
+                    if tool_args:
+                        for _key in (
+                            "query",
+                            "keyword",
+                            "path",
+                            "filename",
+                            "url",
+                            "command",
+                            "code",
+                        ):
+                            if _key in tool_args:
+                                _val = str(tool_args[_key])[:40]
+                                _arg_hint = f"：{_val}"
+                                break
+                    _action_display = _action_label + _arg_hint
+
                     action_obj = AgentAction(
                         tool_name=tool_name, tool_args=tool_args, tool_call_id=None
                     )
                     yield AgentStep(
                         step_type=AgentStepType.ACTION,
-                        content=f"Calling tool: {tool_name}",
+                        content=_action_display,
                         action=action_obj,
                     )
                     _pub(
                         "ACTION",
-                        f"Calling tool: {tool_name}",
+                        _action_display,
                         tool_name=tool_name,
                         tool_args=tool_args,
                     )
@@ -472,7 +631,8 @@ class UnifiedAgent(Agent):
                     _n = tc.get("name")
                     _a = tc.get("args", {})
                     try:
-                        return _n, str(self.registry.execute(_n, _a))
+                        raw = str(self.registry.execute(_n, _a))
+                        return _n, self._compress_observation(raw, _n)
                     except Exception as _e:
                         return _n, f"Error: {_e}"
 
@@ -491,10 +651,14 @@ class UnifiedAgent(Agent):
                     for tool_call in tool_calls:
                         _n = tool_call.get("name")
                         observation = observations.get(_n, "Error: result missing")
+                        _done_label = self._TOOL_DONE_LABELS.get(
+                            _n, f"✅ {_n} 执行完成"
+                        )
                         yield AgentStep(
                             step_type=AgentStepType.OBSERVATION,
                             content=observation,
                             observation=observation,
+                            metadata={"done_label": _done_label},
                         )
                         _pub(
                             "OBSERVATION",
@@ -502,16 +666,28 @@ class UnifiedAgent(Agent):
                             tool_name=_n,
                             observation=observation[:500],
                         )
+                        # 工具原始输出可能很长（搜索结果、文件内容等）；
+                        # 完整内容已通过 yield 展示给用户界面，
+                        # 回传给 LLM 的 history 只需保留前 800 字符，
+                        # 避免大块原始文本在后续每轮循环中重复计费。
+                        _obs_hist = (
+                            observation[:800]
+                            + "\n[...内容已截断，如需完整数据请重新调用工具]"
+                            if len(observation) > 800
+                            else observation
+                        )
                         current_history.append(
-                            {"role": "function", "name": _n, "content": observation}
+                            {"role": "function", "name": _n, "content": _obs_hist}
                         )
                 else:
                     # 单工具直接执行
                     _n, observation = _exec_one(tool_calls[0])
+                    _done_label = self._TOOL_DONE_LABELS.get(_n, f"✅ {_n} 执行完成")
                     yield AgentStep(
                         step_type=AgentStepType.OBSERVATION,
                         content=observation,
                         observation=observation,
+                        metadata={"done_label": _done_label},
                     )
                     _pub(
                         "OBSERVATION",
@@ -519,8 +695,14 @@ class UnifiedAgent(Agent):
                         tool_name=_n,
                         observation=observation[:500],
                     )
+                    _obs_hist = (
+                        observation[:800]
+                        + "\n[...内容已截断，如需完整数据请重新调用工具]"
+                        if len(observation) > 800
+                        else observation
+                    )
                     current_history.append(
-                        {"role": "function", "name": _n, "content": observation}
+                        {"role": "function", "name": _n, "content": _obs_hist}
                     )
 
             except Exception as e:
