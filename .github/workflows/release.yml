@@ -100,40 +100,25 @@ jobs:
       - name: Smoke-test built EXE (import check)
         shell: pwsh
         run: |
-          # Run a Python import check inside the built _internal environment
-          # to verify all critical C extensions were bundled correctly.
-          # Uses the venv Python with sys.path pointed at _internal so it
-          # mirrors what the frozen exe sees at runtime.
-          $internalDir = Resolve-Path "dist\Koto\_internal"
-          $checkScript = @"
-import sys, os
-sys.path.insert(0, r'$internalDir')
-os.chdir(r'$internalDir')
-
-critical = [
-    'psutil', 'flask', 'flask_cors', 'requests', 'httpx',
-    'cryptography', 'jwt', 'PIL', 'lxml', 'bs4',
-    'pandas', 'numpy', 'openpyxl', 'docx', 'pptx',
-    'schedule', 'markdown', 'jieba',
-    'langchain_core', 'langgraph',
-    'google.genai',
-]
-failed = []
-for mod in critical:
-    try:
-        __import__(mod)
-    except Exception as e:
-        failed.append(f'{mod}: {e}')
-
-if failed:
-    print('::error::EXE smoke test FAILED - missing modules:')
-    for f in failed:
-        print(f'  {f}')
-    sys.exit(1)
-else:
-    print(f'Smoke test passed: all {len(critical)} critical modules importable')
-"@
-          $checkScript | .\.venv\Scripts\python.exe -
+          $internalDir = (Resolve-Path "dist\Koto\_internal").Path
+          $script = "import sys, os`n"
+          $script += "sys.path.insert(0, r'" + $internalDir + "')`n"
+          $script += "os.chdir(r'" + $internalDir + "')`n"
+          $script += "critical = ['psutil','flask','flask_cors','requests','httpx','cryptography','jwt','PIL','lxml','bs4','pandas','numpy','openpyxl','docx','pptx','schedule','markdown','jieba','langchain_core','langgraph','google.genai']`n"
+          $script += "failed = [f'{m}: {e}' for m in critical for e in [None] if (lambda: (__import__(m), None)[-1]) is None or True]`n"
+          $script += "failed = []`n"
+          $script += "for m in critical:`n"
+          $script += "    try:`n"
+          $script += "        __import__(m)`n"
+          $script += "    except Exception as e:`n"
+          $script += "        failed.append(f'{m}: {e}')`n"
+          $script += "if failed:`n"
+          $script += "    [print(f'  MISSING: {f}') for f in failed]`n"
+          $script += "    sys.exit(1)`n"
+          $script += "else:`n"
+          $script += "    print(f'Smoke test passed: all {len(critical)} modules importable')`n"
+          $script | Set-Content -Path "smoke_test.py" -Encoding UTF8
+          .\.venv\Scripts\python.exe smoke_test.py
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Upload build log
