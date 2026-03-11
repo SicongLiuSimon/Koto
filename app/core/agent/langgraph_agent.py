@@ -502,60 +502,60 @@ class LangGraphAgent:
         """
         # ── 工具名 → 中文描述 ──────────────────────────────────────────────
         _TOOL_ACTION_LABELS = {
-            "web_search": "🌐 正在搜索网络",
-            "search_web": "🌐 正在搜索网络",
-            "get_weather": "☁️ 正在获取天气数据",
-            "read_file": "📂 正在读取文件",
-            "write_file": "💾 正在写入文件",
-            "patch_file": "✏️ 正在修改文件",
-            "replace_text": "✏️ 正在替换文件内容",
-            "list_files": "📁 正在列出文件",
-            "execute_code": "⚡ 正在执行代码",
-            "run_python": "🐍 正在运行 Python",
-            "run_command": "💻 正在执行命令",
-            "open_application": "🚀 正在打开应用",
-            "get_system_info": "🖥️ 正在获取系统信息",
-            "get_cpu_info": "📊 正在获取 CPU 状态",
-            "get_memory_info": "📊 正在获取内存状态",
-            "get_disk_info": "💽 正在获取磁盘状态",
-            "get_network_info": "🔌 正在获取网络状态",
-            "get_processes": "📋 正在获取进程列表",
-            "take_screenshot": "📸 正在截图",
-            "search_files": "🔍 正在全盘搜索文件",
-            "create_document": "📄 正在创建文档",
-            "generate_image": "🎨 正在生成图像",
-            "memory_search": "🧠 正在检索记忆",
-            "fetch_url": "🌍 正在获取网页内容",
-            "calculate": "🔢 正在计算",
-            "translate": "🌐 正在翻译",
+            "web_search":        "🌐 正在搜索网络",
+            "search_web":        "🌐 正在搜索网络",
+            "get_weather":       "☁️ 正在获取天气数据",
+            "read_file":         "📂 正在读取文件",
+            "write_file":        "💾 正在写入文件",
+            "patch_file":        "✏️ 正在修改文件",
+            "replace_text":      "✏️ 正在替换文件内容",
+            "list_files":        "📁 正在列出文件",
+            "execute_code":      "⚡ 正在执行代码",
+            "run_python":        "🐍 正在运行 Python",
+            "run_command":       "💻 正在执行命令",
+            "open_application":  "🚀 正在打开应用",
+            "get_system_info":   "🖥️ 正在获取系统信息",
+            "get_cpu_info":      "📊 正在获取 CPU 状态",
+            "get_memory_info":   "📊 正在获取内存状态",
+            "get_disk_info":     "💽 正在获取磁盘状态",
+            "get_network_info":  "🔌 正在获取网络状态",
+            "get_processes":     "📋 正在获取进程列表",
+            "take_screenshot":   "📸 正在截图",
+            "search_files":      "🔍 正在全盘搜索文件",
+            "create_document":   "📄 正在创建文档",
+            "generate_image":    "🎨 正在生成图像",
+            "memory_search":     "🧠 正在检索记忆",
+            "fetch_url":         "🌍 正在获取网页内容",
+            "calculate":         "🔢 正在计算",
+            "translate":         "🌐 正在翻译",
         }
         _TOOL_DONE_LABELS = {
-            "web_search": "✅ 搜索完成",
-            "search_web": "✅ 搜索完成",
-            "get_weather": "✅ 天气数据已获取",
-            "read_file": "✅ 文件读取完成",
-            "write_file": "✅ 文件写入完成",
-            "patch_file": "✅ 文件修改完成",
-            "replace_text": "✅ 内容替换完成",
-            "list_files": "✅ 文件列举完成",
-            "execute_code": "✅ 代码执行完成",
-            "run_python": "✅ Python 运行完成",
-            "run_command": "✅ 命令执行完成",
-            "open_application": "✅ 应用已打开",
-            "get_system_info": "✅ 系统信息已获取",
-            "get_cpu_info": "✅ CPU 状态已获取",
-            "get_memory_info": "✅ 内存状态已获取",
-            "get_disk_info": "✅ 磁盘状态已获取",
-            "get_network_info": "✅ 网络状态已获取",
-            "get_processes": "✅ 进程列表已获取",
-            "take_screenshot": "✅ 截图完成",
-            "search_files": "✅ 文件搜索完成",
-            "create_document": "✅ 文档已创建",
-            "generate_image": "✅ 图像生成完成",
-            "memory_search": "✅ 记忆检索完成",
-            "fetch_url": "✅ 网页内容已获取",
-            "calculate": "✅ 计算完成",
-            "translate": "✅ 翻译完成",
+            "web_search":        "✅ 搜索完成",
+            "search_web":        "✅ 搜索完成",
+            "get_weather":       "✅ 天气数据已获取",
+            "read_file":         "✅ 文件读取完成",
+            "write_file":        "✅ 文件写入完成",
+            "patch_file":        "✅ 文件修改完成",
+            "replace_text":      "✅ 内容替换完成",
+            "list_files":        "✅ 文件列举完成",
+            "execute_code":      "✅ 代码执行完成",
+            "run_python":        "✅ Python 运行完成",
+            "run_command":       "✅ 命令执行完成",
+            "open_application":  "✅ 应用已打开",
+            "get_system_info":   "✅ 系统信息已获取",
+            "get_cpu_info":      "✅ CPU 状态已获取",
+            "get_memory_info":   "✅ 内存状态已获取",
+            "get_disk_info":     "✅ 磁盘状态已获取",
+            "get_network_info":  "✅ 网络状态已获取",
+            "get_processes":     "✅ 进程列表已获取",
+            "take_screenshot":   "✅ 截图完成",
+            "search_files":      "✅ 文件搜索完成",
+            "create_document":   "✅ 文档已创建",
+            "generate_image":    "✅ 图像生成完成",
+            "memory_search":     "✅ 记忆检索完成",
+            "fetch_url":         "✅ 网页内容已获取",
+            "calculate":         "✅ 计算完成",
+            "translate":         "✅ 翻译完成",
         }
 
         state = self._build_initial_state(input_text, history, session_id, **kwargs)
@@ -585,15 +585,8 @@ class LangGraphAgent:
                                         t_name, f"⚙️ 正在调用 {t_name}"
                                     )
                                     _arg_hint = ""
-                                    for _key in (
-                                        "query",
-                                        "keyword",
-                                        "path",
-                                        "filename",
-                                        "url",
-                                        "command",
-                                        "code",
-                                    ):
+                                    for _key in ("query", "keyword", "path", "filename",
+                                                 "url", "command", "code"):
                                         if _key in t_args:
                                             _val = str(t_args[_key])[:40]
                                             _arg_hint = f"：{_val}"
@@ -605,25 +598,15 @@ class LangGraphAgent:
                                         "tool": t_name,
                                         "args": t_args,
                                     }
-                                    yield {
-                                        "type": "tool_call",
-                                        "content": t_name,
-                                        "args": t_args,
-                                    }
+                                    yield {"type": "tool_call", "content": t_name,
+                                           "args": t_args}
                             elif msg.content:
                                 yield {"type": "token", "content": msg.content}
                         elif isinstance(msg, ToolMessage):
                             # 工具结果到达时：先发送完成通知，再发结果
-                            _done_tool = (
-                                _last_tool_names.pop(0) if _last_tool_names else ""
-                            )
+                            _done_tool = _last_tool_names.pop(0) if _last_tool_names else ""
                             _done_label = _TOOL_DONE_LABELS.get(
-                                _done_tool,
-                                (
-                                    f"✅ {_done_tool} 执行完成"
-                                    if _done_tool
-                                    else "✅ 工具执行完成"
-                                ),
+                                _done_tool, f"✅ {_done_tool} 执行完成" if _done_tool else "✅ 工具执行完成"
                             )
                             yield {
                                 "type": "step_status",

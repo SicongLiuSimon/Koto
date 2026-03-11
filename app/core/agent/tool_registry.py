@@ -1,7 +1,6 @@
 import inspect
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as _FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FuturesTimeout
 from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from app.core.agent.base import AgentPlugin
@@ -10,7 +9,6 @@ logger = logging.getLogger(__name__)
 
 # 单个工具调用的最大允许执行秒数（超时后返回错误，不挂死 agent 循环）
 _TOOL_TIMEOUT: int = 60
-
 
 class ToolRegistry:
     """

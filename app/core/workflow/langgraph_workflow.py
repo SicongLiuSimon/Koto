@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 
 # ── 可选依赖 ─────────────────────────────────────────────────────────────────
 try:
+    from langgraph.graph import StateGraph, END
+    from langgraph.types import Send  # v1.x: Send moved from langgraph.graph to langgraph.types
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
+    from typing_extensions import TypedDict, Annotated
     import operator
 
     from langchain_core.messages import (
@@ -114,7 +118,6 @@ def _rag_context(query: str, k: int = 4) -> str:
     """从本地知识库检索与 query 相关的片段，格式化后追加到 LLM 提示词。"""
     try:
         from app.core.services.rag_service import get_rag_service
-
         rag = get_rag_service()
         if not rag.stats().get("initialized"):
             return ""
@@ -259,7 +262,6 @@ def _build_research_document_graph(checkpointer=None):
 
     if checkpointer is None:
         from app.core.agent.checkpoint_manager import get_checkpointer
-
         checkpointer = get_checkpointer()
     return graph.compile(checkpointer=checkpointer)
 
@@ -416,7 +418,6 @@ def _build_multi_agent_ppt_graph(checkpointer=None):
 
     if checkpointer is None:
         from app.core.agent.checkpoint_manager import get_checkpointer
-
         checkpointer = get_checkpointer()
     return graph.compile(checkpointer=checkpointer)
 

@@ -101,7 +101,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # ── 文档生成工具（Word / PDF / Excel / PPT） ──────────────────────
     try:
         from app.core.agent.plugins.doc_gen_plugin import DocGenPlugin
-
         registry.register_plugin(DocGenPlugin())
     except Exception as _e:
         logger.debug(f"[_build_registry] DocGenPlugin 跳过: {_e}")

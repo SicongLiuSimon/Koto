@@ -320,13 +320,8 @@ class ProactiveAgent:
             return None
 
         self._last_suggestion_topic = picked
-        return _make_msg(
-            "suggestion",
-            content,
-            priority="low",
-            triggered_by=f"topic:{picked}",
-            ttl_hours=48,
-        )
+        return _make_msg("suggestion", content, priority="low",
+                         triggered_by=f"topic:{picked}", ttl_hours=48)
 
     def _build_failed_retry(
         self, failed_tasks: List[Dict], llm_fn=None
@@ -433,8 +428,7 @@ class ProactiveAgent:
                     queue_raw = []
                 # 过滤过期/已关闭条目
                 self._queue = [
-                    m
-                    for m in queue_raw
+                    m for m in queue_raw
                     if not m.get("dismissed")
                     and datetime.fromisoformat(m.get("expires_at", "2000-01-01")) > now
                 ]
