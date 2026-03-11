@@ -341,6 +341,9 @@ class SkillRecorder:
         # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
         _auto_register_intent_binding(skill_def)
 
+        # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
+        _auto_register_intent_binding(skill_def)
+
         return skill_def.id
 
     # ── 私有辅助 ─────────────────────────────────────────────────────────────
