@@ -199,17 +199,17 @@ _DOMAIN_KEYWORDS: Dict[str, List[str]] = {
 
 # 领域 → 适用任务类型的映射
 _DOMAIN_TO_TASK_TYPES: Dict[str, List[str]] = {
-    "coding": ["CODER", "CHAT"],
-    "writing": ["FILE_GEN", "CHAT"],
-    "research": ["RESEARCH", "CHAT"],
-    "finance": ["RESEARCH", "CHAT"],
-    "legal": ["CHAT", "FILE_GEN"],
-    "medical": ["CHAT"],
-    "education": ["CHAT", "RESEARCH"],
-    "marketing": ["CHAT", "FILE_GEN"],
+    "coding":       ["CODER", "CHAT"],
+    "writing":      ["FILE_GEN", "CHAT"],
+    "research":     ["RESEARCH", "CHAT"],
+    "finance":      ["RESEARCH", "CHAT"],
+    "legal":        ["CHAT", "FILE_GEN"],
+    "medical":      ["CHAT"],
+    "education":    ["CHAT", "RESEARCH"],
+    "marketing":    ["CHAT", "FILE_GEN"],
     "productivity": ["CHAT", "AGENT"],
-    "lifestyle": ["CHAT"],
-    "general": ["CHAT"],
+    "lifestyle":    ["CHAT"],
+    "general":      ["CHAT"],
 }
 
 
@@ -221,24 +221,11 @@ def _infer_task_types(domain: str, description: str = "") -> List[str]:
     base = list(_DOMAIN_TO_TASK_TYPES.get(domain, ["CHAT"]))
     desc_lower = description.lower()
     extra: List[str] = []
-    if any(
-        kw in desc_lower
-        for kw in ("代码", "编程", "debug", "python", "javascript", "函数", "重构")
-    ):
+    if any(kw in desc_lower for kw in ("代码", "编程", "debug", "python", "javascript", "函数", "重构")):
         extra.append("CODER")
     if any(kw in desc_lower for kw in ("研究", "分析", "调研", "报告", "论文", "深度")):
         extra.append("RESEARCH")
-    if any(
-        kw in desc_lower
-        for kw in (
-            "生成文件",
-            "生成文档",
-            "输出报告",
-            "生成word",
-            "生成excel",
-            "生成ppt",
-        )
-    ):
+    if any(kw in desc_lower for kw in ("生成文件", "生成文档", "输出报告", "生成word", "生成excel", "生成ppt")):
         extra.append("FILE_GEN")
     if any(kw in desc_lower for kw in ("批注", "审查", "校对", "修改文档")):
         extra.append("DOC_ANNOTATE")
@@ -847,9 +834,7 @@ class SkillAutoBuilder:
             ai_prompt_text = ai_result.get("prompt", "")
             ai_intent = ai_result.get("intent_description", "")
             ai_tags = ai_result.get("tags") or auto_tags
-            ai_task_types = ai_result.get("task_types") or _infer_task_types(
-                "general", effective_description
-            )
+            ai_task_types = ai_result.get("task_types") or _infer_task_types("general", effective_description)
             # 融合用户传入的 tags
             merged_tags = list(dict.fromkeys(auto_tags + ai_tags))  # 去重保序
 
@@ -867,9 +852,7 @@ class SkillAutoBuilder:
                         name="input", description="用户输入的内容", required=True
                     )
                 ],
-                output_spec=OutputSpec(
-                    format="any", description=f"以「{name}」风格回答"
-                ),
+                output_spec=OutputSpec(format="any", description=f"以「{name}」风格回答"),
                 task_types=ai_task_types,
                 enabled=enabled,
                 version="1.0.0",
@@ -945,11 +928,7 @@ class SkillAutoBuilder:
                 max_tokens=1500,
             )
 
-            text = (
-                raw["text"].strip()
-                if isinstance(raw, dict) and "text" in raw
-                else str(raw).strip()
-            )
+            text = raw["text"].strip() if isinstance(raw, dict) and "text" in raw else str(raw).strip()
 
             # 容错解析：去掉可能的 ```json ``` 包裹
             if text.startswith("```"):

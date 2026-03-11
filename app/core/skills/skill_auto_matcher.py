@@ -71,155 +71,30 @@ class SkillAutoMatcher:
 
     # ── 规则兜底：意图关键词 → Skill ID ──────────────────────────────────────
     _PATTERN_MAP: List[dict] = [
-        {
-            "skill_id": "concise_mode",
-            "patterns": [
-                "简短",
-                "简洁",
-                "一句话",
-                "快速说",
-                "长话短说",
-                "总结一下",
-                "brief",
-                "concise",
-                "short",
-            ],
-        },
-        {
-            "skill_id": "step_by_step",
-            "patterns": [
-                "一步一步",
-                "分步骤",
-                "操作流程",
-                "详细步骤",
-                "怎么做",
-                "如何做",
-                "请教我",
-                "step by step",
-                "step-by-step",
-            ],
-        },
-        {
-            "skill_id": "teaching_mode",
-            "patterns": [
-                "教我",
-                "讲解",
-                "通俗解释",
-                "像老师一样",
-                "我没学过",
-                "能解释一下",
-                "浅显",
-                "explain",
-                "teach me",
-            ],
-        },
-        {
-            "skill_id": "professional_tone",
-            "patterns": [
-                "正式一点",
-                "专业一点",
-                "商务语气",
-                "写邮件",
-                "汇报",
-                "报告",
-                "formal",
-                "professional",
-            ],
-        },
-        {
-            "skill_id": "writing_assistant",
-            "patterns": [
-                "润色",
-                "改写",
-                "优化表达",
-                "重写",
-                "整理成文",
-                "polish",
-                "rewrite",
-            ],
-        },
-        {
-            "skill_id": "code_best_practices",
-            "patterns": [
-                "写代码",
-                "重构",
-                "代码优化",
-                "最佳实践",
-                "写个函数",
-                "实现一下",
-                "best practice",
-            ],
-        },
-        {
-            "skill_id": "security_aware",
-            "patterns": [
-                "安全",
-                "风险",
-                "漏洞",
-                "加密",
-                "权限",
-                "注入",
-                "security",
-                "vulnerability",
-            ],
-        },
-        {
-            "skill_id": "research_depth",
-            "patterns": [
-                "深入分析",
-                "深度研究",
-                "详细分析",
-                "全面比较",
-                "in-depth",
-                "comprehensive",
-            ],
-        },
-        {
-            "skill_id": "task_planner",
-            "patterns": [
-                "计划",
-                "安排",
-                "待办",
-                "路线图",
-                "拆解任务",
-                "里程碑",
-                "plan",
-                "roadmap",
-                "todo",
-            ],
-        },
-        {
-            "skill_id": "complex_task_planner",
-            "patterns": [
-                "复杂任务",
-                "多步骤",
-                "分阶段",
-                "系统化",
-                "全套流程",
-                "综合执行",
-                "整体规划",
-                "complex task",
-                "multi-step",
-                "全流程",
-                "逐步完成",
-                "分步执行",
-                "帮我完成一个复杂",
-                "我需要分多步",
-                "step-by-step execution",
-            ],
-        },
-        {
-            "skill_id": "data_analysis",
-            "patterns": [
-                "数据分析",
-                "统计",
-                "图表",
-                "可视化",
-                "趋势",
-                "data analysis",
-                "visualization",
-            ],
-        },
+        {"skill_id": "concise_mode",
+         "patterns": ["简短", "简洁", "一句话", "快速说", "长话短说", "总结一下", "brief", "concise", "short"]},
+        {"skill_id": "step_by_step",
+         "patterns": ["一步一步", "分步骤", "操作流程", "详细步骤", "怎么做", "如何做", "请教我", "step by step", "step-by-step"]},
+        {"skill_id": "teaching_mode",
+         "patterns": ["教我", "讲解", "通俗解释", "像老师一样", "我没学过", "能解释一下", "浅显", "explain", "teach me"]},
+        {"skill_id": "professional_tone",
+         "patterns": ["正式一点", "专业一点", "商务语气", "写邮件", "汇报", "报告", "formal", "professional"]},
+        {"skill_id": "writing_assistant",
+         "patterns": ["润色", "改写", "优化表达", "重写", "整理成文", "polish", "rewrite"]},
+        {"skill_id": "code_best_practices",
+         "patterns": ["写代码", "重构", "代码优化", "最佳实践", "写个函数", "实现一下", "best practice"]},
+        {"skill_id": "security_aware",
+         "patterns": ["安全", "风险", "漏洞", "加密", "权限", "注入", "security", "vulnerability"]},
+        {"skill_id": "research_depth",
+         "patterns": ["深入分析", "深度研究", "详细分析", "全面比较", "in-depth", "comprehensive"]},
+        {"skill_id": "task_planner",
+         "patterns": ["计划", "安排", "待办", "路线图", "拆解任务", "里程碑", "plan", "roadmap", "todo"]},
+        {"skill_id": "complex_task_planner",
+         "patterns": ["复杂任务", "多步骤", "分阶段", "系统化", "全套流程", "综合执行", "整体规划",
+                       "complex task", "multi-step", "全流程", "逐步完成", "分步执行",
+                       "帮我完成一个复杂", "我需要分多步", "step-by-step execution"]},
+        {"skill_id": "data_analysis",
+         "patterns": ["数据分析", "统计", "图表", "可视化", "趋势", "data analysis", "visualization"]},
         # ── 专项调试技能（必须在 debug_python 前，避免被截胡）──
         {
             "skill_id": "debug_api",
@@ -1120,10 +995,7 @@ class SkillAutoMatcher:
         # 用户注册的意图绑定（导入失败时静默跳过）
         if len(matched) < _MAX_AUTO_SKILLS:
             try:
-                from app.core.skills.skill_trigger_binding import (
-                    get_skill_binding_manager,
-                )
-
+                from app.core.skills.skill_trigger_binding import get_skill_binding_manager
                 user_matched = get_skill_binding_manager().match_intent(user_input)
                 seen = set(matched)
                 for sid in user_matched:
