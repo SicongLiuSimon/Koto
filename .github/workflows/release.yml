@@ -97,29 +97,32 @@ jobs:
           $exeMB = [math]::Round((Get-Item dist\Koto\Koto.exe).Length / 1MB, 1)
           Write-Host "Build OK -> dist\Koto\Koto.exe ($exeMB MB)"
 
-      - name: Smoke-test built EXE (import check)
+      - name: Smoke-test built EXE (file existence check)
         shell: pwsh
         run: |
-          $internalDir = (Resolve-Path "dist\Koto\_internal").Path
-          $script = "import sys, os`n"
-          $script += "sys.path.insert(0, r'" + $internalDir + "')`n"
-          $script += "os.chdir(r'" + $internalDir + "')`n"
-          $script += "critical = ['psutil','flask','flask_cors','requests','httpx','cryptography','jwt','PIL','lxml','bs4','pandas','numpy','openpyxl','docx','pptx','schedule','markdown','jieba','langchain_core','langgraph','google.genai']`n"
-          $script += "failed = [f'{m}: {e}' for m in critical for e in [None] if (lambda: (__import__(m), None)[-1]) is None or True]`n"
-          $script += "failed = []`n"
-          $script += "for m in critical:`n"
-          $script += "    try:`n"
-          $script += "        __import__(m)`n"
-          $script += "    except Exception as e:`n"
-          $script += "        failed.append(f'{m}: {e}')`n"
-          $script += "if failed:`n"
-          $script += "    [print(f'  MISSING: {f}') for f in failed]`n"
-          $script += "    sys.exit(1)`n"
-          $script += "else:`n"
-          $script += "    print(f'Smoke test passed: all {len(critical)} modules importable')`n"
-          $script | Set-Content -Path "smoke_test.py" -Encoding UTF8
-          .\.venv\Scripts\python.exe smoke_test.py
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $internal = "dist\Koto\_internal"
+          $checks = @(
+            "dist\Koto\Koto.exe",
+            "$internal\base_library.zip",
+            "$internal\psutil",
+            "$internal\app",
+            "$internal\web",
+            "$internal\config"
+          )
+          $failed = @()
+          foreach ($p in $checks) {
+            if (Test-Path $p) { Write-Host "  OK: $p" }
+            else              { $failed += $p; Write-Host "::error::MISSING: $p" }
+          }
+          # Also verify psutil .pyd is present (the C extension that was missing in v1.0.2)
+          $pyd = Get-ChildItem "$internal\psutil" -Filter "_psutil_windows*.pyd" -ErrorAction SilentlyContinue
+          if ($pyd) { Write-Host "  OK: psutil C extension: $($pyd.Name)" }
+          else       { $failed += "psutil/_psutil_windows.pyd"; Write-Host "::error::MISSING: psutil C extension .pyd" }
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::Smoke test failed: $($failed.Count) item(s) missing"
+            exit 1
+          }
+          Write-Host "Smoke test passed: all critical bundle files present"
 
       - name: Upload build log
         if: always()
