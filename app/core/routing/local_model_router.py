@@ -970,8 +970,25 @@ class LocalModelRouter:
             )
             try:
                 from app.core.skills.skill_manager import SkillManager
+                # AutoMatcher + BindingManager 双路径合并
+                _temp_ids: list = []
+                try:
+                    from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+                    _temp_ids = SkillAutoMatcher.match(
+                        user_input=user_input or "", task_type="CHAT"
+                    )
+                except Exception:
+                    pass
+                try:
+                    from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+                    _binding_ids = get_skill_binding_manager().match_intent(user_input or "")
+                    if _binding_ids:
+                        _temp_ids = list(dict.fromkeys(_temp_ids + _binding_ids))
+                except Exception:
+                    pass
                 sys_prompt = SkillManager.inject_into_prompt(
-                    _base, task_type="CHAT", user_input=user_input
+                    _base, task_type="CHAT", user_input=user_input,
+                    temp_skill_ids=_temp_ids,
                 )
             except Exception:
                 sys_prompt = _base

@@ -31,6 +31,7 @@ const API = {
 const state = {
   currentTab: 'catalog',    // catalog | library | studio | import-export
   activeCategory: 'all',
+  activeNature: 'all',      // all | model_hint | domain_skill | system
   searchQuery: '',
   allSkills: [],
   filteredSkills: [],
@@ -94,9 +95,14 @@ async function loadCatalog(category = null) {
       data = await api('GET', API.search(state.searchQuery));
     } else {
       let url = API.catalog();
+      const params = [];
       if (state.activeCategory && state.activeCategory !== 'all') {
-        url += `?category=${state.activeCategory}`;
+        params.push(`category=${state.activeCategory}`);
       }
+      if (state.activeNature && state.activeNature !== 'all') {
+        params.push(`skill_nature=${state.activeNature}`);
+      }
+      if (params.length) url += '?' + params.join('&');
       data = await api('GET', url);
     }
 
@@ -116,10 +122,19 @@ async function loadCatalog(category = null) {
 }
 
 function updateSidebarCounts(skills) {
-  const counts = { all: skills.length, behavior: 0, style: 0, domain: 0, custom: 0 };
-  skills.forEach(s => { counts[s.category] = (counts[s.category] || 0) + 1; });
-  Object.entries(counts).forEach(([cat, count]) => {
+  // Category counts
+  const catCounts = { all: skills.length, behavior: 0, style: 0, domain: 0, workflow: 0, custom: 0 };
+  skills.forEach(s => { catCounts[s.category] = (catCounts[s.category] || 0) + 1; });
+  Object.entries(catCounts).forEach(([cat, count]) => {
     const el = document.querySelector(`[data-cat="${cat}"] .item-count`);
+    if (el) el.textContent = count;
+  });
+
+  // Nature counts
+  const natureCounts = { all: skills.length, model_hint: 0, domain_skill: 0, system: 0 };
+  skills.forEach(s => { natureCounts[s.skill_nature] = (natureCounts[s.skill_nature] || 0) + 1; });
+  Object.entries(natureCounts).forEach(([nat, count]) => {
+    const el = document.querySelector(`[data-nature-count="${nat}"]`);
     if (el) el.textContent = count;
   });
 }
@@ -209,7 +224,12 @@ function renderSkillGrid(gridId, skills) {
 
 function renderSkillCard(skill) {
   const catClass = `category-${skill.category}`;
-  const catLabel = { behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', custom: '✨ 自定义' };
+  const catLabel = { behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', workflow: '📋 工作流', memory: '🧠 记忆', custom: '✨ 自定义' };
+  const natureLabel = { model_hint: '🧠 通用能力', domain_skill: '🎯 任务技能', system: '⚙️ 系统' };
+  const natureClass = skill.skill_nature ? `nature-${skill.skill_nature}` : '';
+  const natureBadge = (skill.skill_nature && skill.skill_nature !== 'system')
+    ? `<span class="sm-tag ${natureClass}">${natureLabel[skill.skill_nature] || skill.skill_nature}</span>`
+    : '';
   const stars = renderStarsMini(skill.rating || 0, skill.rating_count || 0);
   const enabledBadge = skill.enabled
     ? `<span class="sm-badge enabled">● 已启用</span>`
@@ -231,6 +251,7 @@ function renderSkillCard(skill) {
     <div class="sm-card-desc">${escHtml(skill.description || '（暂无描述）')}</div>
     <div class="sm-card-footer">
       <span class="sm-tag ${catClass}">${catLabel[skill.category] || skill.category}</span>
+      ${natureBadge}
       ${(skill.tags || []).slice(0, 2).map(t => `<span class="sm-tag">${escHtml(t)}</span>`).join('')}
       ${stars}
     </div>
@@ -830,10 +851,20 @@ document.addEventListener('DOMContentLoaded', () => {
   // Sidebar category filters
   $$('.sm-sidebar-item[data-cat]').forEach(item => {
     item.addEventListener('click', () => {
-      $$('.sm-sidebar-item').forEach(i => i.classList.remove('active'));
+      $$('.sm-sidebar-item[data-cat]').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
       state.activeCategory = item.dataset.cat;
       loadCatalog(item.dataset.cat);
+    });
+  });
+
+  // Sidebar nature filters
+  $$('.sm-sidebar-item[data-nature]').forEach(item => {
+    item.addEventListener('click', () => {
+      $$('.sm-sidebar-item[data-nature]').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      state.activeNature = item.dataset.nature;
+      loadCatalog();
     });
   });
 

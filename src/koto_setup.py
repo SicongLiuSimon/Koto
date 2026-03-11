@@ -362,12 +362,136 @@ def _run_setup_if_needed():
             pass
 
 
+# ── 本地模型安装提示（首次启动，可选）────────────────
+def _prompt_local_model_if_needed():
+    """
+    首次启动时，如果 Ollama 未运行且用户尚未被提示过，
+    弹窗询问是否安装本地 AI 模型助手。
+    仅当 LocalModelInstaller.exe 存在时才触发（便携版/安装版均适用）。
+    """
+    import socket as _socket
+
+    prompt_flag = APP_ROOT / "config" / "local_model_prompted.json"
+    if prompt_flag.exists():
+        return  # 已提示过，跳过
+
+    installer_exe = APP_ROOT / "LocalModelInstaller.exe"
+    if not installer_exe.exists():
+        return  # 没有安装程序，无法安装
+
+    # 快速检测 Ollama 是否已在运行（11434 端口）
+    try:
+        _s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        _s.settimeout(0.5)
+        _ollama_up = (_s.connect_ex(("127.0.0.1", 11434)) == 0)
+        _s.close()
+    except Exception:
+        _ollama_up = False
+
+    if _ollama_up:
+        # Ollama 已在运行，标记为已提示，直接跳过
+        try:
+            import json as _json
+            prompt_flag.write_text(_json.dumps({"prompted": True, "skipped": "ollama_running"}), encoding="utf-8")
+        except Exception:
+            pass
+        return
+
+    # ── 弹出提示对话框 ──
+    try:
+        import tkinter as tk
+
+        _chosen = {"action": None}
+
+        dialog = tk.Tk()
+        dialog.title("本地 AI 模型（可选）")
+        dialog.resizable(False, False)
+        dialog.configure(bg="#05080f")
+
+        W, H = 420, 210
+        dialog.geometry(f"{W}x{H}")
+        dialog.update_idletasks()
+        sw, sh = dialog.winfo_screenwidth(), dialog.winfo_screenheight()
+        dialog.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
+        dialog.lift()
+        dialog.attributes("-topmost", True)
+        dialog.after(200, lambda: dialog.attributes("-topmost", False))
+
+        try:
+            ico = ASSETS_DIR / "koto_icon.ico"
+            if ico.exists():
+                dialog.iconbitmap(str(ico))
+        except Exception:
+            pass
+
+        tk.Label(
+            dialog,
+            text="是否安装本地 AI 模型助手？",
+            bg="#05080f", fg="#e8eefc",
+            font=("Microsoft YaHei UI", 13, "bold"),
+        ).pack(pady=(22, 6))
+
+        tk.Label(
+            dialog,
+            text="本地模型可加速任务分类，无需联网即可运行。\n需额外下载约 2–8 GB 模型文件。\n（可随时在 Koto 设置中安装或卸载）",
+            bg="#05080f", fg="#9fb3d1",
+            font=("Microsoft YaHei UI", 10),
+            justify="center",
+        ).pack(pady=(0, 18))
+
+        btn_frame = tk.Frame(dialog, bg="#05080f")
+        btn_frame.pack()
+
+        def _on_install():
+            _chosen["action"] = "install"
+            dialog.destroy()
+
+        def _on_skip():
+            _chosen["action"] = "skip"
+            dialog.destroy()
+
+        tk.Button(
+            btn_frame, text="立即安装", command=_on_install,
+            bg="#1a6fcf", fg="#ffffff", activebackground="#2280e8",
+            font=("Microsoft YaHei UI", 10, "bold"),
+            relief="flat", bd=0, padx=18, pady=6, cursor="hand2",
+        ).pack(side="left", padx=(0, 12))
+
+        tk.Button(
+            btn_frame, text="稍后再说", command=_on_skip,
+            bg="#1a2540", fg="#9fb3d1", activebackground="#243055",
+            font=("Microsoft YaHei UI", 10),
+            relief="flat", bd=0, padx=18, pady=6, cursor="hand2",
+        ).pack(side="left")
+
+        dialog.protocol("WM_DELETE_WINDOW", _on_skip)
+        dialog.mainloop()
+
+        # 写入已提示标志（无论选择如何，避免重复弹窗）
+        import json as _json
+        import subprocess as _subprocess
+        prompt_flag.write_text(
+            _json.dumps({"prompted": True, "action": _chosen["action"]}),
+            encoding="utf-8",
+        )
+
+        if _chosen["action"] == "install":
+            _subprocess.Popen([str(installer_exe)], cwd=str(APP_ROOT))
+
+    except Exception:
+        # 弹窗失败不阻塞启动
+        pass
+
+
 # ── 主程序入口 ────────────────────────────────────────
 def main():
     # Step 1: 运行设置向导（首次/强制模式）
     _run_setup_if_needed()
 
-    # Step 2: 启动 Koto 桌面程序
+    # Step 2: 询问是否安装本地 AI 模型（首次启动，可选）
+    _prompt_local_model_if_needed()
+
+    # Step 3: 启动 Koto 桌面程序
     # 兼容 src/ 布局：先找项目根，再找 src/ 子目录
     koto_main_path = BUNDLE_DIR / "koto_app.py"
     if not koto_main_path.exists():

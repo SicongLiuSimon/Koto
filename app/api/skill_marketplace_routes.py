@@ -121,13 +121,15 @@ def get_catalog():
     """
     返回完整 Skill 目录。
     查询参数:
-      category - 按分类过滤 (behavior/style/domain/custom)
-      tag      - 按标签过滤（可多次传入）
-      author   - 按作者过滤
+      category    - 按分类过滤 (behavior/style/domain/workflow/custom)
+      skill_nature - 按性质过滤 (model_hint/domain_skill/system)
+      tag         - 按标签过滤（可多次传入）
+      author      - 按作者过滤
     """
-    category_filter = request.args.get("category", "").strip().lower()
-    tag_filter      = request.args.getlist("tag")
-    author_filter   = request.args.get("author", "").strip().lower()
+    category_filter    = request.args.get("category", "").strip().lower()
+    nature_filter      = request.args.get("skill_nature", "").strip().lower()
+    tag_filter         = request.args.getlist("tag")
+    author_filter      = request.args.get("author", "").strip().lower()
 
     try:
         sm = _sm()
@@ -148,6 +150,8 @@ def get_catalog():
         for s in all_skills:
             if category_filter and s.get("category", "") != category_filter:
                 continue
+            if nature_filter and s.get("skill_nature", "") != nature_filter:
+                continue
             if tag_filter:
                 skill_tags = [t.lower() for t in s.get("tags", [])]
                 if not any(t.lower() in skill_tags for t in tag_filter):
@@ -156,9 +160,13 @@ def get_catalog():
                 continue
             result.append(s)
 
-        # 按分类排序：behavior > style > domain > custom
-        cat_order = {"behavior": 0, "style": 1, "domain": 2, "custom": 3}
-        result.sort(key=lambda x: cat_order.get(x.get("category", ""), 99))
+        # 按性质+分类排序：model_hint 先，domain_skill 后；同性质内按 category 顺序
+        nature_order = {"model_hint": 0, "domain_skill": 1, "system": 2}
+        cat_order = {"behavior": 0, "style": 1, "domain": 2, "workflow": 3, "custom": 4}
+        result.sort(key=lambda x: (
+            nature_order.get(x.get("skill_nature", ""), 9),
+            cat_order.get(x.get("category", ""), 99),
+        ))
 
         return jsonify({
             "success": True,

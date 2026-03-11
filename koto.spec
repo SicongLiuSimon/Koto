@@ -42,8 +42,9 @@ _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.svg'), os.path.join('assets'
 # ── 默认配置模板 ──
 _add(os.path.join(ROOT, 'config', 'gemini_config.env.example'),
      os.path.join('config', 'gemini_config.env.example'))
-_add(os.path.join(ROOT, 'config', 'user_settings.json'),
-     os.path.join('config', 'user_settings.json'))
+# user_settings.json 不打包：含开发者本机绝对路径，且运行时由 web/settings.py
+# 自动按 DEFAULT_SETTINGS 在 exe 同级 config/ 目录创建，无需预置。
+# skill_packs 目录目前为空，保留 _add 调用确保目录未来有内容时自动打包
 _add(os.path.join(ROOT, 'config', 'skill_packs'),   os.path.join('config', 'skill_packs'))
 _add(os.path.join(ROOT, 'config', 'skills'),        os.path.join('config', 'skills'))
 _add(os.path.join(ROOT, 'config', 'workflows'),     os.path.join('config', 'workflows'))
@@ -211,9 +212,6 @@ hiddenimports = [
     'app.api.skill_routes',
     'app.api.skill_marketplace_routes',
 
-    # ── 启动器模块 ──
-    'launcher', 'launcher.modes', 'launcher.health', 'launcher.core',
-
     # ── 模型下载器 ──
     'model_downloader',
 
@@ -306,6 +304,34 @@ for _pkg in _collect_pkgs:
     _d, _b, _h = _safe_collect(_pkg)
     datas += _d
     hiddenimports += _h
+
+# ═══════════════════════════════════════════════
+# 过滤掉体积庞大但运行时无用的数据目录
+# （主要是 numpy/pandas 的 tests/、docs/、benchmarks/ 等）
+# ═══════════════════════════════════════════════
+import re as _re
+_SKIP_PATTERNS = [
+    r'[\\/]tests[\\/]',
+    r'[\\/]test[\\/]',
+    r'[\\/]testing[\\/]',
+    r'[\\/]benchmarks[\\/]',
+    r'[\\/]_bench[\\/]',
+    r'[\\/]docs[\\/]',
+]
+_skip_re = _re.compile('|'.join(_SKIP_PATTERNS), _re.IGNORECASE)
+
+def _filter_datas(datas_list):
+    kept, dropped = [], 0
+    for src, dst in datas_list:
+        if _skip_re.search(src.replace('\\', '/')):
+            dropped += 1
+        else:
+            kept.append((src, dst))
+    if dropped:
+        print(f'[koto.spec] 已过滤 {dropped} 条测试/文档数据文件')
+    return kept
+
+datas = _filter_datas(datas)
 
 # ═══════════════════════════════════════════════
 # Analysis

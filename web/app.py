@@ -4110,7 +4110,18 @@ class Utils:
         if not text or not str(text).strip():
             return True
         t = str(text).strip().lower()
-        return t.startswith("❌") or "失败" in t or "错误" in t
+        if t.startswith("❌") or "失败" in t or "错误" in t:
+            return True
+        # 检测模型声称「无法联网/没有实时数据」的拒绝型回答
+        _no_internet_phrases = [
+            "没有直接联网", "无法直接联网", "无法联网", "没有联网", "不能联网",
+            "没有实时", "无法获取实时", "不能获取实时",
+            "没有访问互联网", "无法访问互联网",
+            "i don't have access to the internet", "i cannot access the internet",
+            "i'm unable to access the internet", "no internet access",
+            "i don't have real-time", "i cannot browse", "i can't browse",
+        ]
+        return any(phrase in t for phrase in _no_internet_phrases)
 
     @staticmethod
     def build_fix_prompt(task_type: str, user_input: str, prev_output: str = "", error_hint: str = "") -> str:
@@ -6182,6 +6193,8 @@ def chat_stream():
                     _multi_summary += f"\n生成文件: {', '.join(os.path.basename(p) for p in saved_files)}"
                 session_manager.append_and_save(f"{session_name}.json", user_input, _multi_summary)
                 print(f"[MULTI_STEP] ✅ 对话历史已保存")
+                _start_memory_extraction(user_input, _multi_summary, [],
+                                         task_type="CODER", session_name=session_name)
             except Exception as save_err:
                 print(f"[MULTI_STEP] ⚠️ 保存对话历史失败: {save_err}")
         
@@ -6279,6 +6292,11 @@ def chat_stream():
                 )
             except Exception:
                 pass
+            try:
+                _start_memory_extraction(user_input, final_answer or '', [],
+                                         task_type="AGENT", session_name=session_name)
+            except Exception:
+                pass
 
         return Response(generate_agent(), mimetype='text/event-stream')
     
@@ -6302,10 +6320,21 @@ def chat_stream():
         try:
             from app.core.skills.skill_trigger_binding import get_skill_binding_manager
             _intent_temp_ids = get_skill_binding_manager().match_intent(user_input or "")
-            if _intent_temp_ids:
-                print(f"[STREAM] 🔗 Intent-matched Skills: {', '.join(_intent_temp_ids)}")
         except Exception:
             pass
+        # AutoMatcher 补充：规则/语义匹配覆盖意图绑定未持久化的场景
+        try:
+            from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+            _auto_ids = SkillAutoMatcher.match(
+                user_input=user_input or "", task_type=task_type or "CHAT"
+            )
+            if _auto_ids:
+                # 合并去重，保持 intent 结果优先
+                _intent_temp_ids = list(dict.fromkeys(_intent_temp_ids + _auto_ids))
+        except Exception:
+            pass
+        if _intent_temp_ids:
+            print(f"[STREAM] 🔗 Auto Skills: {', '.join(_intent_temp_ids)}")
         system_instruction = SkillManager.inject_into_prompt(
             system_instruction, task_type=task_type, user_input=user_input,
             temp_skill_ids=_intent_temp_ids,
@@ -9566,8 +9595,10 @@ def chat_stream():
                                 f"{session_name}.json", user_input, local_full_text,
                                 task=task_type, model_name=f"ollama/{LocalModelRouter._response_model}"
                             )
-                            if task_type == "CHAT":
-                                _start_memory_extraction(user_input, local_full_text, history)
+                            _reflect_types_local = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT"}
+                            if task_type in _reflect_types_local:
+                                _start_memory_extraction(user_input, local_full_text, history,
+                                                        task_type=task_type, session_name=session_name)
                             total_time = time.time() - start_time
                             print(f"[CHAT] ⚡ 本地模型响应完成 ({total_time:.2f}s)")
                             yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"

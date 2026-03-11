@@ -964,6 +964,33 @@ def main():
     except Exception as _sem_err:
         _write_log(f"⚠️ 系统监控启动失败（非致命）: {_sem_err}")
 
+    # === 预热本地路由模型（守护线程，不阻塞窗口创建）===
+    def _init_local_router_async():
+        import socket as _socket
+        time.sleep(3)  # 等待 Flask 和 Ollama 完全就绪
+        try:
+            _s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            _s.settimeout(0.5)
+            _ollama_up = (_s.connect_ex(("127.0.0.1", 11434)) == 0)
+            _s.close()
+        except Exception:
+            _ollama_up = False
+
+        if not _ollama_up:
+            _write_log("🦙 Ollama 未运行，本地模型路由不可用（可运行 LocalModelInstaller 安装）")
+            return
+
+        try:
+            from app.core.routing.local_model_router import LocalModelRouter
+            if LocalModelRouter.init_model():
+                _write_log(f"🦙 本地路由模型已就绪: {LocalModelRouter._model_name}")
+            else:
+                _write_log("🦙 Ollama 运行中但无可用路由模型，请通过 LocalModelInstaller 下载模型")
+        except Exception as _lmr_e:
+            _write_log(f"🦙 本地路由模型初始化跳过: {_lmr_e}")
+
+    threading.Thread(target=_init_local_router_async, daemon=True).start()
+
     # 选择窗口图标（如存在）
     icon_path = None
     ico_path = ASSETS_DIR / "koto_icon.ico"
@@ -1036,11 +1063,18 @@ def main():
     _write_log("🚀 启动 webview.start（窗口事件循环）")
     
     # 在启动时设置图标（仅Windows支持）
-    start_kwargs = {'func': on_shown, 'debug': False}
+    # private_mode=False：关闭隐私模式，使麦克风等权限、Cookie 在重启后保留
+    # storage_path：指定持久化用户数据目录（与前面创建的 .webview2_profile 一致）
+    start_kwargs = {
+        'func': on_shown,
+        'debug': False,
+        'private_mode': False,
+        'storage_path': str(_webview_data_dir),
+    }
     if icon_path:
         start_kwargs['icon'] = icon_path
         _write_log(f"✔ 设置应用图标: {icon_path}")
-    
+
     webview.start(**start_kwargs)
     _write_log("ℹ️ webview.start 结束（窗口已关闭）")
 

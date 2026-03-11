@@ -36,6 +36,7 @@ _COOLDOWN_HOURS = {
     "follow_up": 12,
     "suggestion": 24,
     "reminder": 1,
+    "failed_retry": 48,
 }
 
 
@@ -126,6 +127,12 @@ class ProactiveAgent:
             if msg:
                 self._enqueue(msg)
 
+        # 4. 失败任务重试提示
+        if self._can_fire("failed_retry"):
+            msg = self._build_failed_retry(watcher.get_failed_tasks(), llm_fn)
+            if msg:
+                self._enqueue(msg)
+
     def pending(self) -> List[Dict]:
         """返回未过期、未关闭的消息列表（按优先级排序）。"""
         now = datetime.now()
@@ -187,8 +194,11 @@ class ProactiveAgent:
             time_str = "晚上好"
 
         streak = obs.get("streak", {}).get("days", 0)
-        topics = sorted(obs.get("topics", {}).items(), key=lambda x: -x[1])
-        top_topic = topics[0][0] if topics else ""
+        # 优先使用近期话题（7天内），再 fallback 到全时段
+        recent_7d = obs.get("recent_topics_7d") or {}
+        recent_30d = obs.get("recent_topics_30d") or obs.get("topics", {})
+        recent_topics = recent_7d or recent_30d
+        top_topic = next(iter(recent_topics), "") if recent_topics else ""
 
         if gap_hours > 48:
             days = int(gap_hours / 24)
@@ -225,11 +235,17 @@ class ProactiveAgent:
     ) -> Optional[Dict]:
         if not open_tasks:
             return None
-        # Pick the oldest undone task
-        task = sorted(open_tasks, key=lambda t: t.get("mentioned_at", ""))[0]
+        # 优先选择：多次提到但未完成（revisited_at 存在且 done=False）
+        revisited = [t for t in open_tasks if t.get("revisited_at") and not t.get("done")]
+        if revisited:
+            task = sorted(revisited, key=lambda t: t.get("revisited_at", ""), reverse=True)[0]
+            prefix = "📌 你多次提到"
+        else:
+            task = sorted(open_tasks, key=lambda t: t.get("mentioned_at", ""))[0]
+            prefix = "📌 你之前提到"
         task_text = task["text"]
 
-        content = f"📌 你之前提到：「{task_text}」，这件事完成了吗？需要我帮你继续吗？"
+        content = f"{prefix}：「{task_text}」，这件事完成了吗？需要我帮你继续吗？"
 
         if llm_fn:
             try:
@@ -255,14 +271,19 @@ class ProactiveAgent:
     def _build_suggestion(
         self, obs: Dict, llm_fn=None
     ) -> Optional[Dict]:
-        topics = sorted(obs.get("topics", {}).items(), key=lambda x: -x[1])
+        # 优先使用近期话题（近7天），再 fallback 到近30天或全时段
+        recent_topics = (
+            obs.get("recent_topics_7d")
+            or obs.get("recent_topics_30d")
+            or dict(sorted(obs.get("topics", {}).items(), key=lambda x: -x[1]))
+        )
         phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])
 
-        if not topics and not phrases:
-            return None
-
-        top_topic = topics[0][0] if topics else ""
+        top_topic = next(iter(recent_topics), "") if recent_topics else ""
         top_phrase = phrases[0][0] if phrases else ""
+
+        if not top_topic and not top_phrase:
+            return None
 
         if top_topic:
             content = f"💡 你经常使用 Koto 处理「{top_topic}」相关任务，要不要让我整理一份最佳实践？"
@@ -273,6 +294,42 @@ class ProactiveAgent:
 
         return _make_msg("suggestion", content, priority="low",
                          triggered_by=f"topic:{top_topic}", ttl_hours=48)
+
+    def _build_failed_retry(
+        self, failed_tasks: List[Dict], llm_fn=None
+    ) -> Optional[Dict]:
+        """针对 AI 之前未能完成的请求，主动提出换个方式再试。"""
+        eligible = [
+            f for f in failed_tasks
+            if not f.get("retried") and not f.get("resolved")
+        ]
+        if not eligible:
+            return None
+        # 选最近的失败任务
+        task = sorted(eligible, key=lambda f: f.get("asked_at", ""), reverse=True)[0]
+        text = task["text"]
+
+        content = f"🔄 之前我没能帮你完成「{text[:50]}」，现在可以换个思路再试试吗？"
+
+        if llm_fn:
+            try:
+                prompt = (
+                    f"你是 Koto AI 助手。之前用户请求「{text[:80]}」，但你当时无法完成。"
+                    "请用一句简短自然的中文（20-55字，含1个emoji）主动提出现在可以换个方式帮忙。"
+                    "只输出这一句话。"
+                )
+                generated = llm_fn(prompt)
+                if generated and 15 < len(generated) < 100:
+                    content = generated.strip()
+            except Exception:
+                pass
+
+        return _make_msg(
+            "failed_retry", content,
+            priority="medium",
+            triggered_by=f"failed_task:{task['id']}",
+            ttl_hours=48,
+        )
 
     # ── 队列管理 ──────────────────────────────────────────────────────────────
 
