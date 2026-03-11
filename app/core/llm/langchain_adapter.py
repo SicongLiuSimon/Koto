@@ -118,7 +118,7 @@ if _LANGCHAIN_AVAILABLE:
             max_tokens  : 最大输出 token 数（默认 8192）
         """
 
-        model_id: str = "gemini-2.5-flash-preview-05-20"
+        model_id: str = "gemini-3-flash-preview"
         temperature: float = 0.7
         max_tokens: int = 8192
         _koto_provider: Any = None  # GeminiProvider 实例（私有，不序列化）
@@ -126,7 +126,7 @@ if _LANGCHAIN_AVAILABLE:
         class Config:
             arbitrary_types_allowed = True
 
-        def __init__(self, model_id: str = "gemini-2.5-flash-preview-05-20",
+        def __init__(self, model_id: str = "gemini-3-flash-preview",
                      temperature: float = 0.7, max_tokens: int = 8192, **kwargs):
             _assert_langchain()
             super().__init__(model_id=model_id, temperature=temperature,

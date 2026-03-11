@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import urllib.request
 import urllib.error
 from typing import Any, Dict, Generator, List, Optional, Union
@@ -198,20 +199,26 @@ class OllamaLLMProvider(LLMProvider):
 
     Parameters
     ----------
-    model : Ollama model tag (e.g. "qwen3:8b", "llama3.1:8b")
+    model : Ollama model tag (e.g. "qwen3:8b", "gemma3:4b").
+            ``None`` (default) = 自动从已安装模型中选出最佳选项，每 60 秒重新检测一次。
     base_url : Ollama server base URL (default: http://localhost:11434)
     temperature : Sampling temperature
     num_predict : Max tokens to generate per call
     """
 
+    # 类级自动选模型缓存（所有 model=None 实例共享，60 秒 TTL）
+    _auto_model: str = ""
+    _auto_model_ts: float = 0.0
+    _AUTO_MODEL_TTL: float = 60.0
+
     def __init__(
         self,
-        model: str = "qwen3:8b",
+        model: Optional[str] = None,
         base_url: str = _OLLAMA_BASE_URL,
         temperature: float = 0.7,
         num_predict: int = 4096,
     ):
-        self.model = model
+        self.model = model  # None 表示运行时自动选择
         self.base_url = base_url.rstrip("/")
         self._options: Dict[str, Any] = {
             "temperature": temperature,
@@ -219,7 +226,31 @@ class OllamaLLMProvider(LLMProvider):
         }
 
     # ── LLMProvider interface ──────────────────────────────────────────────
-
+    def _resolve_model(self) -> str:
+        """
+        返回实际使用的模型 TAG。
+        - 初始化时指定了 model 则直接返回。
+        - model=None 时对已安装模型进行评分，60 秒内缓存结果。
+        """
+        if self.model:
+            return self.model
+        now = time.time()
+        if (
+            OllamaLLMProvider._auto_model
+            and (now - OllamaLLMProvider._auto_model_ts) < OllamaLLMProvider._AUTO_MODEL_TTL
+        ):
+            return OllamaLLMProvider._auto_model
+        try:
+            from app.core.routing.local_model_router import LocalModelRouter
+            best = LocalModelRouter.pick_best_chat_model()
+            if best:
+                OllamaLLMProvider._auto_model = best
+                OllamaLLMProvider._auto_model_ts = now
+                logger.info(f"[OllamaLLMProvider] 自动选择模型: {best}")
+                return best
+        except Exception:
+            pass
+        return "qwen3:8b"  # 绝对保底，实际运行时 Ollama 应已安装
     def generate_content(
         self,
         prompt: Union[str, List[Dict[str, Any]]],
@@ -229,7 +260,7 @@ class OllamaLLMProvider(LLMProvider):
         stream: bool = False,
         **kwargs,
     ) -> Union[Dict[str, Any], Generator[Dict[str, Any], None, None]]:
-        target = model or self.model
+        target = model or self._resolve_model()
         # 若 system_instruction 含有激活的 Skills 块，在最前面插入元认知前言
         effective_sys = system_instruction
         if effective_sys and _SKILL_BLOCK_MARKER in effective_sys:
