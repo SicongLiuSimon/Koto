@@ -20,8 +20,8 @@ _icon = str(Path("assets/koto_icon.ico")) if Path("assets/koto_icon.ico").exists
 block_cipher = None
 
 a = Analysis(
-    ["local_model_installer.py"],
-    pathex=["."],
+    ["src/local_model_installer.py"],
+    pathex=[".", "src"],
     binaries=[],
     datas=[
         # 如果有图标资源可加入：
