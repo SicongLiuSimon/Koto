@@ -311,9 +311,12 @@ if _psutil_pyd:
     for _p in _psutil_pyd:
         _extra_binaries.append((_p, 'psutil'))
 
+_all_binaries = list(_extra_binaries)  # start with manually-added psutil .pyd
+
 for _pkg in _collect_pkgs:
     _d, _b, _h = _safe_collect(_pkg)
     datas += _d
+    _all_binaries += _b   # include C extensions collected by collect_all
     hiddenimports += _h
 
 # ═══════════════════════════════════════════════
@@ -351,7 +354,7 @@ datas = _filter_datas(datas)
 a = Analysis(
     ['src/koto_setup.py'],       # ← 新入口（含下载器向导）
     pathex=[ROOT],
-    binaries=_extra_binaries,
+    binaries=_all_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

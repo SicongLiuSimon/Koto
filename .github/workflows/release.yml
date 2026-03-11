@@ -63,9 +63,11 @@ jobs:
           .\.venv\Scripts\pip install --upgrade pip wheel
           .\.venv\Scripts\pip install pyinstaller
 
-          $reqContent = Get-Content config\requirements.txt
+          # Read with explicit UTF-8 (requirements.txt has Chinese comments)
+          $reqContent = Get-Content config\requirements.txt -Encoding UTF8
           $coreReqs = $reqContent | Where-Object {
             $_ -notmatch '^\s*#' -and
+            $_ -notmatch '^\s*$' -and
             $_ -notmatch 'PyAudio' -and
             $_ -notmatch 'SpeechRecognition' -and
             $_ -notmatch 'vosk' -and
@@ -75,8 +77,10 @@ jobs:
             $_ -notmatch 'openai.whisper' -and
             $_ -notmatch 'gunicorn'
           }
-          $coreReqs | Set-Content .venv\core_reqs.txt
+          $coreReqs | Set-Content .venv\core_reqs.txt -Encoding UTF8
+          Write-Host "Installing $(($coreReqs | Measure-Object).Count) packages..."
           .\.venv\Scripts\pip install -r .venv\core_reqs.txt
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::pip install failed"; exit 1 }
 
           .\.venv\Scripts\pip install PyAudio
           if ($LASTEXITCODE -ne 0) {
