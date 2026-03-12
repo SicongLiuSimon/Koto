@@ -48,7 +48,6 @@ try:
         HumanMessage,
         SystemMessage,
     )
-    from langgraph.checkpoint.memory import MemorySaver
     from langgraph.graph import END, StateGraph
     from langgraph.types import (  # v1.x: Send moved from langgraph.graph to langgraph.types
         Send,
@@ -111,6 +110,23 @@ def _get_llm(model_id: str = "gemini-2.5-flash-preview-05-20"):
     return KotoLangChainLLM(model_id=model_id)
 
 
+def _rag_context(query: str, k: int = 4) -> str:
+    """从本地知识库检索与 query 相关的片段，格式化后追加到 LLM 提示词。"""
+    try:
+        from app.core.services.rag_service import get_rag_service
+
+        rag = get_rag_service()
+        if not rag.stats().get("initialized"):
+            return ""
+        hits = rag.hybrid_retrieve(query, k=k, score_threshold=0.25)
+        if not hits:
+            return ""
+        lines = [f"• {h['content'][:300]}" for h in hits if h.get("content")]
+        return "\n\n[知识库参考]\n" + "\n".join(lines) if lines else ""
+    except Exception:
+        return ""
+
+
 def _llm_call(
     llm,
     system: str,
@@ -141,13 +157,14 @@ def _build_research_document_graph(checkpointer=None):
 
     def node_research(state: "WorkflowState") -> Dict:
         llm = _get_llm(state["model_id"])
+        rag_ctx = _rag_context(state["user_input"])
         result = _llm_call(
             llm,
             system=(
                 "你是一名专业研究员。根据用户问题，提供全面、有深度的研究摘要，"
                 "包含关键要点、数据、最新进展和多角度分析。用中文回答。"
             ),
-            user=f"请深入研究：{state['user_input']}",
+            user=f"请深入研究：{state['user_input']}{rag_ctx}",
         )
         logger.info("[WorkflowEngine][research_and_document] 研究完成")
         return {
@@ -240,7 +257,11 @@ def _build_research_document_graph(checkpointer=None):
     graph.add_edge("write", "finalize")
     graph.add_edge("finalize", END)
 
-    return graph.compile(checkpointer=checkpointer or MemorySaver())
+    if checkpointer is None:
+        from app.core.agent.checkpoint_manager import get_checkpointer
+
+        checkpointer = get_checkpointer()
+    return graph.compile(checkpointer=checkpointer)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -257,6 +278,7 @@ def _build_multi_agent_ppt_graph(checkpointer=None):
 
     def node_researcher(state: "WorkflowState") -> Dict:
         llm = _get_llm(state["model_id"])
+        rag_ctx = _rag_context(state["user_input"])
         result = _llm_call(
             llm,
             system=(
@@ -264,7 +286,7 @@ def _build_multi_agent_ppt_graph(checkpointer=None):
                 "你的任务是为 PPT 收集、整理相关知识、数据、案例和核心观点。"
                 "输出结构化的研究摘要，分为：背景、核心要点、数据支撑、案例。"
             ),
-            user=f"PPT 主题：{state['user_input']}",
+            user=f"PPT 主题：{state['user_input']}{rag_ctx}",
         )
         return {
             "research_result": result,
@@ -392,7 +414,11 @@ def _build_multi_agent_ppt_graph(checkpointer=None):
     graph.add_edge("revise", "assemble")
     graph.add_edge("assemble", END)
 
-    return graph.compile(checkpointer=checkpointer or MemorySaver())
+    if checkpointer is None:
+        from app.core.agent.checkpoint_manager import get_checkpointer
+
+        checkpointer = get_checkpointer()
+    return graph.compile(checkpointer=checkpointer)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

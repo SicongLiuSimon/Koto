@@ -86,6 +86,7 @@ class ProactiveAgent:
     def __init__(self):
         self._queue: List[Dict] = []
         self._last_type_time: Dict[str, datetime] = {}
+        self._last_suggestion_topic: str = ""  # 轮换推荐话题，避免每次推同一个
         self._q_lock = threading.Lock()
         self._load_queue()
 
@@ -284,28 +285,46 @@ class ProactiveAgent:
             or obs.get("recent_topics_30d")
             or dict(sorted(obs.get("topics", {}).items(), key=lambda x: -x[1]))
         )
-        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])
 
-        top_topic = next(iter(recent_topics), "") if recent_topics else ""
-        top_phrase = phrases[0][0] if phrases else ""
+        # 轮换话题：跳过上次已推荐的，避免每次推相同内容
+        topic_keys = list(recent_topics.keys()) if recent_topics else []
+        top_topic = ""
+        for candidate in topic_keys:
+            if candidate != self._last_suggestion_topic:
+                top_topic = candidate
+                break
+        # 所有话题都推过了（只有一个），仍使用它
+        if not top_topic and topic_keys:
+            top_topic = topic_keys[0]
 
-        if not top_topic and not top_phrase:
+        # 从任务风格中获取最高频同样轮换的任务类型
+        ts = obs.get("task_style", {})
+        task_types = ts.get("task_types", {})
+        sorted_tasks = sorted(task_types.items(), key=lambda x: -x[1])
+        top_task = ""
+        for t_name, t_count in sorted_tasks:
+            if t_count >= 3 and t_name != self._last_suggestion_topic:
+                top_task = t_name
+                break
+
+        if not top_topic and not top_task:
             return None
 
-        if top_topic:
+        if top_task:
+            picked = top_task
+            content = f"💡 我注意到你经常需要「{top_task}」，要不要创建一个快捷 Skill？"
+        elif top_topic:
+            picked = top_topic
             content = f"💡 你经常使用 Koto 处理「{top_topic}」相关任务，要不要让我整理一份最佳实践？"
-        elif top_phrase:
-            content = (
-                f"💡 我注意到你经常需要「{top_phrase}」，要不要创建一个快捷 Skill？"
-            )
         else:
             return None
 
+        self._last_suggestion_topic = picked
         return _make_msg(
             "suggestion",
             content,
             priority="low",
-            triggered_by=f"topic:{top_topic}",
+            triggered_by=f"topic:{picked}",
             ttl_hours=48,
         )
 
@@ -377,8 +396,18 @@ class ProactiveAgent:
         try:
             _BASE.mkdir(parents=True, exist_ok=True)
             with self._q_lock:
+                # 同时持久化冷却时间，防止重启后立即群发消息
+                cooldown_data = {
+                    k: v.isoformat(timespec="seconds")
+                    for k, v in self._last_type_time.items()
+                }
+                payload = {
+                    "queue": self._queue,
+                    "last_type_time": cooldown_data,
+                    "last_suggestion_topic": self._last_suggestion_topic,
+                }
                 _QUEUE_FILE.write_text(
-                    json.dumps(self._queue, ensure_ascii=False, indent=2),
+                    json.dumps(payload, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
         except Exception as exc:
@@ -387,17 +416,28 @@ class ProactiveAgent:
     def _load_queue(self):
         if _QUEUE_FILE.exists():
             try:
-                data = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
-                if isinstance(data, list):
-                    # Drop already-expired entries on load
-                    now = datetime.now()
-                    self._queue = [
-                        m
-                        for m in data
-                        if not m.get("dismissed")
-                        and datetime.fromisoformat(m.get("expires_at", "2000-01-01"))
-                        > now
-                    ]
+                raw = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
+                now = datetime.now()
+                # 兼容旧格式（纯列表）和新格式（含冷却时间的字典）
+                if isinstance(raw, list):
+                    queue_raw = raw
+                elif isinstance(raw, dict):
+                    queue_raw = raw.get("queue", [])
+                    for k, v_str in raw.get("last_type_time", {}).items():
+                        try:
+                            self._last_type_time[k] = datetime.fromisoformat(v_str)
+                        except (ValueError, TypeError):
+                            pass
+                    self._last_suggestion_topic = raw.get("last_suggestion_topic", "")
+                else:
+                    queue_raw = []
+                # 过滤过期/已关闭条目
+                self._queue = [
+                    m
+                    for m in queue_raw
+                    if not m.get("dismissed")
+                    and datetime.fromisoformat(m.get("expires_at", "2000-01-01")) > now
+                ]
             except Exception as exc:
                 logger.debug("[ProactiveAgent] 队列加载失败: %s", exc)
 
