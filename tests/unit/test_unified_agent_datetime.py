@@ -1,7 +1,9 @@
 """Unit tests for datetime injection in UnifiedAgent.run().
 
-Verifies that the current local time is prepended to system_instruction
-on every call to run(), so cloud models always receive temporal context.
+Verifies that the current local time is prepended to the first user
+message in the conversation history on every call to run(). This keeps
+system_instruction stable for Gemini context caching while still giving
+the model temporal context.
 """
 
 from __future__ import annotations
@@ -45,20 +47,27 @@ def _make_agent(system_instruction: Optional[str] = None) -> UnifiedAgent:
     return agent
 
 
-def _run_and_capture_instruction(agent: UnifiedAgent, message: str = "hello") -> str:
-    """Run agent once and return the system_instruction passed to generate_content."""
-    # Consume the generator to drive the loop
+def _run_and_capture_user_message(agent: UnifiedAgent, message: str = "hello") -> str:
+    """Run agent once and return the first user message sent to generate_content.
+
+    The datetime is injected into the user message (history prompt), not into
+    system_instruction — this keeps system_instruction stable for Gemini caching.
+    """
     for _ in agent.run(input_text=message):
         break
     call_kwargs = agent.llm.generate_content.call_args
-    # system_instruction may be positional or keyword
-    if call_kwargs.kwargs.get("system_instruction") is not None:
-        return call_kwargs.kwargs["system_instruction"]
-    # fallback: positional arg index varies; search all args
-    for arg in call_kwargs.args:
-        if isinstance(arg, str) and "当前本地时间" in arg:
-            return arg
+    prompt = call_kwargs.kwargs.get("prompt") or (
+        call_kwargs.args[0] if call_kwargs.args else []
+    )
+    # Find the first user turn
+    for turn in prompt:
+        if isinstance(turn, dict) and turn.get("role") == "user":
+            return turn.get("content", "")
     return ""
+
+
+# Keep the old name as an alias so test methods below read clearly.
+_run_and_capture_instruction = _run_and_capture_user_message
 
 
 # ---------------------------------------------------------------------------
@@ -68,29 +77,29 @@ def _run_and_capture_instruction(agent: UnifiedAgent, message: str = "hello") ->
 
 class TestDatetimeInjection:
     def test_instruction_contains_datetime_prefix(self):
-        """System instruction sent to LLM must start with a datetime line."""
+        """User message sent to LLM must start with a datetime line."""
         agent = _make_agent()
-        instruction = _run_and_capture_instruction(agent)
+        user_msg = _run_and_capture_instruction(agent)
         assert _DATETIME_PATTERN.search(
-            instruction
-        ), f"Expected datetime prefix in instruction, got: {instruction[:200]!r}"
+            user_msg
+        ), f"Expected datetime prefix in user message, got: {user_msg[:200]!r}"
 
     def test_datetime_prefix_is_first_line(self):
-        """The datetime prefix must appear at the very beginning of the instruction."""
+        """The datetime prefix must appear at the very beginning of the user message."""
         agent = _make_agent()
-        instruction = _run_and_capture_instruction(agent)
-        assert instruction.startswith(
+        user_msg = _run_and_capture_instruction(agent)
+        assert user_msg.startswith(
             "当前本地时间："
-        ), f"Instruction should start with datetime prefix, got: {instruction[:100]!r}"
+        ), f"User message should start with datetime prefix, got: {user_msg[:100]!r}"
 
     def test_original_instruction_preserved_after_prefix(self):
-        """Custom system_instruction content must still be present after the prefix."""
-        custom = "You are a specialized assistant for tests."
-        agent = _make_agent(system_instruction=custom)
-        instruction = _run_and_capture_instruction(agent)
+        """The original user input must still be present after the datetime prefix."""
+        custom_input = "You are a specialized assistant for tests."
+        agent = _make_agent()
+        user_msg = _run_and_capture_user_message(agent, message=custom_input)
         assert (
-            custom in instruction
-        ), "Original system instruction was lost after datetime injection."
+            custom_input in user_msg
+        ), "Original user input was lost after datetime injection."
 
     def test_weekday_label_is_correct(self):
         """The injected weekday label must match the frozen datetime's weekday."""
@@ -100,11 +109,11 @@ class TestDatetimeInjection:
         agent = _make_agent()
         with patch("app.core.agent.unified_agent.datetime") as mock_dt:
             mock_dt.now.return_value = fixed_dt
-            instruction = _run_and_capture_instruction(agent)
+            user_msg = _run_and_capture_instruction(agent)
 
         assert (
-            expected_weekday in instruction
-        ), f"Expected weekday '{expected_weekday}' in instruction, got: {instruction[:200]!r}"
+            expected_weekday in user_msg
+        ), f"Expected weekday '{expected_weekday}' in user message, got: {user_msg[:200]!r}"
 
     def test_date_and_time_values_are_correct(self):
         """The injected date/time string must match the frozen datetime."""
@@ -114,11 +123,11 @@ class TestDatetimeInjection:
         agent = _make_agent()
         with patch("app.core.agent.unified_agent.datetime") as mock_dt:
             mock_dt.now.return_value = fixed_dt
-            instruction = _run_and_capture_instruction(agent)
+            user_msg = _run_and_capture_instruction(agent)
 
         assert (
-            expected_str in instruction
-        ), f"Expected '{expected_str}' in instruction, got: {instruction[:200]!r}"
+            expected_str in user_msg
+        ), f"Expected '{expected_str}' in user message, got: {user_msg[:200]!r}"
 
     def test_datetime_refreshed_on_each_call(self):
         """Each call to run() must inject a fresh datetime, not a cached one."""
@@ -132,18 +141,20 @@ class TestDatetimeInjection:
             mock_dt.now.return_value = dt1
             for _ in agent.run(input_text="first call"):
                 break
-            instr1 = agent.llm.generate_content.call_args.kwargs.get(
-                "system_instruction", ""
+            prompt1 = agent.llm.generate_content.call_args.kwargs.get("prompt", [])
+            instr1 = next(
+                (t["content"] for t in prompt1 if t.get("role") == "user"), ""
             )
 
         with patch("app.core.agent.unified_agent.datetime") as mock_dt:
             mock_dt.now.return_value = dt2
             for _ in agent.run(input_text="second call"):
                 break
-            instr2 = agent.llm.generate_content.call_args.kwargs.get(
-                "system_instruction", ""
+            prompt2 = agent.llm.generate_content.call_args.kwargs.get("prompt", [])
+            instr2 = next(
+                (t["content"] for t in prompt2 if t.get("role") == "user"), ""
             )
 
         assert "10:00" in instr1, f"First call: expected 10:00 in {instr1[:100]!r}"
         assert "11:30" in instr2, f"Second call: expected 11:30 in {instr2[:100]!r}"
-        assert instr1 != instr2, "Instructions for different times should differ"
+        assert instr1 != instr2, "User messages for different times should differ"
