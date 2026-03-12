@@ -7,6 +7,7 @@
   2. 有内容产出（text_content 或 binary_data 非空）
   3. format_result_for_chat() 输出格式正确
 """
+
 import os
 import sys
 import struct
@@ -21,27 +22,35 @@ sys.path.insert(0, ROOT)
 from web.file_processor import FileProcessor, process_uploaded_file
 
 # ── 颜色输出 ──────────────────────────────────────────────────────────────────
-GREEN  = "\033[92m"
-RED    = "\033[91m"
+GREEN = "\033[92m"
+RED = "\033[91m"
 YELLOW = "\033[93m"
-CYAN   = "\033[96m"
-RESET  = "\033[0m"
+CYAN = "\033[96m"
+RESET = "\033[0m"
 
 RESULTS: list[dict] = []
 
+
 def ok(label, detail=""):
-    print(f"  {GREEN}✓ PASS{RESET}  {label}" + (f"  {YELLOW}({detail}){RESET}" if detail else ""))
+    print(
+        f"  {GREEN}✓ PASS{RESET}  {label}"
+        + (f"  {YELLOW}({detail}){RESET}" if detail else "")
+    )
     RESULTS.append({"label": label, "status": "PASS", "detail": detail})
+
 
 def fail(label, reason):
     print(f"  {RED}✗ FAIL{RESET}  {label}  →  {reason}")
     RESULTS.append({"label": label, "status": "FAIL", "detail": reason})
 
+
 def skip(label, reason):
     print(f"  {YELLOW}⊘ SKIP{RESET}  {label}  →  {reason}")
     RESULTS.append({"label": label, "status": "SKIP", "detail": reason})
 
+
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 
 def run_processor(filepath: str, user_msg="请分析这个文件"):
     """运行 FileProcessor 并返回 (result, formatted_msg, file_data)。"""
@@ -55,17 +64,22 @@ def run_processor(filepath: str, user_msg="请分析这个文件"):
 # ║  文件创建助手                                                         ║
 # ╚═══════════════════════════════════════════════════════════════════════╝
 
+
 def make_txt(d):
     p = os.path.join(d, "sample.txt")
     with open(p, "w", encoding="utf-8") as f:
         f.write("这是一份纯文本测试文件\n第二行内容\nHello, world!\n")
     return p
 
+
 def make_md(d):
     p = os.path.join(d, "sample.md")
     with open(p, "w", encoding="utf-8") as f:
-        f.write("# 测试文档\n\n## 简介\n这是 Markdown 格式的测试文件。\n\n- 功能 A\n- 功能 B\n")
+        f.write(
+            "# 测试文档\n\n## 简介\n这是 Markdown 格式的测试文件。\n\n- 功能 A\n- 功能 B\n"
+        )
     return p
+
 
 def make_csv(d):
     p = os.path.join(d, "sample.csv")
@@ -73,33 +87,43 @@ def make_csv(d):
         f.write("姓名,年龄,城市\n张三,28,北京\n李四,32,上海\n王五,25,深圳\n")
     return p
 
+
 def make_json(d):
     import json
+
     p = os.path.join(d, "sample.json")
     with open(p, "w", encoding="utf-8") as f:
-        json.dump({"title": "测试", "items": [1, 2, 3], "active": True}, f, ensure_ascii=False)
+        json.dump(
+            {"title": "测试", "items": [1, 2, 3], "active": True}, f, ensure_ascii=False
+        )
     return p
+
 
 def make_docx(d):
     p = os.path.join(d, "sample.docx")
     try:
         from docx import Document
+
         doc = Document()
         doc.add_heading("测试 Word 文档", 0)
         doc.add_paragraph("这是第一段正文内容，用于验证 DOCX 解析。")
         doc.add_paragraph("这是第二段，包含更多文字。")
         t = doc.add_table(rows=2, cols=2)
-        t.cell(0,0).text = "列A"; t.cell(0,1).text = "列B"
-        t.cell(1,0).text = "值1"; t.cell(1,1).text = "值2"
+        t.cell(0, 0).text = "列A"
+        t.cell(0, 1).text = "列B"
+        t.cell(1, 0).text = "值1"
+        t.cell(1, 1).text = "值2"
         doc.save(p)
         return p
     except ImportError:
         return None
 
+
 def make_xlsx(d):
     p = os.path.join(d, "sample.xlsx")
     try:
         import openpyxl
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Sheet1"
@@ -112,16 +136,21 @@ def make_xlsx(d):
         # 尝试 pandas
         try:
             import pandas as pd
-            pd.DataFrame({"产品":["苹果","香蕉"],"数量":[100,200]}).to_excel(p, index=False)
+
+            pd.DataFrame({"产品": ["苹果", "香蕉"], "数量": [100, 200]}).to_excel(
+                p, index=False
+            )
             return p
         except ImportError:
             return None
+
 
 def make_pptx(d):
     p = os.path.join(d, "sample.pptx")
     try:
         from pptx import Presentation
         from pptx.util import Inches, Pt
+
         prs = Presentation()
         slide_layout = prs.slide_layouts[1]
         slide = prs.slides.add_slide(slide_layout)
@@ -135,12 +164,14 @@ def make_pptx(d):
     except ImportError:
         return None
 
+
 def make_pdf(d):
     p = os.path.join(d, "sample.pdf")
     # 优先用 reportlab，fallback 最小手写 PDF
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import A4
+
         c = canvas.Canvas(p, pagesize=A4)
         c.drawString(100, 750, "PDF Test Document")
         c.drawString(100, 720, "This is a test PDF created for Koto upload testing.")
@@ -179,60 +210,90 @@ def make_pdf(d):
         f.write(content)
     return p
 
+
 def make_png(d):
     p = os.path.join(d, "sample.png")
+
     # 最小合法 PNG (1×1 红色像素)
     def write_chunk(chunk_type, data):
-        length = struct.pack('>I', len(data))
+        length = struct.pack(">I", len(data))
         chunk = chunk_type + data
-        crc = struct.pack('>I', zlib.crc32(chunk) & 0xffffffff)
+        crc = struct.pack(">I", zlib.crc32(chunk) & 0xFFFFFFFF)
         return length + chunk + crc
-    signature = b'\x89PNG\r\n\x1a\n'
-    ihdr_data = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
-    ihdr = write_chunk(b'IHDR', ihdr_data)
-    raw_data = b'\x00\xff\x00\x00'  # filter byte + RGB
+
+    signature = b"\x89PNG\r\n\x1a\n"
+    ihdr_data = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    ihdr = write_chunk(b"IHDR", ihdr_data)
+    raw_data = b"\x00\xff\x00\x00"  # filter byte + RGB
     compressed = zlib.compress(raw_data)
-    idat = write_chunk(b'IDAT', compressed)
-    iend = write_chunk(b'IEND', b'')
-    with open(p, 'wb') as f:
+    idat = write_chunk(b"IDAT", compressed)
+    iend = write_chunk(b"IEND", b"")
+    with open(p, "wb") as f:
         f.write(signature + ihdr + idat + iend)
     return p
+
 
 def make_jpg(d):
     p = os.path.join(d, "sample.jpg")
     try:
         from PIL import Image as PILImage
+
         img = PILImage.new("RGB", (64, 64), color=(0, 128, 255))
         img.save(p, "JPEG")
         return p
     except ImportError:
         pass
     # 最小合法 JPEG (SOI + EOI)
-    minimal_jpg = bytes([
-        0xFF, 0xD8,  # SOI
-        0xFF, 0xE0, 0x00, 0x10,  # APP0 marker + length
-        0x4A, 0x46, 0x49, 0x46, 0x00,  # JFIF\0
-        0x01, 0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,  # version, density
-        0xFF, 0xD9   # EOI
-    ])
-    with open(p, 'wb') as f:
+    minimal_jpg = bytes(
+        [
+            0xFF,
+            0xD8,  # SOI
+            0xFF,
+            0xE0,
+            0x00,
+            0x10,  # APP0 marker + length
+            0x4A,
+            0x46,
+            0x49,
+            0x46,
+            0x00,  # JFIF\0
+            0x01,
+            0x01,
+            0x00,
+            0x00,
+            0x01,
+            0x00,
+            0x01,
+            0x00,
+            0x00,  # version, density
+            0xFF,
+            0xD9,  # EOI
+        ]
+    )
+    with open(p, "wb") as f:
         f.write(minimal_jpg)
     return p
+
 
 # ╔═══════════════════════════════════════════════════════════════════════╗
 # ║  各类型测试                                                           ║
 # ╚═══════════════════════════════════════════════════════════════════════╝
 
+
 def test_text_files(d):
     print(f"\n{CYAN}── 纯文本类 ──{RESET}")
-    for name, maker in [("TXT", make_txt), ("Markdown", make_md),
-                         ("CSV", make_csv), ("JSON", make_json)]:
+    for name, maker in [
+        ("TXT", make_txt),
+        ("Markdown", make_md),
+        ("CSV", make_csv),
+        ("JSON", make_json),
+    ]:
         p = maker(d)
         try:
             r, fmt, fdata = run_processor(p)
-            if not r['success']:
-                fail(name, r['error'])
-            elif not r['text_content']:
+            if not r["success"]:
+                fail(name, r["error"])
+            elif not r["text_content"]:
                 fail(name, "text_content 为空")
             elif fdata is not None:
                 fail(name, "文本文件不应产生 binary file_data")
@@ -250,13 +311,13 @@ def test_image_files(d):
         p = maker(d)
         try:
             r, fmt, fdata = run_processor(p)
-            if not r['success']:
-                fail(name, r['error'])
-            elif r['binary_data'] is None or len(r['binary_data']) == 0:
+            if not r["success"]:
+                fail(name, r["error"])
+            elif r["binary_data"] is None or len(r["binary_data"]) == 0:
                 fail(name, "binary_data 为空")
             elif fdata is None:
                 fail(name, "图片应产生 file_data")
-            elif not fdata.get('mime_type', '').startswith('image/'):
+            elif not fdata.get("mime_type", "").startswith("image/"):
                 fail(name, f"mime_type 错误: {fdata.get('mime_type')}")
             else:
                 ok(name, f"{len(r['binary_data'])} bytes, mime={fdata['mime_type']}")
@@ -269,16 +330,16 @@ def test_pdf(d):
     p = make_pdf(d)
     try:
         r, fmt, fdata = run_processor(p)
-        if not r['success']:
-            fail("PDF", r['error'])
-        elif r['binary_data'] is None or len(r['binary_data']) == 0:
+        if not r["success"]:
+            fail("PDF", r["error"])
+        elif r["binary_data"] is None or len(r["binary_data"]) == 0:
             fail("PDF", "binary_data 为空")
         elif fdata is None:
             fail("PDF", "PDF 应产生 file_data")
-        elif fdata.get('mime_type') != 'application/pdf':
+        elif fdata.get("mime_type") != "application/pdf":
             fail("PDF", f"mime_type 错误: {fdata.get('mime_type')}")
         else:
-            tq = r['metadata'].get('text_quality', 'n/a')
+            tq = r["metadata"].get("text_quality", "n/a")
             ok("PDF", f"{len(r['binary_data'])} bytes, text_quality={tq}")
     except Exception as e:
         fail("PDF", f"异常: {e}")
@@ -292,16 +353,19 @@ def test_docx(d):
         return
     try:
         r, fmt, fdata = run_processor(p)
-        if not r['success']:
-            fail("DOCX", r['error'])
-        elif not r['text_content']:
+        if not r["success"]:
+            fail("DOCX", r["error"])
+        elif not r["text_content"]:
             fail("DOCX", "text_content 为空")
         elif fdata is not None:
             fail("DOCX", "DOCX 不应产生 binary file_data（应嵌入文本）")
         elif "测试 Word 文档" not in fmt:
             fail("DOCX", "提取文本缺少预期内容")
         else:
-            ok("DOCX", f"{len(r['text_content'])} 字符, {r['metadata'].get('paragraphs','?')} 段落")
+            ok(
+                "DOCX",
+                f"{len(r['text_content'])} 字符, {r['metadata'].get('paragraphs','?')} 段落",
+            )
     except Exception as e:
         fail("DOCX", f"异常: {e}")
 
@@ -314,14 +378,17 @@ def test_xlsx(d):
         return
     try:
         r, fmt, fdata = run_processor(p)
-        if not r['success']:
-            fail("XLSX", r['error'])
-        elif not r['text_content']:
+        if not r["success"]:
+            fail("XLSX", r["error"])
+        elif not r["text_content"]:
             fail("XLSX", "text_content 为空")
         elif fdata is not None:
             fail("XLSX", "XLSX 不应产生 binary file_data")
         else:
-            ok("XLSX", f"{len(r['text_content'])} 字符, {r['metadata'].get('sheets','?')} 个sheet")
+            ok(
+                "XLSX",
+                f"{len(r['text_content'])} 字符, {r['metadata'].get('sheets','?')} 个sheet",
+            )
     except Exception as e:
         fail("XLSX", f"异常: {e}")
 
@@ -334,15 +401,18 @@ def test_pptx(d):
         return
     try:
         r, fmt, fdata = run_processor(p)
-        if not r['success']:
-            fail("PPTX", r['error'])
+        if not r["success"]:
+            fail("PPTX", r["error"])
         elif fdata is not None:
             fail("PPTX", "PPTX 不应产生 binary file_data")
-        elif not r['text_content']:
+        elif not r["text_content"]:
             # 有些 PPTX 无文本，仍算通过（不报错）
             ok("PPTX (无文本)", f"{r['metadata'].get('slides','?')} 张幻灯片")
         else:
-            ok("PPTX", f"{len(r['text_content'])} 字符, {r['metadata'].get('slides','?')} 张")
+            ok(
+                "PPTX",
+                f"{len(r['text_content'])} 字符, {r['metadata'].get('slides','?')} 张",
+            )
     except Exception as e:
         fail("PPTX", f"异常: {e}")
 
@@ -379,7 +449,7 @@ def test_error_handling(d):
     nonexist = os.path.join(d, "nonexistent.docx")
     try:
         r, fmt, fdata = run_processor(nonexist)
-        if r['success']:
+        if r["success"]:
             fail("不存在文件", "不存在的文件不应返回 success=True")
         elif "❌" in fmt:
             ok("不存在文件→优雅失败", fmt[:60].strip())
@@ -394,20 +464,23 @@ def test_error_handling(d):
 # ║  汇总输出                                                             ║
 # ╚═══════════════════════════════════════════════════════════════════════╝
 
+
 def print_summary():
-    passed = sum(1 for r in RESULTS if r['status'] == 'PASS')
-    failed = sum(1 for r in RESULTS if r['status'] == 'FAIL')
-    skipped = sum(1 for r in RESULTS if r['status'] == 'SKIP')
+    passed = sum(1 for r in RESULTS if r["status"] == "PASS")
+    failed = sum(1 for r in RESULTS if r["status"] == "FAIL")
+    skipped = sum(1 for r in RESULTS if r["status"] == "SKIP")
     total = len(RESULTS)
     print(f"\n{'='*60}")
     print(f"{CYAN}文件上传通路测试汇总{RESET}")
     print(f"{'='*60}")
-    print(f"  总计: {total}   {GREEN}通过: {passed}{RESET}   "
-          f"{RED}失败: {failed}{RESET}   {YELLOW}跳过: {skipped}{RESET}")
+    print(
+        f"  总计: {total}   {GREEN}通过: {passed}{RESET}   "
+        f"{RED}失败: {failed}{RESET}   {YELLOW}跳过: {skipped}{RESET}"
+    )
     if failed:
         print(f"\n{RED}失败项明细:{RESET}")
         for r in RESULTS:
-            if r['status'] == 'FAIL':
+            if r["status"] == "FAIL":
                 print(f"  ✗ {r['label']}: {r['detail']}")
     print(f"{'='*60}")
     return failed == 0
@@ -415,6 +488,7 @@ def print_summary():
 
 if __name__ == "__main__":
     import shutil
+
     tmpdir = tempfile.mkdtemp(prefix="koto_filetest_")
     try:
         print(f"{CYAN}{'='*60}{RESET}")
