@@ -123,7 +123,7 @@ async function loadCatalog(category = null) {
 
 function updateSidebarCounts(skills) {
   // Category counts
-  const catCounts = { all: skills.length, behavior: 0, style: 0, domain: 0, workflow: 0, custom: 0 };
+  const catCounts = { all: skills.length, agent: 0, behavior: 0, style: 0, domain: 0, workflow: 0, custom: 0 };
   skills.forEach(s => { catCounts[s.category] = (catCounts[s.category] || 0) + 1; });
   Object.entries(catCounts).forEach(([cat, count]) => {
     const el = document.querySelector(`[data-cat="${cat}"] .item-count`);
@@ -224,7 +224,7 @@ function renderSkillGrid(gridId, skills) {
 
 function renderSkillCard(skill) {
   const catClass = `category-${skill.category}`;
-  const catLabel = { behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', workflow: '📋 工作流', memory: '🧠 记忆', custom: '✨ 自定义' };
+  const catLabel = { agent: '🤖 Agent 能力', behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', workflow: '⚡ 工作流', memory: '🧠 记忆', custom: '✨ 自定义' };
   const natureLabel = { model_hint: '🧠 通用能力', domain_skill: '🎯 任务技能', system: '⚙️ 系统' };
   const natureClass = skill.skill_nature ? `nature-${skill.skill_nature}` : '';
   const natureBadge = (skill.skill_nature && skill.skill_nature !== 'system')

@@ -1073,6 +1073,16 @@
                         </div>
                         <p class="setting-hint">开启后所有请求只走本地模型（Ollama），不调用云端 API，保证完全本地隐私。</p>
                     </div>
+                    <div class="setting-item" id="localModelPickerSection">
+                        <label>🦙 本地模型选择</label>
+                        <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
+                            <select id="settingLocalModel" onchange="onLocalModelSelect(this.value)" style="flex:1">
+                                <option value="">-- 查询中... --</option>
+                            </select>
+                            <button class="browse-btn" onclick="refreshOllamaModels()" title="重新查询 Ollama 已安装模型">刷新</button>
+                        </div>
+                        <p class="setting-hint" id="localModelStatus">正在检测 Ollama 状态…</p>
+                    </div>
                     <div class="setting-item">
                         <label>默认模型</label>
                         <select id="settingModel" onchange="onModelChange(this.value)">
@@ -1114,6 +1124,30 @@
                             </label>
                         </div>
                         <p class="setting-hint">等待回复时显示小恐龙游戏</p>
+                    </div>
+                </div>
+
+                <!-- 模型路由管理 -->
+                <div class="settings-section" id="modelRoutingSection">
+                    <h4 style="cursor:pointer;user-select:none;" onclick="toggleModelRoutingPanel()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="8" r="4"></circle>
+                            <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"></path>
+                            <line x1="19" y1="8" x2="23" y2="8"></line>
+                            <line x1="1" y1="8" x2="5" y2="8"></line>
+                        </svg>
+                        模型路由管理
+                        <span id="modelRoutingToggleIcon" style="margin-left:auto;font-size:12px;opacity:.6;">▼</span>
+                    </h4>
+                    <p class="setting-desc">查看当前任务→模型分配，并可手动覆盖某个任务使用的模型（重启后还原动态发现值）。</p>
+                    <div id="modelRoutingBody" style="display:none;">
+                        <div style="display:flex;gap:6px;margin-bottom:8px;">
+                            <button class="btn-sm" onclick="loadModelRouting()" style="flex:1;">🔄 刷新</button>
+                            <button class="btn-sm" onclick="refreshModelRegistry()" style="flex:1;">🌐 重新发现</button>
+                            <button class="btn-sm" onclick="clearAllModelOverrides()" style="flex:1;color:#f87171;">✕ 清除覆盖</button>
+                        </div>
+                        <div id="modelRoutingStatus" style="font-size:11px;opacity:.5;margin-bottom:6px;">载入中…</div>
+                        <div id="modelRoutingTable" style="overflow-x:auto;"></div>
                     </div>
                 </div>
 
@@ -1296,7 +1330,7 @@
                     </div>
 
                     <!-- 统一文件结果区 -->
-                    <div id="fhResultHeader" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
+                    <div id="fhResultHeader" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:4px;justify-content:space-between;">
                         <span id="fhResultCount"></span>
                         <button class="btn-secondary btn-sm" style="font-size:11px;" onclick="fhCopyAllPaths()">📋 复制所有路径</button>
                     </div>
@@ -1392,39 +1426,76 @@
 
         <!-- ── Create Custom Skill Modal ──────────────────────────────── -->
         <div id="createSkillModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeCreateSkillModal()">
-            <div class="skill-editor-inner" style="width:min(560px,93vw);">
+            <div class="skill-editor-inner" style="width:min(580px,95vw);">
                 <div class="skill-editor-header">
                     <span>✨ 创建自定义 Skill</span>
                     <button class="close-panel" onclick="closeCreateSkillModal()">×</button>
                 </div>
-                <div class="form-row">
-                    <div class="form-group" style="width:68px;flex:none;">
-                        <label class="form-label">图标</label>
-                        <input type="text" id="csIcon" class="form-input" value="🤖" style="text-align:center;font-size:18px;padding:4px;">
+                <!-- 模式 Tab -->
+                <div style="display:flex;gap:4px;margin-bottom:14px;background:var(--bg-hover);border-radius:6px;padding:3px;">
+                    <button id="csTabManual"  class="ske-tab active" style="flex:1;border-radius:4px;" onclick="csSwitchTab('manual')">✏️ 手动填写</button>
+                    <button id="csTabExtract" class="ske-tab"        style="flex:1;border-radius:4px;" onclick="csSwitchTab('extract')">💬 从对话提炼</button>
+                    <button id="csTabAi"      class="ske-tab"        style="flex:1;border-radius:4px;" onclick="csSwitchTab('ai')">🤖 AI 描述生成</button>
+                </div>
+
+                <!-- ── 手动填写 ── -->
+                <div id="csTabBodyManual">
+                    <div class="form-row">
+                        <div class="form-group" style="width:68px;flex:none;">
+                            <label class="form-label">图标</label>
+                            <input type="text" id="csIcon" class="form-input" value="🤖" style="text-align:center;font-size:18px;padding:4px;">
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label class="form-label">技能名称</label>
+                            <input type="text" id="csName" class="form-input" placeholder="我的专属助手">
+                        </div>
+                        <div class="form-group" style="width:120px;flex:none;">
+                            <label class="form-label">分类</label>
+                            <select id="csCategory" class="form-select">
+                                <option value="custom">🔧 自定义</option>
+                                <option value="behavior">⚙️ 行为</option>
+                                <option value="style">🎨 风格</option>
+                                <option value="domain">🔬 领域</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="form-group" style="flex:1;">
-                        <label class="form-label">技能名称</label>
-                        <input type="text" id="csName" class="form-input" placeholder="我的专属助手">
+                    <div class="form-group">
+                        <label class="form-label">简介</label>
+                        <input type="text" id="csDesc" class="form-input" placeholder="这个 Skill 的功能描述">
                     </div>
-                    <div class="form-group" style="width:120px;flex:none;">
-                        <label class="form-label">分类</label>
-                        <select id="csCategory" class="form-select">
-                            <option value="custom">🔧 自定义</option>
-                            <option value="behavior">⚙️ 行为</option>
-                            <option value="style">🎨 风格</option>
-                            <option value="domain">🔬 领域</option>
-                        </select>
+                    <div class="form-group">
+                        <label class="form-label">System Prompt</label>
+                        <textarea id="csPrompt" class="skill-editor-textarea" rows="5" placeholder="你是一个专注于...的 AI 助手。&#10;&#10;（留空则使用默认模板）"></textarea>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">简介</label>
-                    <input type="text" id="csDesc" class="form-input" placeholder="这个 Skill 的功能描述">
+
+                <!-- ── 从对话提炼 ── -->
+                <div id="csTabBodyExtract" style="display:none;">
+                    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">选择一个对话会话，自动分析其中的交流风格和任务特征，生成完整 Skill。</p>
+                    <div id="csExtractSessionList" style="max-height:180px;overflow-y:auto;border:1px solid var(--border-color);border-radius:6px;padding:6px;margin-bottom:10px;font-size:12px;">
+                        <div style="color:var(--text-muted);padding:6px;">正在加载对话列表…</div>
+                    </div>
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label class="form-label">技能名称（提炼后可修改）</label>
+                        <input type="text" id="csExtractName" class="form-input" placeholder="从对话提炼的 Skill 名称">
+                    </div>
+                    <div id="csExtractStatus" style="font-size:12px;color:var(--text-muted);min-height:18px;margin-bottom:8px;"></div>
+                    <button class="btn-primary btn-sm" onclick="csExtractFromSession()" style="width:100%;">✨ 分析风格并填充表单</button>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">System Prompt</label>
-                    <textarea id="csPrompt" class="skill-editor-textarea" rows="5" placeholder="你是一个专注于...的 AI 助手。&#10;&#10;（留空则使用默认模板）"></textarea>
+
+                <!-- ── AI 描述生成 ── -->
+                <div id="csTabBodyAi" style="display:none;">
+                    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">用自然语言描述你想要的 Skill，AI 自动生成 System Prompt。</p>
+                    <div class="form-group">
+                        <label class="form-label">描述你想要的 Skill</label>
+                        <textarea id="csAiDesc" class="skill-editor-textarea" rows="3" placeholder="例：像老朋友一样聊天，温柔、感同身受，擅长鼓励；回答简洁，不啰嗦"></textarea>
+                    </div>
+                    <button class="btn-secondary btn-sm" onclick="csPreviewPrompt()" style="width:100%;margin-bottom:8px;">🔍 预览生成的 Prompt</button>
+                    <div id="csAiPreview" style="display:none;border:1px solid var(--border-color);border-radius:6px;padding:8px;font-size:12px;max-height:160px;overflow-y:auto;white-space:pre-wrap;color:var(--text-primary);margin-bottom:8px;"></div>
+                    <button id="csAiApplyBtn" class="btn-primary btn-sm" style="display:none;width:100%;" onclick="csApplyGeneratedPrompt()">✅ 使用此 Prompt（填入手动模式）</button>
                 </div>
-                <div class="skill-editor-actions">
+
+                <div class="skill-editor-actions" style="margin-top:14px;">
                     <button class="btn-secondary btn-sm" onclick="closeCreateSkillModal()">取消</button>
                     <button class="btn-primary btn-sm" onclick="saveCreateSkill()">💾 创建 Skill</button>
                 </div>
@@ -1596,9 +1667,11 @@
             <!-- Category filter chips -->
             <div class="sp-filter-row" id="spFilterRow">
                 <button class="sp-chip active" data-cat="all" onclick="spSetCat('all')">全部</button>
+                <button class="sp-chip" data-cat="agent" onclick="spSetCat('agent')">🤖 Agent 能力</button>
                 <button class="sp-chip" data-cat="behavior" onclick="spSetCat('behavior')">⚙️ 行为</button>
                 <button class="sp-chip" data-cat="style" onclick="spSetCat('style')">🎨 风格</button>
                 <button class="sp-chip" data-cat="domain" onclick="spSetCat('domain')">🔬 领域</button>
+                <button class="sp-chip" data-cat="workflow" onclick="spSetCat('workflow')">⚡ 工作流</button>
                 <button class="sp-chip" data-cat="custom" onclick="spSetCat('custom')">🔧 自定义</button>
             </div>
             <!-- Skill cards content (catalog / library tabs) -->
@@ -2242,7 +2315,15 @@
         let _spCurrentSearch = '';
         let _spSelectedSessionId = null;
 
-        const CAT_LABELS = { behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', custom: '🔧 自定义' };
+        const CAT_LABELS = {
+            agent:    '🤖 Agent 能力',
+            behavior: '⚙️ 行为',
+            style:    '🎨 风格',
+            domain:   '🔬 领域',
+            workflow: '⚡ 工作流',
+            memory:   '🧠 记忆',
+            custom:   '🔧 自定义',
+        };
 
         window.openSkillsPanel = function() {
             const panel = document.getElementById('skillsPanel');

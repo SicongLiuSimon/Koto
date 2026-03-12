@@ -281,6 +281,7 @@ a:hover { text-decoration: underline; }
   font-size: 11px;
   color: var(--text-muted);
 }
+.sm-tag.category-agent    { border-color: rgba(120,200,255,0.5); color: #70b8ff; }
 .sm-tag.category-behavior { border-color: rgba(31,111,235,0.4); color: var(--text-link); }
 .sm-tag.category-style    { border-color: rgba(137,87,229,0.4); color: #a371f7; }
 .sm-tag.category-domain   { border-color: rgba(218,202,47,0.4); color: #e3b341; }

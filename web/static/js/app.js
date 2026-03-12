@@ -260,9 +260,9 @@ const TASK_MODELS = {
     'CHAT': 'gemini-3-flash-preview',
     'CODER': 'gemini-3-pro-preview', 
     'VISION': 'gemini-3-flash-preview',
-    'PAINTER': 'nano-banana-pro-preview',
+    'PAINTER': 'gemini-3.1-flash-image-preview',
     'VOICE': 'gemini-3-flash-preview',  // 语音模式使用快速模型
-    'RESEARCH': 'deep-research-pro-preview-12-2025',
+    'RESEARCH': 'gemini-2.5-pro-preview',
     'FILE_GEN': 'gemini-3-pro-preview'
 };
 
@@ -1754,17 +1754,48 @@ async function sendMessage(event) {
                     const stepType = String(step.step_type).toUpperCase();
 
                     if (stepType === 'THOUGHT') {
-                        return { type: 'agent_thought', thought: step.content || '' };
+                        // THOUGHT：仅显示前 120 字的简短摘要，避免长文本污染步骤面板
+                        const thought = step.content || '';
+                        const shortThought = thought.length > 120 ? thought.slice(0, 120) + '…' : thought;
+                        return { type: 'agent_thought', thought: shortThought };
                     }
 
                     if (stepType === 'ACTION') {
+                        // UnifiedAgent ACTION：带中文状态描述的步骤
                         agentStepCounter += 1;
                         return {
                             type: 'agent_step',
-                            step_number: agentStepCounter,
+                            step_number: step.step_number || agentStepCounter,
                             total_steps: '?',
-                            tool_name: step.action?.tool_name || 'tool',
-                            tool_args: step.action?.tool_args || {}
+                            tool_name: step.action?.tool_name || step.tool || 'tool',
+                            tool_args: step.action?.tool_args || step.args || {},
+                            label: step.content || '',   // 人类可读中文描述
+                        };
+                    }
+
+                    if (stepType === 'STEP_DONE') {
+                        // LangGraphAgent 工具完成通知（新增）
+                        return {
+                            type: 'agent_step_done',
+                            step_number: step.step_number || agentStepCounter,
+                            label: step.content || '✅ 完成',
+                            tool: step.tool || '',
+                        };
+                    }
+
+                    if (stepType === 'THINKING') {
+                        // LangGraph token：不进入步骤面板，直接显示为思考文本
+                        const thought = step.content || '';
+                        const shortThought = thought.length > 120 ? thought.slice(0, 120) + '…' : thought;
+                        return { type: 'agent_thought', thought: shortThought };
+                    }
+
+                    if (stepType === 'TOOL_RESULT') {
+                        // 工具返回结果：对应 UnifiedAgent OBSERVATION
+                        return {
+                            type: 'observation',
+                            message: step.content || '',
+                            observation: step.content || ''
                         };
                     }
 
@@ -1772,7 +1803,8 @@ async function sendMessage(event) {
                         return {
                             type: 'observation',
                             message: step.content || '',
-                            observation: step.observation || step.content || ''
+                            observation: step.observation || step.content || '',
+                            done_label: step.metadata?.done_label || '',
                         };
                     }
 
@@ -1970,23 +2002,23 @@ async function sendMessage(event) {
                                         scrollToBottom();
                                     }
                                 } else if (data.type === 'agent_step') {
-                                    // Agent步骤信息 - 在步骤面板中显示
-                                    console.log('[AGENT] Step:', data.step_number, '/', data.total_steps, '-', data.tool_name);
+                                    // Agent步骤信息 - 在步骤面板中显示（Copilot 风格）
+                                    lastStreamEventTime = Date.now();
                                     
-                                    // 初始化 agent 状态栏和步骤面板（首次）
+                                    // 初始化 agent 状态栏（首次）
                                     if (!bodyEl.querySelector('.agent-status-bar')) {
                                         const statusBar = document.createElement('div');
                                         statusBar.className = 'agent-status-bar';
                                         statusBar.innerHTML = '<div class="agent-spinner"></div><span class="agent-status-text">🤖 Agent 执行中…</span>';
                                         bodyEl.insertBefore(statusBar, bodyEl.firstChild);
                                     }
+                                    // 初始化步骤面板（首次）
                                     let stepsPanel = bodyEl.querySelector('.agent-steps-panel');
                                     if (!stepsPanel) {
                                         stepsPanel = document.createElement('details');
                                         stepsPanel.className = 'agent-steps-panel';
                                         stepsPanel.open = true;
                                         stepsPanel.innerHTML = '<summary>📋 执行步骤</summary><div class="agent-steps-list"></div>';
-                                        // 在状态栏之后、正文之前插入
                                         const statusBar = bodyEl.querySelector('.agent-status-bar');
                                         if (statusBar && statusBar.nextSibling) {
                                             bodyEl.insertBefore(stepsPanel, statusBar.nextSibling);
@@ -1995,34 +2027,57 @@ async function sendMessage(event) {
                                         }
                                     }
                                     
-                                    // 更新状态栏
+                                    // 更新状态栏：显示当前操作的中文描述（Copilot 风格）
                                     const statusText = bodyEl.querySelector('.agent-status-text');
-                                    if (statusText) statusText.textContent = `🤖 步骤 ${data.step_number}/${data.total_steps} — ${data.tool_name}`;
+                                    const displayLabel = data.label || data.tool_name || 'tool';
+                                    if (statusText) statusText.textContent = displayLabel;
                                     
-                                    // 添加步骤卡片
+                                    // 添加步骤卡片（使用中文描述，不是原始工具名）
                                     const stepsList = stepsPanel.querySelector('.agent-steps-list');
                                     const stepCard = document.createElement('div');
                                     stepCard.className = 'agent-step-card step-pending';
                                     stepCard.id = `agent-step-${data.step_number}`;
-                                    const argsStr = data.tool_args ? Object.entries(data.tool_args).map(([k,v]) => `${k}=${JSON.stringify(v)}`).join(', ') : '';
+                                    // 优先使用中文描述标签
+                                    const labelText = data.label || data.tool_name || 'tool';
                                     stepCard.innerHTML = `
                                         <div class="agent-step-number">${data.step_number}</div>
                                         <div class="agent-step-info">
-                                            <div class="agent-step-tool">${escapeHtml(data.tool_name)}</div>
-                                            <div class="agent-step-status">⏳ 执行中...${argsStr ? ' (' + escapeHtml(argsStr).substring(0, 60) + ')' : ''}</div>
+                                            <div class="agent-step-tool">${escapeHtml(labelText)}</div>
+                                            <div class="agent-step-status agent-step-running">
+                                                <span class="agent-step-spinner"></span> 执行中…
+                                            </div>
                                         </div>`;
                                     stepsList.appendChild(stepCard);
                                     scrollToBottom();
 
+                                } else if (data.type === 'agent_step_done') {
+                                    // LangGraph 工具完成通知：更新对应步骤卡片状态
+                                    lastStreamEventTime = Date.now();
+                                    const targetCard = bodyEl.querySelector(`#agent-step-${data.step_number}`) ||
+                                                       bodyEl.querySelector('.agent-step-card.step-pending:last-of-type');
+                                    if (targetCard) {
+                                        const isSuccess = data.success !== false;
+                                        targetCard.className = `agent-step-card ${isSuccess ? 'step-success' : 'step-fail'}`;
+                                        const statusEl = targetCard.querySelector('.agent-step-status');
+                                        if (statusEl) {
+                                            statusEl.className = 'agent-step-status';
+                                            statusEl.textContent = data.label || (isSuccess ? '✅ 完成' : '❌ 失败');
+                                        }
+                                    }
+                                    scrollToBottom();
+
                                 } else if (data.type === 'observation' && bodyEl.querySelector('.agent-steps-panel')) {
-                                    // Agent OBSERVATION: 结构化展示工具结果
+                                    // Agent OBSERVATION: 结构化展示工具结果，更新步骤状态
+                                    lastStreamEventTime = Date.now();
                                     const cards = bodyEl.querySelectorAll('.agent-step-card');
                                     const lastCard = cards.length > 0 ? cards[cards.length - 1] : null;
                                     if (lastCard) {
                                         lastCard.className = 'agent-step-card step-success';
                                         const statusEl = lastCard.querySelector('.agent-step-status');
                                         if (statusEl) {
-                                            statusEl.textContent = '✅ 已完成';
+                                            statusEl.className = 'agent-step-status';
+                                            // 优先显示 done_label（中文），否则显示 ✅ 已完成
+                                            statusEl.textContent = data.done_label || '✅ 已完成';
                                         }
 
                                         const rawObs = data.observation || data.message || '';
@@ -2057,20 +2112,31 @@ async function sendMessage(event) {
                                     scrollToBottom();
                                     
                                 } else if (data.type === 'agent_thought') {
-                                    // Agent思考过程 - 仅在工具调用中间步骤显示
-                                    // 最终回复(token)会替代思考内容，避免重复
+                                    // Agent思考过程 - 显示在步骤面板中（不污染最终回答）
+                                    lastStreamEventTime = Date.now();
                                     console.log('[AGENT] Thinking:', data.thought);
-                                    agentThoughtText = data.thought; // 记录思考文本，用于去重
-                                    fullText += `*💭 ${data.thought}*\n\n`;
-                                    // 更新正文区（跳过面板部分）
-                                    const textContainer = bodyEl.querySelector('.agent-answer') || bodyEl;
-                                    if (!bodyEl.querySelector('.agent-answer')) {
-                                        const answerDiv = document.createElement('div');
-                                        answerDiv.className = 'agent-answer';
-                                        bodyEl.appendChild(answerDiv);
+                                    agentThoughtText = data.thought; // 记录用于去重
+                                    
+                                    // 如果存在步骤面板，把思考文本作为一个"思考中"条目
+                                    const thoughtPanel = bodyEl.querySelector('.agent-steps-panel');
+                                    if (thoughtPanel) {
+                                        const thoughtsList = thoughtPanel.querySelector('.agent-steps-list');
+                                        if (thoughtsList) {
+                                            // 避免重复追加同一思考内容
+                                            const lastThought = thoughtsList.querySelector('.agent-thought-item:last-of-type');
+                                            if (!lastThought || lastThought.dataset.thought !== data.thought) {
+                                                const thoughtItem = document.createElement('div');
+                                                thoughtItem.className = 'agent-thought-item';
+                                                thoughtItem.dataset.thought = data.thought;
+                                                thoughtItem.innerHTML = `<span class="agent-thought-icon">💭</span><span class="agent-thought-text">${escapeHtml(data.thought)}</span>`;
+                                                thoughtsList.appendChild(thoughtItem);
+                                                scrollToBottom();
+                                            }
+                                        }
+                                    } else {
+                                        // 无面板时降级：在正文作短暂提示（会被最终回答替换掉）
+                                        agentThoughtText = data.thought;
                                     }
-                                    bodyEl.querySelector('.agent-answer').innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
-                                    scrollToBottom();
                                     
                                 } else if (data.type === 'user_confirm') {
                                     // 需要用户确认 - 显示带倒计时的确认对话框
@@ -3341,7 +3407,10 @@ function applySettingsToUI() {
     // AI settings
     const modelSelect = document.getElementById('settingModel');
     if (modelSelect) {
-        modelSelect.value = currentSettings.ai?.default_model || 'gemini-3-flash-preview';
+        const savedModel = currentSettings.ai?.default_model || 'auto';
+        modelSelect.value = savedModel;
+        // 如果 savedModel 不在下拉列表里（历史遗留值），回退到 auto
+        if (!modelSelect.value) modelSelect.value = 'auto';
         selectedModel = modelSelect.value; // 同步全局变量
     }
     
@@ -3376,11 +3445,12 @@ function applySettingsToUI() {
         applyLocalOnlyMode(localOnly);
     }
 
+    // 本地模型列表（异步查询）
+    loadLocalModels();
+
     // Restore UI zoom from server settings (server is the source of truth)
     const savedZoom = parseFloat(currentSettings.appearance?.ui_zoom || '1');
-    if (savedZoom && savedZoom !== 1) {
-        setUIZoom(savedZoom, true);  // true = suppress server re-save on load
-    }
+    setUIZoom(savedZoom, true);  // always sync slider display, suppress server re-save
 
     // Proxy settings
     const proxyEnabledEl = document.getElementById('settingProxyEnabled');
@@ -3406,17 +3476,23 @@ function selectTheme(theme) {
 }
 
 function openSettings() {
-    loadSettings();
-    loadMemories(); // Load memories when opening settings
-    loadSkills();   // Load skills when opening settings
-    loadSkillBindings();    // Load intent bindings
-    loadTriggers();         // Load scheduled triggers
-    fileHubLoadStats();     // Load file registry stats
-    loadShadowStatus();     // Load shadow watcher status
+    // 立即打开面板并加载核心设置
     document.getElementById('settingsPanel').classList.add('active');
-    // Sync zoom slider to current state (suppress save - just restoring display)
     const savedZ = parseFloat(localStorage.getItem('koto.uiZoom') || '1');
     setUIZoom(savedZ, true);
+
+    // 加载设置和记忆（必要）
+    loadSettings();
+    loadMemories();
+
+    // 延迟加载次要区域，避免同时触发大量请求卡住面板动画
+    setTimeout(() => {
+        loadSkills();
+        loadSkillBindings();
+        loadTriggers();
+        fileHubLoadStats();
+        loadShadowStatus();
+    }, 200);
 }
 
 function closeSettings() {
@@ -3430,14 +3506,20 @@ let _currentSkillFilter = 'all';
 let _editingSkillId = null; // skill being edited
 
 const SKILL_CATEGORY_LABELS = {
+    agent:    '🤖 Agent 能力',
     behavior: '⚙️ 行为',
     style:    '🎨 风格',
     domain:   '🔬 领域',
+    workflow: '⚡ 工作流',
+    memory:   '🧠 记忆',
 };
 const SKILL_CAT_COLORS = {
+    agent:    '#70b8ff',
     behavior: '#4a9eff',
     style:    '#e06c75',
-    domain:   '#98c379',
+    domain:   '#e3b341',
+    workflow: '#f0883e',
+    memory:   '#76f7d4',
 };
 
 async function loadSkills() {
@@ -4217,6 +4299,77 @@ function onModelChange(value) {
 function onLocalOnlyChange(enabled) {
     applyLocalOnlyMode(enabled);
     updateSetting('ai', 'use_local_only', enabled);
+    // 同步写入 model_mode，确保后端路由实际切换
+    const select = document.getElementById('settingLocalModel');
+    const tag = (select && select.value) || '';
+    fetch('/api/local/model', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ mode: enabled ? 'local' : 'cloud', tag })
+    }).catch(e => console.warn('set local model mode failed:', e));
+}
+
+// ================= 本地模型选择 =================
+
+async function loadLocalModels() {
+    const select = document.getElementById('settingLocalModel');
+    const status = document.getElementById('localModelStatus');
+    if (!select || !status) return;
+
+    try {
+        const resp = await fetch('/api/local/models');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+
+        select.innerHTML = '';
+        if (!data.ollama_running || data.models.length === 0) {
+            select.innerHTML = '<option value="">-- Ollama 未运行或无已安装模型 --</option>';
+            select.disabled = true;
+            status.textContent = data.ollama_running ? '未检测到已安装的模型，请先下载模型。' : 'Ollama 未运行。启动 Ollama 后点击刷新。';
+            return;
+        }
+
+        select.disabled = false;
+        data.models.forEach(tag => {
+            const opt = document.createElement('option');
+            opt.value = tag;
+            const isRec = tag === data.recommended;
+            opt.textContent = isRec ? `${tag}  ★ 推荐` : tag;
+            select.appendChild(opt);
+        });
+
+        // 恢复已保存的选择，否则用推荐模型
+        const saved = data.current || data.recommended;
+        if (saved) select.value = saved;
+
+        status.textContent = `已检测到 ${data.models.length} 个本地模型` +
+            (data.recommended ? `，推荐: ${data.recommended}` : '');
+    } catch (e) {
+        select.innerHTML = '<option value="">-- 查询失败，请检查 Ollama --</option>';
+        select.disabled = true;
+        status.textContent = '无法连接 Ollama，请确保 Ollama 正在运行。';
+        console.warn('loadLocalModels error:', e);
+    }
+}
+
+function onLocalModelSelect(tag) {
+    if (!tag) return;
+    const localOnly = document.getElementById('settingLocalOnly');
+    const mode = (localOnly && localOnly.checked) ? 'local' : 'cloud';
+    fetch('/api/local/model', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ tag, mode })
+    }).catch(e => console.warn('onLocalModelSelect failed:', e));
+}
+
+async function refreshOllamaModels() {
+    const btn = document.querySelector('#localModelPickerSection .browse-btn');
+    const status = document.getElementById('localModelStatus');
+    if (btn) { btn.disabled = true; btn.textContent = '查询中…'; }
+    if (status) status.textContent = '正在查询 Ollama…';
+    await loadLocalModels();
+    if (btn) { btn.disabled = false; btn.textContent = '刷新'; }
 }
 
 function applyLocalOnlyMode(enabled) {
@@ -6414,11 +6567,120 @@ function openCreateSkillModal() {
     document.getElementById('csCategory').value = 'custom';
     document.getElementById('csDesc').value = '';
     document.getElementById('csPrompt').value = '';
+    document.getElementById('csAiDesc').value = '';
+    document.getElementById('csAiPreview').style.display = 'none';
+    document.getElementById('csAiApplyBtn').style.display = 'none';
+    document.getElementById('csExtractStatus').textContent = '';
+    _csSelectedSession = null;
+    csSwitchTab('manual');
     document.getElementById('createSkillModal').style.display = 'flex';
 }
 
 function closeCreateSkillModal() {
     document.getElementById('createSkillModal').style.display = 'none';
+}
+
+let _csSelectedSession = null;
+
+function csSwitchTab(tab) {
+    ['manual', 'extract', 'ai'].forEach(t => {
+        const id = 'csTab' + t.charAt(0).toUpperCase() + t.slice(1);
+        const btn = document.getElementById(id);
+        const body = document.getElementById('csTabBody' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (btn)  btn.classList.toggle('active', t === tab);
+        if (body) body.style.display = t === tab ? 'block' : 'none';
+    });
+    if (tab === 'extract') csLoadSessions();
+}
+
+async function csLoadSessions() {
+    const list = document.getElementById('csExtractSessionList');
+    if (!list) return;
+    list.innerHTML = '<div style="color:var(--text-muted);padding:6px;font-size:12px;">正在加载…</div>';
+    try {
+        const resp = await fetch('/api/skillmarket/sessions');
+        const data = await resp.json();
+        const sessions = data.sessions || [];
+        if (!sessions.length) {
+            list.innerHTML = '<div style="color:var(--text-muted);padding:6px;font-size:12px;">暂无对话记录。</div>';
+            return;
+        }
+        list.innerHTML = sessions.map(s => `
+            <div class="ske-session-item" data-sid="${escapeHtml(s.id)}" onclick="csSelectSession('${escapeHtml(s.id)}', this)">
+                💬 ${escapeHtml(s.title || s.id)}
+                <span style="float:right;color:var(--text-muted);font-size:10px;">${s.message_count || 0} 条</span>
+            </div>`).join('');
+    } catch(e) {
+        list.innerHTML = `<div style="color:var(--accent-danger);font-size:12px;padding:6px;">⚠️ ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function csSelectSession(sessionId, el) {
+    _csSelectedSession = sessionId;
+    document.querySelectorAll('#csExtractSessionList .ske-session-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    document.getElementById('csExtractStatus').textContent = '';
+}
+
+async function csExtractFromSession() {
+    if (!_csSelectedSession) { alert('请先选择一个对话会话'); return; }
+    const name = (document.getElementById('csExtractName').value || '').trim() || '从对话提炼';
+    const statusEl = document.getElementById('csExtractStatus');
+    statusEl.style.color = 'var(--text-muted)';
+    statusEl.textContent = '⏳ 正在分析对话风格…';
+    try {
+        const resp = await fetch('/api/skillmarket/from-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: _csSelectedSession, name, save: false }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '提取失败');
+        const skill = data.skill || {};
+        // 填入手动模式表单
+        if (skill.name)        document.getElementById('csName').value    = skill.name;
+        if (skill.icon)        document.getElementById('csIcon').value    = skill.icon;
+        if (skill.category)    document.getElementById('csCategory').value = skill.category;
+        if (skill.description) document.getElementById('csDesc').value    = skill.description;
+        const prompt = skill.system_prompt_template || skill.system_prompt || skill.prompt || '';
+        if (prompt)            document.getElementById('csPrompt').value  = prompt;
+        statusEl.style.color = 'var(--accent-success, #4caf50)';
+        statusEl.textContent = '✅ 风格提炼完成，已填入表单';
+        csSwitchTab('manual');
+    } catch(e) {
+        statusEl.style.color = 'var(--accent-danger, #e06c75)';
+        statusEl.textContent = '⚠️ ' + e.message;
+    }
+}
+
+async function csPreviewPrompt() {
+    const desc = (document.getElementById('csAiDesc').value || '').trim();
+    if (!desc) { alert('请输入 Skill 描述'); return; }
+    const previewEl = document.getElementById('csAiPreview');
+    const applyBtn  = document.getElementById('csAiApplyBtn');
+    previewEl.style.display = 'block';
+    applyBtn.style.display = 'none';
+    previewEl.textContent = '⏳ AI 正在生成…';
+    try {
+        const resp = await fetch('/api/skillmarket/preview-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: desc }),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '生成失败');
+        previewEl.textContent = data.prompt || data.system_prompt || '（空）';
+        applyBtn.style.display = 'block';
+    } catch(e) {
+        previewEl.textContent = '⚠️ ' + e.message;
+    }
+}
+
+function csApplyGeneratedPrompt() {
+    const text = document.getElementById('csAiPreview').textContent || '';
+    if (!text || text.startsWith('⏳') || text.startsWith('⚠️')) return;
+    document.getElementById('csPrompt').value = text;
+    csSwitchTab('manual');
 }
 
 async function saveCreateSkill() {
@@ -6882,9 +7144,10 @@ function setUIZoom(v, suppressSave = false) {
     // Compensate --viewport-h so 100vh-based containers don't overflow after zoom
     document.documentElement.style.setProperty('--viewport-h', (window.innerHeight / v) + 'px');
     localStorage.setItem('koto.uiZoom', v);
-    // Persist to server so the setting survives across sessions/ports/browsers
+    // Persist to server with debounce (avoid flooding during slider drag)
     if (!suppressSave && typeof updateSetting === 'function') {
-        updateSetting('appearance', 'ui_zoom', v);
+        clearTimeout(window._zoomSaveTimer);
+        window._zoomSaveTimer = setTimeout(() => updateSetting('appearance', 'ui_zoom', v), 400);
     }
     const pct = Math.round(v * 100);
     const display = document.getElementById('uiZoomDisplay');
@@ -7019,6 +7282,28 @@ async function loadShadowStatus() {
         if (cardsEl) {
             cardsEl.style.display = '';
             const topics = (s.top_topics || []).map(t => `<span style="background:var(--bg-hover);border-radius:4px;padding:2px 6px;font-size:11px;">${escapeHtml(t.topic)} ×${t.count}</span>`).join(' ');
+            // 对话风格摘要
+            let styleHtml = '';
+            if (s.style_summary && s.style_summary.samples > 2) {
+                const cs = s.style_summary;
+                const styleItems = [];
+                if (cs.polite_ratio > 0.6) styleItems.push('礼貌型');
+                else if (cs.polite_ratio < 0.3) styleItems.push('直接型');
+                if (cs.context_ratio > 0.4) styleItems.push('爱给背景');
+                if (cs.explicit_pref_ratio > 0.3) styleItems.push('有格式偏好');
+                if (cs.multistep_ratio > 0.25) styleItems.push('多步任务');
+                if (cs.avg_query_len > 80) styleItems.push('长消息');
+                else if (cs.avg_query_len > 0 && cs.avg_query_len < 25) styleItems.push('简洁提问');
+                if (styleItems.length) {
+                    styleHtml = `<div style="margin-top:5px;font-size:11px;color:var(--text-muted);">🎭 对话风格: ${styleItems.map(i => `<span style="background:var(--bg-hover);border-radius:3px;padding:1px 5px;">${i}</span>`).join(' ')}</div>`;
+                }
+            }
+            // 任务风格摘要
+            let taskHtml = '';
+            if (s.task_summary && s.task_summary.samples > 2) {
+                const topTypes = (s.task_summary.top_task_types || []).slice(0, 3).map(t => `${t.type}×${t.count}`).join('  ');
+                if (topTypes) taskHtml = `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">🎯 常用任务: <span style="opacity:.8">${topTypes}</span></div>`;
+            }
             cardsEl.innerHTML = `
                 <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--text-muted);">
                     <span>📊 已观察 <strong>${s.total_observations || 0}</strong> 次对话</span>
@@ -7027,6 +7312,7 @@ async function loadShadowStatus() {
                     <span>💬 待推送 <strong>${s.pending_messages || 0}</strong> 条</span>
                 </div>
                 ${topics ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${topics}</div>` : ''}
+                ${styleHtml}${taskHtml}
             `;
         }
 
@@ -7121,4 +7407,164 @@ async function shadowMarkTaskDone(taskId) {
         await loadShadowOpenTasks();
         await loadShadowStatus();
     } catch(e) { /* ignore */ }
+}
+// ================= 模型路由管理 =================
+
+let _modelRoutingOpen = false;
+
+function toggleModelRoutingPanel() {
+    _modelRoutingOpen = !_modelRoutingOpen;
+    document.getElementById('modelRoutingBody').style.display = _modelRoutingOpen ? 'block' : 'none';
+    document.getElementById('modelRoutingToggleIcon').textContent  = _modelRoutingOpen ? '▲' : '▼';
+    if (_modelRoutingOpen) loadModelRouting();
+}
+
+async function loadModelRouting() {
+    const statusEl = document.getElementById('modelRoutingStatus');
+    const tableEl  = document.getElementById('modelRoutingTable');
+    if (!statusEl || !tableEl) return;
+    statusEl.textContent = '载入中…';
+    try {
+        const [routeRes, overrideRes] = await Promise.all([
+            fetch('/api/v1/models'),
+            fetch('/api/v1/models/overrides')
+        ]);
+        const routeData    = await routeRes.json();
+        const overrideData = await overrideRes.json();
+
+        const available = (routeData.available || []).map(m => m.id || m).filter(Boolean);
+        const overrides = overrideData.overrides || {};
+        const modelMapRaw = overrideData.model_map || {};
+
+        statusEl.innerHTML = routeData.ready
+            ? `<span style="color:#4ade80;">● 动态发现已就绪</span> · ${available.length} 个可用模型`
+            : `<span style="color:#facc15;">● 静态默认值</span>（模型管理器未就绪）`;
+
+        // Task display labels
+        const TASK_LABELS = {
+            CHAT: '💬 对话',
+            CODER: '💻 编程',
+            WEB_SEARCH: '🌐 网络搜索',
+            VISION: '👁️ 图像理解',
+            RESEARCH: '🔬 深度研究',
+            FILE_GEN: '📄 文档生成',
+            FILE_GEN_COMPLEX: '📄 文档生成 (复杂)',
+            DOC_ANNOTATE: '📝 文档批注',
+            DOC_ANNOTATE_COMPLEX: '📝 文档批注 (复杂)',
+            CODER_COMPLEX: '💻 编程 (复杂)',
+            MULTI_STEP: '🧭 多步任务',
+            PAINTER: '🎨 图像生成',
+            AGENT: '🤖 Agent',
+            FILE_SEARCH: '🗂️ 文件搜索',
+            COMPLEX: '⚡ 复杂度升级兜底',
+            SYSTEM: '🖥️ 系统操作',
+            FILE_OP: '📁 文件操作',
+        };
+
+        // Build option list from available models + current MODEL_MAP values
+        const allModelIds = Array.from(new Set([
+            ...available,
+            ...Object.values(modelMapRaw).map(v => v.model_id || v),
+            'gemini-3-pro-preview', 'gemini-3-flash-preview',
+            'gemini-2.5-flash', 'gemini-2.5-pro-preview',
+            'deep-research-pro-preview-12-2025',
+            'gemini-3.1-flash-image-preview', 'local-executor'
+        ])).filter(Boolean);
+
+        let rows = '';
+        for (const [task, info] of Object.entries(modelMapRaw)) {
+            const mid = info.model_id || info;
+            const isOverridden = !!overrides[task];
+            const label = TASK_LABELS[task] || task;
+            const opts = allModelIds.map(m =>
+                `<option value="${m}" ${m === mid ? 'selected' : ''}>${m}</option>`
+            ).join('');
+            rows += `<tr style="${isOverridden ? 'background:rgba(250,204,21,.08);' : ''}">
+                <td style="padding:4px 6px;font-size:12px;white-space:nowrap;">${label}</td>
+                <td style="padding:4px 6px;">
+                    <select style="width:100%;font-size:11px;background:var(--bg-secondary,#1e1e2e);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:4px;padding:2px 4px;"
+                            onchange="applyModelOverride('${task}', this.value, this)">
+                        ${opts}
+                    </select>
+                </td>
+                <td style="padding:4px 6px;font-size:11px;opacity:.6;">
+                    ${isOverridden ? `<span style="color:#facc15;">✏️ 覆盖</span>` : (info.score != null ? `${Math.round(info.score*100)}分` : '默认')}
+                </td>
+            </tr>`;
+        }
+
+        tableEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="opacity:.5;font-size:11px;">
+                <th style="text-align:left;padding:4px 6px;">任务</th>
+                <th style="text-align:left;padding:4px 6px;">模型</th>
+                <th style="text-align:left;padding:4px 6px;">状态</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+
+    } catch(e) {
+        statusEl.textContent = '加载失败: ' + e.message;
+        tableEl.innerHTML = '';
+    }
+}
+
+async function applyModelOverride(task, modelId, selectEl) {
+    try {
+        const res = await fetch('/api/v1/models/override', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task, model_id: modelId })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            _showToast(`✅ ${task} → ${modelId}`);
+            // 高亮行标记
+            const row = selectEl.closest('tr');
+            if (row) row.style.background = 'rgba(250,204,21,.08)';
+            // 更新状态单元格
+            const cells = row ? row.querySelectorAll('td') : [];
+            if (cells[2]) cells[2].innerHTML = `<span style="color:#facc15;">✏️ 覆盖</span>`;
+        } else {
+            _showToast('覆盖失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch(e) {
+        _showToast('请求失败: ' + e.message, 'error');
+    }
+}
+
+async function clearAllModelOverrides() {
+    if (!confirm('确认清除所有手动覆盖，恢复动态/默认路由？')) return;
+    try {
+        const res = await fetch('/api/v1/models/overrides');
+        const data = await res.json();
+        const tasks = Object.keys(data.overrides || {});
+        for (const task of tasks) {
+            await fetch('/api/v1/models/override', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task, model_id: '' })
+            });
+        }
+        _showToast('✅ 所有覆盖已清除');
+        await loadModelRouting();
+    } catch(e) {
+        _showToast('操作失败: ' + e.message, 'error');
+    }
+}
+
+async function refreshModelRegistry() {
+    const statusEl = document.getElementById('modelRoutingStatus');
+    if (statusEl) statusEl.textContent = '正在重新发现模型…';
+    try {
+        const res = await fetch('/api/v1/models/refresh', { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok' || data.status === 'initializing') {
+            _showToast('🔄 模型列表已刷新');
+            await loadModelRouting();
+        } else {
+            _showToast('刷新失败: ' + (data.error || ''), 'error');
+        }
+    } catch(e) {
+        _showToast('请求失败: ' + e.message, 'error');
+    }
 }
