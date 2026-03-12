@@ -36,12 +36,12 @@ _MEMORY_K: int = 5
 # Category names that get a priority boost inside search_memories() for
 # each task type.  Mirrors MemOS Cube-aware multi-granularity dispatch.
 _TASK_CUBE_MAP: dict[str, list[str]] = {
-    "CHAT":       ["user_fact", "preference", "user_preference"],
-    "RESEARCH":   ["topic_summary", "user_fact", "preference"],
+    "CHAT": ["user_fact", "preference", "user_preference"],
+    "RESEARCH": ["topic_summary", "user_fact", "preference"],
     "WEB_SEARCH": ["topic_summary", "user_fact"],
-    "CODER":      ["user_fact", "user_preference", "correction", "preference"],
-    "FILE_GEN":   ["user_fact", "user_preference", "preference"],
-    "AGENT":      ["decision", "reminder", "user_fact"],
+    "CODER": ["user_fact", "user_preference", "correction", "preference"],
+    "FILE_GEN": ["user_fact", "user_preference", "preference"],
+    "AGENT": ["decision", "reminder", "user_fact"],
     "MULTI_STEP": ["decision", "reminder", "user_fact"],
 }
 
@@ -102,11 +102,14 @@ class MemoryRouter:
                 search_fn = getattr(mgr, "search_memories", None)
                 if search_fn and query:
                     _boost = _TASK_CUBE_MAP.get(task_type, [])
-                    hits = search_fn(
-                        query,
-                        limit=_MEMORY_K,
-                        boost_categories=_boost or None,
-                    ) or []
+                    hits = (
+                        search_fn(
+                            query,
+                            limit=_MEMORY_K,
+                            boost_categories=_boost or None,
+                        )
+                        or []
+                    )
                     if hits:
                         lines = []
                         for h in hits:
@@ -114,7 +117,11 @@ class MemoryRouter:
                             content = (h.get("content") or "").strip()
                             if content:
                                 # 单条记忆截断至 150 字符，防止超长条目撑大 system_instruction
-                                content_short = content[:150] + "…" if len(content) > 150 else content
+                                content_short = (
+                                    content[:150] + "…"
+                                    if len(content) > 150
+                                    else content
+                                )
                                 lines.append(f"  [{cat}] {content_short}")
                         if lines:
                             parts.append(

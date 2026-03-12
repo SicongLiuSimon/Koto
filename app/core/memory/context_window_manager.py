@@ -114,7 +114,7 @@ class ContextWindowManager:
             and len(history) > _MIN_TURNS_BEFORE_COMPRESS
         ):
             # Keep the _RECENT_KEEP most-recent turns; summarize the rest
-            old_turns   = history[:-_RECENT_KEEP]
+            old_turns = history[:-_RECENT_KEEP]
             recent_turns = history[-_RECENT_KEEP:]
 
             summary_text = _summarize_turns(old_turns, llm_callable)
@@ -132,7 +132,9 @@ class ContextWindowManager:
                         source="context_window_manager",
                         metadata={"tags": [tag, "auto_generated"]},
                     )
-                    logger.info(f"[CWM] Paged out {len(old_turns)} turns for {session_name}")
+                    logger.info(
+                        f"[CWM] Paged out {len(old_turns)} turns for {session_name}"
+                    )
                 except Exception as ex:
                     logger.debug(f"[CWM] page_out failed: {ex}")
 
@@ -140,7 +142,7 @@ class ContextWindowManager:
 
             # Return only the recent portion + a synthetic summary turn at the top
             managed_history = [
-                {"role": "user",  "parts": ["请注意以下是之前对话的摘要："]},
+                {"role": "user", "parts": ["请注意以下是之前对话的摘要："]},
                 {"role": "model", "parts": [summary_text]},
             ] + recent_turns
 
@@ -155,7 +157,9 @@ class ContextWindowManager:
             mgr = get_memory_fn()
             if mgr is not None and query and len(query.strip()) > 4:
                 # 优先使用向量语义检索（FAISS），关键词搜索作为备用
-                hits = mgr.search_vector_memories(query, limit=4) or mgr.search_memories(query, limit=4)
+                hits = mgr.search_vector_memories(
+                    query, limit=4
+                ) or mgr.search_memories(query, limit=4)
                 if hits:
                     lines: List[str] = []
                     for h in hits:
