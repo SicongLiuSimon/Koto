@@ -32,8 +32,8 @@ import json
 import logging
 import os
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from app.core.llm.base import LLMProvider
