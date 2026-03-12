@@ -24,10 +24,12 @@ class GeminiProvider(LLMProvider):
 
     # These models only support the Interactions API and cannot use generate_content().
     # Any direct generate_content call with these models will receive a 400 INVALID_ARGUMENT.
-    INTERACTIONS_ONLY_MODELS: frozenset = frozenset({
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
-    })
+    INTERACTIONS_ONLY_MODELS: frozenset = frozenset(
+        {
+            "gemini-3-flash-preview",
+            "gemini-3-pro-preview",
+        }
+    )
     # Fallback model used whenever an Interactions-only model is passed to generate_content
     INTERACTIONS_FALLBACK_MODEL: str = "gemini-2.5-flash"
 
@@ -70,7 +72,8 @@ class GeminiProvider(LLMProvider):
             logger.warning(
                 "[GeminiProvider] model '%s' only supports Interactions API; "
                 "substituting '%s' for generate_content call",
-                model, self.INTERACTIONS_FALLBACK_MODEL,
+                model,
+                self.INTERACTIONS_FALLBACK_MODEL,
             )
             model = self.INTERACTIONS_FALLBACK_MODEL
 
@@ -117,11 +120,15 @@ class GeminiProvider(LLMProvider):
                 last_exc = exc
                 exc_str = str(exc)
                 # If model was somehow still Interactions-only, fall back immediately (no retry)
-                if "Interactions API" in exc_str and model in self.INTERACTIONS_ONLY_MODELS:
+                if (
+                    "Interactions API" in exc_str
+                    and model in self.INTERACTIONS_ONLY_MODELS
+                ):
                     logger.warning(
                         "[GeminiProvider] Caught Interactions-API-only error for '%s'; "
                         "retrying once with '%s'",
-                        model, self.INTERACTIONS_FALLBACK_MODEL,
+                        model,
+                        self.INTERACTIONS_FALLBACK_MODEL,
                     )
                     model = self.INTERACTIONS_FALLBACK_MODEL
                     continue
