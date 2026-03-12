@@ -13,6 +13,7 @@ Local Model Installer  —  本地 AI 模型安装器
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -23,6 +24,17 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
+
+# ─────────────────────────────────────────────────────────────
+#  ANSI 清理（Ollama 0.17+ 输出包含大量 ANSI 转义序列）
+# ─────────────────────────────────────────────────────────────
+_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def _strip_ansi(text: str) -> str:
+    """移除 ANSI/VT100 转义序列，返回纯文本。"""
+    return _ANSI_RE.sub("", text)
+
 
 # ─────────────────────────────────────────────────────────────
 #  路径
@@ -51,14 +63,14 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "极低资源，适合 4 GB 以下内存，速度最快",
     },
     {
-        "tag": "llama3.2:3b",
-        "name": "LLaMA 3.2 3B",
+        "tag": "qwen2.5:3b",
+        "name": "Qwen 2.5 3B",
         "badge": "轻量",
         "vram": 2.5,
         "ram": 6,
-        "size_gb": 2.0,
+        "size_gb": 1.9,
         "tier": "light",
-        "desc": "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
+        "desc": "6–8 GB 内存，流畅度与效果兼顾，中文日常任务优选",
     },
     {
         "tag": "gemma3:4b",
@@ -73,22 +85,22 @@ MODEL_CATALOG: List[Dict] = [
     {
         "tag": "qwen2.5:7b",
         "name": "Qwen 2.5 7B",
-        "badge": "中文强化",
+        "badge": "平衡",
         "vram": 6.0,
         "ram": 12,
         "size_gb": 4.7,
         "tier": "powerful",
-        "desc": "12 GB+ 内存，中文理解出色，复杂任务首选",
+        "desc": "12 GB+ 内存，中英文均衡，性价比极高",
     },
     {
-        "tag": "llama3.1:8b",
-        "name": "LLaMA 3.1 8B",
+        "tag": "qwen3:8b",
+        "name": "Qwen 3 8B",
         "badge": "高性能",
         "vram": 7.0,
         "ram": 16,
-        "size_gb": 5.0,
+        "size_gb": 5.2,
         "tier": "highend",
-        "desc": "16 GB 内存 / NVIDIA 8 GB 显卡，综合能力强",
+        "desc": "16 GB 内存 / NVIDIA 8 GB 显卡，中文深度思考，综合能力强",
     },
     {
         "tag": "qwen2.5:14b",
@@ -273,11 +285,40 @@ def get_system_info() -> Dict:
 
 
 def recommend_models(info: Dict) -> List[Dict]:
+    """返回可运行的模型列表，并在最适合用户的型号上标注 recommended=True。
+
+    「推荐」选取逻辑：在用户可运行的模型中，找到能满足硬件余量的最高档位：
+    - GPU 路径：显存需求 ≤ 可用显存 × 85%
+    - CPU 路径：内存需求 ≤ 可用内存 × 70%（预留 OS 开销）
+    两个条件任一满足即可成为推荐候选，取满足条件的最高档。
+    """
     ram = info["ram_gb"]
     vram = info["gpu_vram_gb"]
-    eff = max(ram, vram * 1.5)
-    out = [m for m in MODEL_CATALOG if eff >= m["ram"] or vram >= m["vram"]]
-    return out or [MODEL_CATALOG[0]]
+
+    # ── 1. 所有可运行模型（理论上能跑）──
+    feasible = [m for m in MODEL_CATALOG if ram >= m["ram"] or vram >= m["vram"]]
+    if not feasible:
+        feasible = [MODEL_CATALOG[0]]
+
+    # ── 2. 找「舒适」推荐档：留足余量 ──
+    # VRAM 余量 15%（GPU 路径），RAM 余量 30%（CPU 路径）
+    sweet = None
+    for m in reversed(feasible):  # 从高档往低找，取最高的舒适档
+        gpu_ok = vram > 0 and vram >= m["vram"] * 1.15
+        cpu_ok = ram >= m["ram"] * 1.30
+        if gpu_ok or cpu_ok:
+            sweet = m
+            break
+    if sweet is None:
+        sweet = feasible[0]  # 全部偏紧时选最低档
+
+    # ── 3. 复制列表，标注 recommended 字段 ──
+    result = []
+    for m in feasible:
+        mc = dict(m)  # 浅拷贝，不污染 MODEL_CATALOG 原始数据
+        mc["recommended"] = m["tag"] == sweet["tag"]
+        result.append(mc)
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -355,6 +396,7 @@ def start_ollama(log_cb=None) -> bool:
 
 
 def pull_model(tag: str, prog_cb=None, log_cb=None) -> bool:
+    """运行 ollama pull，处理 Ollama 0.17+ 的 ANSI 输出并限制 GUI 更新频率。"""
     exe = _find_ollama_exe()
     if not exe:
         log_cb and log_cb("❌ 找不到 ollama 可执行文件")
@@ -369,20 +411,91 @@ def pull_model(tag: str, prog_cb=None, log_cb=None) -> bool:
             errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        for line in proc.stdout:
-            line = line.strip()
+        _last_log_t = 0.0  # 上次发送进度日志的时间
+        _last_pct = -1.0  # 上次回调的百分比
+        _last_activity = time.monotonic()  # 最后一次收到输出的时间（检测死锁）
+        STALL_TIMEOUT = 300  # 超过 5 分钟无任何输出视为卡死
+        for raw_line in proc.stdout:
+            _last_activity = time.monotonic()
+            # 剥离所有 ANSI/VT100 转义序列（Ollama 0.17+ 输出大量光标控制码）
+            line = _strip_ansi(raw_line).strip()
             if not line:
                 continue
-            log_cb and log_cb(line)
-            if "%" in line and prog_cb:
+
+            # 判断是否是进度行（含 "N%" token）
+            is_progress = False
+            pct_val = -1.0
+            if "%" in line:
                 for tok in line.split():
                     if tok.endswith("%"):
                         try:
-                            prog_cb(float(tok.rstrip("%")))
+                            v = float(tok.rstrip("%"))
+                            is_progress = True
+                            pct_val = v
+                            break
                         except ValueError:
                             pass
-        proc.wait()
-        return proc.returncode == 0
+
+            # 日志：非进度行直接输出；进度行每秒最多一条
+            now = time.monotonic()
+            if not is_progress:
+                log_cb and log_cb(line)
+            elif now - _last_log_t >= 1.0:
+                log_cb and log_cb(line)
+                _last_log_t = now
+
+            # 进度回调：每变化 ≥ 2% 才触发，避免 GUI 刷新过频
+            if (
+                is_progress
+                and prog_cb
+                and (pct_val - _last_pct >= 2.0 or pct_val >= 100.0)
+            ):
+                prog_cb(pct_val)
+                _last_pct = pct_val
+
+            # 死锁检测：长时间无新输出则杀进程
+            if time.monotonic() - _last_activity > STALL_TIMEOUT:
+                proc.kill()
+                log_cb and log_cb(
+                    f"❌ 下载超时（{STALL_TIMEOUT}s 无响应），已终止。请检查网络后重试。"
+                )
+                return False
+
+        try:
+            proc.wait(timeout=60)  # 正常流程下进程应立即退出，给 60s 上限
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            log_cb and log_cb("❌ ollama 进程未正常退出，已强制终止")
+            return False
+
+        if proc.returncode != 0:
+            log_cb and log_cb(f"❌ ollama pull 返回错误码 {proc.returncode}")
+            return False
+
+        # ── 实际验证：确认模型出现在 ollama list ──
+        log_cb and log_cb("🔎 验证模型是否已成功安装...")
+        try:
+            r = subprocess.run(
+                [exe, "list"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            base_tag = tag.split(":")[0]  # 允许版本号宽松匹配
+            installed = any(
+                base_tag in line.split()[0] if line.split() else False
+                for line in r.stdout.splitlines()[1:]  # 跳过 header
+            )
+            if not installed:
+                log_cb and log_cb(
+                    f"⚠️  ollama pull 返回成功但 list 中未见 {tag}，可能下载不完整"
+                )
+                return False
+        except Exception as ve:
+            log_cb and log_cb(f"⚠️  无法验证安装结果: {ve}（继续）")
+
+        return True
     except Exception as e:
         log_cb and log_cb(f"❌ {e}")
         return False
@@ -661,15 +774,17 @@ def run_gui():
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # 设置默认选中最高推荐（候选列表最后一个）
+        # 设置默认选中：优先标注了 recommended 的型号，回退到第一个
+        rec_tag = next((m["tag"] for m in ordered if m.get("recommended")), None)
+        default_tag = rec_tag or (ordered[0]["tag"] if ordered else "")
         if ordered and not selected_model.get():
-            selected_model.set(ordered[0]["tag"])
+            selected_model.set(default_tag)
         elif not ordered:
             selected_model.set("")
 
         for m in ordered:
             is_installed = m["tag"] in installed_tags
-            is_rec = m == ordered[0]  # 最高规格推荐
+            is_rec = m.get("recommended", False)  # 舒适档推荐
             color = TIER_COLOR.get(m["tier"], MUTED)
 
             card = tk.Frame(scroll_frame, bg=PANEL, pady=0)
@@ -1110,7 +1225,15 @@ def run_gui():
                             min(pct, 27), f"下载 Ollama... {min(pct-5,22)*100//22}%"
                         )
 
-                urllib.request.urlretrieve(OLLAMA_WIN_URL, str(setup_path), _hook)
+                # 设置全局 socket 超时，防止网络挂起时永久阻塞
+                import socket as _socket
+
+                _prev_timeout = _socket.getdefaulttimeout()
+                _socket.setdefaulttimeout(30)  # 30s 无响应即超时
+                try:
+                    urllib.request.urlretrieve(OLLAMA_WIN_URL, str(setup_path), _hook)
+                finally:
+                    _socket.setdefaulttimeout(_prev_timeout)
                 if cancelled():
                     return
                 log("✅ Ollama 下载完成，正在静默安装...")
