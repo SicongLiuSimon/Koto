@@ -194,8 +194,9 @@ class TestPlanExecutorReplan:
     @pytest.mark.anyio
     async def test_execute_injects_new_steps_on_failure(self):
         """Verify that new steps get injected when a step fails and replan returns steps."""
-        from app.core.routing.plan_executor import PlanExecutor
         from unittest.mock import AsyncMock, patch
+
+        from app.core.routing.plan_executor import PlanExecutor
 
         steps = [
             {
@@ -284,7 +285,7 @@ class TestToolRegistryTimeout:
         assert result == 42
 
     def test_timeout_raises_runtime_error(self):
-        from app.core.agent.tool_registry import ToolRegistry, _TOOL_TIMEOUT
+        from app.core.agent.tool_registry import _TOOL_TIMEOUT, ToolRegistry
 
         reg = ToolRegistry()
 
@@ -328,8 +329,9 @@ class TestUnifiedAgentCompression:
 
     def test_compress_observation_passthrough_short(self):
         """Short text should be returned unchanged without LLM call."""
-        from app.core.agent.unified_agent import UnifiedAgent
         from unittest.mock import MagicMock
+
+        from app.core.agent.unified_agent import UnifiedAgent
 
         agent = UnifiedAgent.__new__(UnifiedAgent)
         agent._OBS_COMPRESS_THRESHOLD = 3000

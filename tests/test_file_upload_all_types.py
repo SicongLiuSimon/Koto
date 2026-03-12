@@ -9,8 +9,8 @@
 """
 
 import os
-import sys
 import struct
+import sys
 import tempfile
 import textwrap
 import zlib
@@ -169,8 +169,8 @@ def make_pdf(d):
     p = os.path.join(d, "sample.pdf")
     # 优先用 reportlab，fallback 最小手写 PDF
     try:
-        from reportlab.pdfgen import canvas
         from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
 
         c = canvas.Canvas(p, pagesize=A4)
         c.drawString(100, 750, "PDF Test Document")

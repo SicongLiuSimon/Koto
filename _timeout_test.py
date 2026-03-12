@@ -1,7 +1,9 @@
-import sys, time
+import sys
+import time
+
 sys.path.insert(0, ".")
-from app.core.agent.tool_registry import ToolRegistry
 import app.core.agent.tool_registry as tr_mod
+from app.core.agent.tool_registry import ToolRegistry
 
 reg = ToolRegistry()
 
