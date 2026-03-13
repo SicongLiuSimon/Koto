@@ -61,8 +61,8 @@ class SmartDispatcher:
     @classmethod
     def _get_route_cache(cls):
         if cls._route_cache is None:
-            from collections import OrderedDict
             import threading as _threading
+            from collections import OrderedDict
 
             cls._route_cache = OrderedDict()
             cls._route_cache_lock = _threading.Lock()

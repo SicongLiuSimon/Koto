@@ -207,8 +207,8 @@ _HISTORY_CACHE_LOCK = None
 def _get_history_cache():
     global _HISTORY_CACHE, _HISTORY_CACHE_LOCK
     if _HISTORY_CACHE is None:
-        from collections import OrderedDict
         import threading as _threading
+        from collections import OrderedDict
 
         _HISTORY_CACHE = OrderedDict()
         _HISTORY_CACHE_LOCK = _threading.Lock()
