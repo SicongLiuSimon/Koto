@@ -173,16 +173,16 @@ class EventDatabase:
                 conn = self._get_conn()
                 conn.row_factory = sqlite3.Row
 
-                    # Build query
+                # Build query
                 query = "SELECT * FROM events WHERE 1=1"
                 params = []
 
-                    # Add time filter
+                # Add time filter
                 cutoff = (datetime.now() - timedelta(hours=hours_back)).isoformat()
                 query += " AND timestamp > ?"
                 params.append(cutoff)
 
-                    # Add type filter
+                # Add type filter
                 if event_type:
                     query += " AND event_type = ?"
                     params.append(event_type)
@@ -201,7 +201,7 @@ class EventDatabase:
 
                 for row in cursor.fetchall():
                     event_dict = dict(row)
-                        # Try to parse data_json for additional fields
+                    # Try to parse data_json for additional fields
                     try:
                         if event_dict.get("data_json"):
                             event_dict["data"] = json.loads(event_dict["data_json"])
@@ -271,7 +271,9 @@ class EventDatabase:
             severity = event_data.get("severity", "low").lower()
             event_type = event_data.get("event_type", "unknown").lower()
 
-            conn = self._get_conn()  # reuse per-thread connection (called under self.lock)
+            conn = (
+                self._get_conn()
+            )  # reuse per-thread connection (called under self.lock)
             # Get or create daily record
             cursor = conn.execute(
                 "SELECT id FROM event_stats WHERE date = ?", (date_str,)

@@ -1640,7 +1640,9 @@ class SkillManager:
 
     _registry: Dict[str, Dict] = {}  # id → 旧版 skill dict（向后兼容）
     _def_registry: Dict[str, SkillDefinition] = {}  # id → 新版 SkillDefinition（v2）
-    _builtin_prompt_index: Dict[str, str] = {}  # id → original built-in prompt (O(1) lookup)
+    _builtin_prompt_index: Dict[str, str] = (
+        {}
+    )  # id → original built-in prompt (O(1) lookup)
     _initialized: bool = False
 
     # ── 初始化 ─────────────────────────────────────────────────────────────────

@@ -63,6 +63,7 @@ class SmartDispatcher:
         if cls._route_cache is None:
             from collections import OrderedDict
             import threading as _threading
+
             cls._route_cache = OrderedDict()
             cls._route_cache_lock = _threading.Lock()
         return cls._route_cache, cls._route_cache_lock
@@ -1128,6 +1129,7 @@ class SmartDispatcher:
         返回: (task_type, confidence_info, context_info)
         """
         import hashlib as _hashlib
+
         start_time = time.time()
 
         # Cache lookup — skip for requests with file_context (state may differ)
