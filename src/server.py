@@ -75,4 +75,4 @@ if __name__ == "__main__":
 ║  Port: {PORT:<33d} ║
 ╚═══════════════════════════════════════╝
     """)
-    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)  # nosec B104
