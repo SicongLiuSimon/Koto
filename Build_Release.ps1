@@ -36,6 +36,7 @@ $PYTHON     = Join-Path $REPO_ROOT ".venv\Scripts\python.exe"
 $DIST_DIR   = Join-Path $REPO_ROOT "dist"
 $LOG_DIR    = Join-Path $REPO_ROOT "logs"
 $SPEC_FILE  = Join-Path $REPO_ROOT "koto.spec"
+$LOCAL_INSTALLER_SPEC = Join-Path $REPO_ROOT "local_model_installer.spec"
 
 # ─── 颜色输出辅助 ─────────────────────────────
 function Write-Step  { param([string]$msg) Write-Host "`n[$([char]0x25B6)] $msg" -ForegroundColor Cyan }
@@ -86,17 +87,29 @@ if (-not $SkipBuild) {
     Write-Step "跳过 PyInstaller（-SkipBuild）"
 }
 
-# ─── 步骤 2：组装便携包 ───────────────────────
-Write-Step "步骤 2/3  组装便携包（dist\Koto_Portable\）"
-& $PYTHON $DEPLOY_PY --allow-missing-installer
+# ─── 步骤 2：构建本地模型安装器 ─────────────────
+$installerBuildLog = Join-Path $LOG_DIR "local_model_installer_build_latest.log"
+Write-Step "步骤 2/4  构建本地模型安装器（输出日志至 logs\local_model_installer_build_latest.log）"
+& $VENV_PIP $LOCAL_INSTALLER_SPEC --clean -y *> $installerBuildLog
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "LocalModelInstaller 构建失败，查看详细日志：$installerBuildLog"
+    Write-Host "(最后 30 行)" -ForegroundColor Yellow
+    Get-Content $installerBuildLog -Tail 30
+    exit 1
+}
+Write-OK "本地模型安装器构建完成 → dist\LocalModelInstaller.exe"
+
+# ─── 步骤 3：组装便携包 ───────────────────────
+Write-Step "步骤 3/4  组装便携包（dist\Koto_Portable\）"
+& $PYTHON $DEPLOY_PY
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "deploy_portable.py 失败"
     exit 1
 }
 Write-OK "便携包已组装 → dist\Koto_Portable\"
 
-# ─── 步骤 3：压缩为 zip ───────────────────────
-Write-Step "步骤 3/3  压缩为 zip"
+# ─── 步骤 4：压缩为 zip ───────────────────────
+Write-Step "步骤 4/4  压缩为 zip"
 $zipName = "Koto_v${Version}_Windows.zip"
 $zipPath = Join-Path $DIST_DIR $zipName
 $portableDir = Join-Path $DIST_DIR "Koto_Portable"

@@ -15,13 +15,13 @@ import sys
 from pathlib import Path
 
 # ── 图标（可选） ──────────────────────────────────────────────
-_icon = str(Path("assets/koto_icon.ico")) if Path("assets/koto_icon.ico").exists() else None
+_icon = str(Path("src/assets/koto_icon.ico")) if Path("src/assets/koto_icon.ico").exists() else None
 
 block_cipher = None
 
 a = Analysis(
     ["src/local_model_installer.py"],
-    pathex=[".", "src"],
+    pathex=["."],
     binaries=[],
     datas=[
         # 如果有图标资源可加入：
