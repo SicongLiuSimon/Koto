@@ -67,19 +67,19 @@ FORMAT_ALIASES: Dict[str, str] = {
     "gif": ".gif",
 }
 
-# 中文格式关键词
-CN_FORMAT_PATTERNS: List[Tuple[str, str]] = [
-    (r"word文档|docx?文件", ".docx"),
-    (r"pdf文件?|PDF", ".pdf"),
-    (r"纯文本|txt文件", ".txt"),
-    (r"markdown|md文件", ".md"),
-    (r"ppt(?:x)?|幻灯片|演示文稿", ".pptx"),
-    (r"excel|xlsx?|电子表格", ".xlsx"),
-    (r"csv|逗号", ".csv"),
-    (r"html?网页", ".html"),
-    (r"png图片?", ".png"),
-    (r"jpe?g图片?", ".jpg"),
-    (r"webp", ".webp"),
+# 中文格式关键词（precompiled）
+CN_FORMAT_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r"word文档|docx?文件", re.IGNORECASE), ".docx"),
+    (re.compile(r"pdf文件?|PDF", re.IGNORECASE), ".pdf"),
+    (re.compile(r"纯文本|txt文件", re.IGNORECASE), ".txt"),
+    (re.compile(r"markdown|md文件", re.IGNORECASE), ".md"),
+    (re.compile(r"ppt(?:x)?|幻灯片|演示文稿", re.IGNORECASE), ".pptx"),
+    (re.compile(r"excel|xlsx?|电子表格", re.IGNORECASE), ".xlsx"),
+    (re.compile(r"csv|逗号", re.IGNORECASE), ".csv"),
+    (re.compile(r"html?网页", re.IGNORECASE), ".html"),
+    (re.compile(r"png图片?", re.IGNORECASE), ".png"),
+    (re.compile(r"jpe?g图片?", re.IGNORECASE), ".jpg"),
+    (re.compile(r"webp", re.IGNORECASE), ".webp"),
 ]
 
 
@@ -764,7 +764,7 @@ def _extract_target_format(text: str) -> Optional[str]:
 
     # 先尝试中文关键词模式
     for pat, ext in CN_FORMAT_PATTERNS:
-        if re.search(pat, tl, re.IGNORECASE):
+        if pat.search(tl):
             # 找到对应的 alias key
             for k, v in FORMAT_ALIASES.items():
                 if v == ext:

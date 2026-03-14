@@ -87,6 +87,8 @@ class AlertManager:
     Manages alert rules and sends notifications.
     """
 
+    _MAX_ALERT_HISTORY = 10000
+
     def __init__(self):
         """Initialize alert manager."""
         self.rules: Dict[str, AlertRule] = {}
@@ -203,9 +205,8 @@ class AlertManager:
                 }
             )
 
-            # Keep only last 1000 alerts
-            if len(self.alert_history) > 1000:
-                self.alert_history = self.alert_history[-1000:]
+            if len(self.alert_history) > self._MAX_ALERT_HISTORY:
+                self.alert_history = self.alert_history[-self._MAX_ALERT_HISTORY:]
 
             return alert_id
         except Exception as e:

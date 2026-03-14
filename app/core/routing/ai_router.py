@@ -83,9 +83,18 @@ class AIRouter:
 只输出类型名称，如: CHAT"""
 
     # 缓存最近的分类结果（避免重复调用）
-    _cache = {}
-    _cache_max_size = 100
-    
+    _cache: dict = {}
+    _CACHE_MAX_SIZE: int = 500
+
+    @classmethod
+    def _cache_set(cls, key, value):
+        """Set a cache entry, evicting oldest half when full."""
+        if len(cls._cache) >= cls._CACHE_MAX_SIZE:
+            keys = list(cls._cache.keys())
+            for k in keys[:len(keys) // 2]:
+                del cls._cache[k]
+        cls._cache[key] = value
+
     @classmethod
     def classify(cls, client, user_input: str, timeout: float = 2.0) -> tuple:
         """
@@ -169,14 +178,7 @@ class AIRouter:
 
             task = result_holder["task"]
             if task:
-                # 缓存结果
-                if len(cls._cache) >= cls._cache_max_size:
-                    # 清除一半缓存
-                    keys = list(cls._cache.keys())[:cls._cache_max_size // 2]
-                    for k in keys:
-                        del cls._cache[k]
-                cls._cache[cache_key] = (task, "🤖 AI")
-                
+                cls._cache_set(cache_key, (task, "🤖 AI"))
                 print(f"[AIRouter] Classified as: {task}")
                 return task, "🤖 AI", "AI"
 
@@ -309,12 +311,7 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             task = result_holder["task"]
             hint = result_holder["hint"]
             if task:
-                # Cache: store task + hint
-                if len(cls._cache) >= cls._cache_max_size:
-                    keys = list(cls._cache.keys())[:cls._cache_max_size // 2]
-                    for k in keys:
-                        del cls._cache[k]
-                cls._cache[cache_key] = (task, "🤖 AI+Hint", hint)
+                cls._cache_set(cache_key, (task, "🤖 AI+Hint", hint))
                 print(f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}")
                 return task, "🤖 AI+Hint", "AI", hint
 

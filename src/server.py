@@ -20,7 +20,10 @@ Koto Server Mode - 纯 Web 服务（无桌面窗口）
   LANGCHAIN_PROJECT=Koto
 """
 
+import atexit
+import logging
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -52,6 +55,15 @@ try:
 except ImportError:
     pass
 
+# 启动时配置验证
+from src.config_validator import validate_startup_config  # noqa: E402
+
+try:
+    validate_startup_config()
+except Exception as e:
+    print(f"[FATAL] Configuration error: {e}")
+    sys.exit(1)
+
 # LangSmith 可观测性初始化（可选，仅当环境变量已设置时激活）
 try:
     from app.core.monitoring.langsmith_tracer import init_langsmith
@@ -66,6 +78,42 @@ from web.app import app
 # 运行模式检测
 DEPLOY_MODE = os.environ.get("KOTO_DEPLOY_MODE", "local")  # local / cloud
 PORT = int(os.environ.get("KOTO_PORT", os.environ.get("PORT", "5000")))
+
+logger = logging.getLogger(__name__)
+
+
+def _cleanup():
+    """Clean up resources on shutdown."""
+    logger.info("Running cleanup...")
+    try:
+        from web.settings import SettingsManager
+        if SettingsManager._instance:
+            SettingsManager._instance.flush()
+            logger.info("Settings flushed")
+    except Exception as e:
+        logger.debug("Settings flush failed: %s", e)
+
+    try:
+        from app.core.monitoring.event_database import EventDatabase  # noqa: F401
+        # Close any open database connections
+        logger.info("Cleanup complete")
+    except Exception as e:
+        logger.debug("DB cleanup failed: %s", e)
+
+
+def _shutdown_handler(signum, frame):
+    """Handle SIGTERM/SIGINT for graceful shutdown."""
+    sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+    logger.info("Received %s, shutting down gracefully...", sig_name)
+    _cleanup()
+    raise SystemExit(0)
+
+
+# Register handlers
+signal.signal(signal.SIGINT, _shutdown_handler)
+signal.signal(signal.SIGTERM, _shutdown_handler)
+atexit.register(_cleanup)
+
 
 if __name__ == "__main__":
     print(f"""

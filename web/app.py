@@ -273,9 +273,10 @@ class StreamInterruptManager:
 
     def __init__(self):
         self.interrupts = {}  # session_name -> {'flag': bool, 'event': threading.Event}
+        self._lock = threading.Lock()
 
     def _ensure(self, session_name):
-        """确保 session 记录存在"""
+        """确保 session 记录存在 (must be called with self._lock held)"""
         if session_name not in self.interrupts:
             self.interrupts[session_name] = {"flag": False, "event": threading.Event()}
         elif self.interrupts[session_name].get("event") is None:
@@ -283,37 +284,42 @@ class StreamInterruptManager:
 
     def set_interrupt(self, session_name):
         """设置中断标志"""
-        self._ensure(session_name)
-        self.interrupts[session_name]["flag"] = True
-        if self.interrupts[session_name]["event"]:
-            self.interrupts[session_name]["event"].set()
+        with self._lock:
+            self._ensure(session_name)
+            self.interrupts[session_name]["flag"] = True
+            if self.interrupts[session_name]["event"]:
+                self.interrupts[session_name]["event"].set()
         print(f"[INTERRUPT] Marked session {session_name} for interruption")
 
     def is_interrupted(self, session_name):
         """检查是否被中断"""
-        if session_name not in self.interrupts:
-            return False
-        record = self.interrupts[session_name]
-        event_flag = record.get("event").is_set() if record.get("event") else False
-        return bool(record.get("flag")) or event_flag
+        with self._lock:
+            if session_name not in self.interrupts:
+                return False
+            record = self.interrupts[session_name]
+            event_flag = record.get("event").is_set() if record.get("event") else False
+            return bool(record.get("flag")) or event_flag
 
     def reset(self, session_name):
         """重置中断标志"""
-        self._ensure(session_name)
-        self.interrupts[session_name]["flag"] = False
-        if self.interrupts[session_name]["event"]:
-            self.interrupts[session_name]["event"].clear()
+        with self._lock:
+            self._ensure(session_name)
+            self.interrupts[session_name]["flag"] = False
+            if self.interrupts[session_name]["event"]:
+                self.interrupts[session_name]["event"].clear()
         print(f"[INTERRUPT] Reset interrupt flag for session {session_name}")
 
     def get_event(self, session_name):
         """获取/创建中断事件对象"""
-        self._ensure(session_name)
-        return self.interrupts[session_name]["event"]
+        with self._lock:
+            self._ensure(session_name)
+            return self.interrupts[session_name]["event"]
 
     def cleanup(self, session_name):
         """清理 session 的中断记录"""
-        if session_name in self.interrupts:
-            del self.interrupts[session_name]
+        with self._lock:
+            if session_name in self.interrupts:
+                del self.interrupts[session_name]
 
 
 _interrupt_manager = StreamInterruptManager()
@@ -355,20 +361,22 @@ GEMINI_API_BASE = os.getenv("GEMINI_API_BASE", "").strip()
 FORCE_PROXY = os.getenv("FORCE_PROXY", "").strip()
 
 _user_settings_cache = {}
+_user_settings_lock = threading.Lock()
 
 
 def _load_user_settings() -> dict:
     """Load user_settings.json with caching and safe fallbacks."""
-    if "data" in _user_settings_cache:
-        return _user_settings_cache["data"]
-    settings_path = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
-    try:
-        with open(settings_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
-    _user_settings_cache["data"] = data
-    return data
+    with _user_settings_lock:
+        if "data" in _user_settings_cache:
+            return _user_settings_cache["data"]
+        settings_path = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        _user_settings_cache["data"] = data
+        return data
 
 
 def get_workspace_root() -> str:

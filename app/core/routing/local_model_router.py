@@ -374,7 +374,8 @@ class LocalModelRouter:
             cls._available = result == 0
             cls._check_time = time.time()
             return cls._available
-        except:
+        except Exception as e:
+            logger.debug("Ollama socket check failed: %s", e)
             cls._available = False
             cls._check_time = time.time()
             return False
@@ -396,7 +397,8 @@ class LocalModelRouter:
                 return False
             installed = [m['name'].split(':')[0] + ':' + m['name'].split(':')[1] if ':' in m['name'] else m['name'] 
                         for m in resp.json().get('models', [])]
-        except:
+        except Exception as e:
+            logger.debug("Failed to fetch installed models: %s", e)
             return False
         
         if not installed:
@@ -405,13 +407,15 @@ class LocalModelRouter:
         # 选择可用的最快模型
         target_model = model_name
         if not target_model:
+            installed_map = {}
+            for im in installed:
+                base = im.split(':')[0]
+                installed_map[base] = im
+
             for m in cls.OLLAMA_MODELS:
                 base_name = m.split(':')[0]
-                if any(base_name in im for im in installed):
-                    for im in installed:
-                        if base_name in im:
-                            target_model = im
-                            break
+                if base_name in installed_map:
+                    target_model = installed_map[base_name]
                     break
         
         if not target_model:

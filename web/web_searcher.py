@@ -5,6 +5,11 @@ WebSearcher 桥接模块 — 避免 tool_registry → app.py 循环导入
 从 app.py 中的 WebSearcher 类代理 search_with_grounding 方法
 """
 
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def _detect_query_type(query: str) -> str:
     """检测查询意图类型: travel / weather / finance / general"""
@@ -91,14 +96,25 @@ def search_with_grounding(query: str, skill_prompt: str = None) -> dict:
 
     try:
         client = get_client()
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=query,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                system_instruction=system_instruction
-            )
-        )
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=query,
+                    config=types.GenerateContentConfig(
+                        tools=[types.Tool(google_search=types.GoogleSearch())],
+                        system_instruction=system_instruction
+                    )
+                )
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt
+                    logger.warning("Web search attempt %d failed: %s, retrying in %ds", attempt + 1, e, delay)
+                    time.sleep(delay)
+                else:
+                    raise
 
         if response.text:
             return {

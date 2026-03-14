@@ -2,6 +2,7 @@
 Koto 快速本地语音识别模块
 优先使用 Vosk 离线识别（无需网络），降级到 Google Speech API
 """
+import logging
 import os
 import sys
 import json
@@ -13,6 +14,8 @@ import threading
 import queue
 from typing import Dict, Optional
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -147,8 +150,16 @@ class FastVoiceRecognizer:
         """后台线程自动下载 vosk-model-small-cn-0.22 (~50MB)"""
         import threading
         
+        def _download_with_timeout(url: str, dest: str, timeout: int = 120):
+            """Download file with connection timeout."""
+            import requests as _requests
+            resp = _requests.get(url, timeout=(15, timeout), stream=True)
+            resp.raise_for_status()
+            with open(dest, 'wb') as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
         def _do_download():
-            import urllib.request
             import zipfile
             
             # 确定目标目录
@@ -167,7 +178,7 @@ class FastVoiceRecognizer:
             try:
                 print(f"[Vosk] 🔽 开始下载中文离线模型 (~50MB)...")
                 print(f"[Vosk] URL: {url}")
-                urllib.request.urlretrieve(url, zip_path)
+                _download_with_timeout(url, zip_path)
                 print(f"[Vosk] 📦 解压模型到 {models_dir}...")
                 with zipfile.ZipFile(zip_path, 'r') as zf:
                     zf.extractall(models_dir)
@@ -178,8 +189,10 @@ class FastVoiceRecognizer:
                 print(f"[Vosk]    手动下载: {url}")
                 print(f"[Vosk]    解压到: {models_dir}")
                 if os.path.exists(zip_path):
-                    try: os.remove(zip_path)
-                    except: pass
+                    try:
+                        os.remove(zip_path)
+                    except Exception as e:
+                        logger.debug("Cleanup of zip file failed: %s", e)
         
         print("[Vosk] 📥 未找到本地模型，启动后台自动下载...")
         t = threading.Thread(target=_do_download, daemon=True)
@@ -263,7 +276,8 @@ class FastVoiceRecognizer:
             with sr.Microphone() as source:
                 pass
             return True
-        except:
+        except Exception as e:
+            logger.debug("Windows SAPI check failed: %s", e)
             return False
     
     def _check_speech_recognition(self) -> bool:
@@ -455,9 +469,9 @@ class FastVoiceRecognizer:
                 # 优化：大大减少噪音检测时间（从0.15秒改为0.05秒）
                 try:
                     recognizer.adjust_for_ambient_noise(source, duration=0.05)
-                except:
+                except Exception as e:
                     # 如果调整失败，继续（不影响识别）
-                    pass
+                    logger.debug("Ambient noise adjustment failed: %s", e)
                 
                 try:
                     # 立即监听（不再等待）

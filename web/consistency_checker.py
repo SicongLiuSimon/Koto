@@ -21,6 +21,13 @@ class ConsistencyChecker:
             "深度学习": ["DL", "dl", "D.L.", "deep learning"],
             "自然语言处理": ["NLP", "nlp", "N.L.P.", "natural language processing"],
         }
+        # Precompile variant patterns
+        self._compiled_patterns = {}
+        for standard_term, variants in self.term_dictionary.items():
+            self._compiled_patterns[standard_term] = [
+                (variant, re.compile(re.escape(variant), re.IGNORECASE))
+                for variant in variants
+            ]
     
     def check_document(self, file_path: str) -> Dict[str, Any]:
         """
@@ -62,12 +69,10 @@ class ConsistencyChecker:
         """检查术语一致性"""
         issues = []
         
-        for standard_term, variants in self.term_dictionary.items():
+        for standard_term, compiled_variants in self._compiled_patterns.items():
             # 统计各种变体出现次数
             counts = {}
-            for variant in variants:
-                # 不区分大小写查找
-                pattern = re.compile(re.escape(variant), re.IGNORECASE)
+            for variant, pattern in compiled_variants:
                 matches = pattern.findall(text)
                 if matches:
                     counts[variant] = len(matches)

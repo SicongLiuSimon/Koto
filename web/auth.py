@@ -74,7 +74,8 @@ def _load_users() -> dict:
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except:
+    except Exception as e:
+        logger.warning("Failed to load users: %s", e)
         return {}
 
 
@@ -125,7 +126,8 @@ def _verify_token(token: str) -> dict:
             if payload.get("exp", 0) < time.time():
                 return None
             return payload
-    except:
+    except Exception as e:
+        logger.debug("Token verification failed: %s", e)
         return None
 
 

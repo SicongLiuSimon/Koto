@@ -29,9 +29,11 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 import logging
+import threading
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -171,7 +173,13 @@ class ModelFallbackExecutor:
     - ``update_model_map()``: 接收 ModelManager 的最新路由表用于 get_best_available。
     """
 
-    _UNAVAILABLE_TTL: int = 300  # 5 分钟内不重试失败模型
+    _UNAVAILABLE_TTL: int = int(os.getenv("KOTO_MODEL_UNAVAILABLE_TTL", "300"))
+
+    # Circuit breaker: consecutive all-model failure tracking per task_type
+    _cascade_failures: Dict[str, int] = {}          # task_type → consecutive failure count
+    _cascade_failure_times: Dict[str, float] = {}   # task_type → last failure time
+    _CASCADE_BACKOFF_BASE: float = 5.0              # seconds
+    _CASCADE_BACKOFF_MAX: float = 120.0             # max backoff seconds
 
     def __init__(self) -> None:
         self._unavailable: Dict[str, float] = {}   # model_id → 过期 unix 时间戳
@@ -250,6 +258,19 @@ class ModelFallbackExecutor:
         tried: set = set()
         last_exc: Exception = None
 
+        # Circuit breaker: if all models failed recently, apply backoff
+        fail_count = self._cascade_failures.get(task_type, 0)
+        if fail_count > 0:
+            last_fail = self._cascade_failure_times.get(task_type, 0)
+            backoff = min(self._CASCADE_BACKOFF_BASE * (2 ** (fail_count - 1)), self._CASCADE_BACKOFF_MAX)
+            elapsed = time.time() - last_fail
+            if elapsed < backoff:
+                raise RuntimeError(
+                    f"[ModelFallback] Circuit breaker open for {task_type}: "
+                    f"backing off {backoff:.0f}s after {fail_count} consecutive failures "
+                    f"({elapsed:.0f}s elapsed)"
+                )
+
         candidates = self._build_candidate_list(preferred_model, task_type)
 
         for model_id in candidates:
@@ -270,6 +291,7 @@ class ModelFallbackExecutor:
                         f"[ModelFallback] ✅ 降级成功: {preferred_model} → {model_id} "
                         f"(task={task_type})"
                     )
+                self._cascade_failures[task_type] = 0
                 return result
 
             except Exception as exc:
@@ -285,6 +307,8 @@ class ModelFallbackExecutor:
                     raise
 
         # 所有候选均失败
+        self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
+        self._cascade_failure_times[task_type] = time.time()
         if last_exc:
             raise last_exc
         raise RuntimeError(
@@ -314,11 +338,14 @@ class ModelFallbackExecutor:
 
 # ── 全局单例 ──────────────────────────────────────────────────────────────────
 _executor: Optional[ModelFallbackExecutor] = None
+_executor_lock = threading.Lock()
 
 
 def get_fallback_executor() -> ModelFallbackExecutor:
     """返回全局 ModelFallbackExecutor 单例（懒加载，线程安全地延迟初始化）。"""
     global _executor
     if _executor is None:
-        _executor = ModelFallbackExecutor()
+        with _executor_lock:
+            if _executor is None:
+                _executor = ModelFallbackExecutor()
     return _executor

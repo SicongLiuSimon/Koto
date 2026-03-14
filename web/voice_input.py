@@ -560,8 +560,16 @@ class VoiceInputEngine:
         # 尝试自动下载小模型
         print("[语音输入] 正在下载 Vosk 中文模型（约50MB）...")
         try:
-            import urllib.request
+            import requests as _requests
             import zipfile
+            
+            def _download_with_timeout(url: str, dest: str, timeout: int = 120):
+                """Download file with connection timeout."""
+                resp = _requests.get(url, timeout=(15, timeout), stream=True)
+                resp.raise_for_status()
+                with open(dest, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
             
             model_url = "https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
             model_dir = os.path.join(os.path.dirname(__file__), "..", "models")
@@ -570,7 +578,7 @@ class VoiceInputEngine:
             zip_path = os.path.join(model_dir, "vosk-model-small-cn.zip")
             
             # 下载
-            urllib.request.urlretrieve(model_url, zip_path)
+            _download_with_timeout(model_url, zip_path)
             
             # 解压
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:

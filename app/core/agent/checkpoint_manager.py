@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -48,6 +49,7 @@ _DEFAULT_DB_PATH = str(
 # ── 单例 ──────────────────────────────────────────────────────────────────────
 _checkpointer_instance: Optional[Any] = None
 _checkpointer_type: str = "none"
+_checkpointer_lock = threading.Lock()
 
 
 def get_checkpointer(db_path: Optional[str] = None) -> Any:
@@ -64,40 +66,44 @@ def get_checkpointer(db_path: Optional[str] = None) -> Any:
     if _checkpointer_instance is not None:
         return _checkpointer_instance
 
-    path = db_path or _DEFAULT_DB_PATH
+    with _checkpointer_lock:
+        if _checkpointer_instance is not None:
+            return _checkpointer_instance
 
-    # 1. 尝试 SqliteSaver（推荐）
-    try:
-        from langgraph.checkpoint.sqlite import SqliteSaver
+        path = db_path or _DEFAULT_DB_PATH
 
-        # 确保目录存在
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        # 1. 尝试 SqliteSaver（推荐）
+        try:
+            from langgraph.checkpoint.sqlite import SqliteSaver
 
-        conn = _get_sqlite_conn(path)
-        saver = SqliteSaver(conn)
+            # 确保目录存在
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+            conn = _get_sqlite_conn(path)
+            saver = SqliteSaver(conn)
+            _checkpointer_instance = saver
+            _checkpointer_type = "sqlite"
+            logger.info(f"[CheckpointManager] ✅ SqliteSaver 启用 → {path}")
+            return saver
+        except ImportError:
+            logger.warning(
+                "[CheckpointManager] langgraph-checkpoint-sqlite 未安装，"
+                "将使用 MemorySaver（重启后历史丢失）\n"
+                "  安装命令: pip install langgraph-checkpoint-sqlite"
+            )
+        except Exception as exc:
+            logger.warning(
+                f"[CheckpointManager] SqliteSaver 初始化失败: {exc}，回退到 MemorySaver"
+            )
+
+        # 2. 回退 MemorySaver
+        from langgraph.checkpoint.memory import MemorySaver
+
+        saver = MemorySaver()
         _checkpointer_instance = saver
-        _checkpointer_type = "sqlite"
-        logger.info(f"[CheckpointManager] ✅ SqliteSaver 启用 → {path}")
+        _checkpointer_type = "memory"
+        logger.info("[CheckpointManager] ℹ️ MemorySaver 已启用（仅内存，不持久化）")
         return saver
-    except ImportError:
-        logger.warning(
-            "[CheckpointManager] langgraph-checkpoint-sqlite 未安装，"
-            "将使用 MemorySaver（重启后历史丢失）\n"
-            "  安装命令: pip install langgraph-checkpoint-sqlite"
-        )
-    except Exception as exc:
-        logger.warning(
-            f"[CheckpointManager] SqliteSaver 初始化失败: {exc}，回退到 MemorySaver"
-        )
-
-    # 2. 回退 MemorySaver
-    from langgraph.checkpoint.memory import MemorySaver
-
-    saver = MemorySaver()
-    _checkpointer_instance = saver
-    _checkpointer_type = "memory"
-    logger.info("[CheckpointManager] ℹ️ MemorySaver 已启用（仅内存，不持久化）")
-    return saver
 
 
 def get_checkpointer_type() -> str:
