@@ -1,6 +1,6 @@
 [
   {
-    "trigger_id": "54b8a43c-acb",
+    "trigger_id": "74777b4d-202",
     "name": "启动自检摘要",
     "trigger_type": "startup",
     "job_type": "agent_query",
@@ -11,13 +11,13 @@
     "session_id": "system",
     "enabled": true,
     "config": {},
-    "last_run": "2026-03-12T00:17:26.046",
-    "run_count": 56,
+    "last_run": null,
+    "run_count": 0,
     "last_error": null,
-    "created_at": "2026-03-07T22:09:01.473"
+    "created_at": "2026-03-13T23:27:06.575"
   },
   {
-    "trigger_id": "e190d2b1-8da",
+    "trigger_id": "4403cad7-f44",
     "name": "每日任务规划",
     "trigger_type": "cron",
     "job_type": "skill_exec",
@@ -27,17 +27,17 @@
       "preset_key": "daily_task_planner"
     },
     "session_id": "system",
-    "enabled": true,
+    "enabled": false,
     "config": {
       "time": "09:00"
     },
     "last_run": null,
     "run_count": 0,
     "last_error": null,
-    "created_at": "2026-03-07T22:09:01.473"
+    "created_at": "2026-03-13T23:27:06.577"
   },
   {
-    "trigger_id": "bde26de6-a9c",
+    "trigger_id": "4a4d3a2e-b54",
     "name": "下载目录自动整理",
     "trigger_type": "interval",
     "job_type": "auto_catalog",
@@ -46,17 +46,17 @@
       "preset_key": "downloads_auto_catalog"
     },
     "session_id": "system",
-    "enabled": true,
+    "enabled": false,
     "config": {
       "interval_seconds": 3600
     },
-    "last_run": "2026-03-12T00:28:48.079",
-    "run_count": 18,
+    "last_run": null,
+    "run_count": 0,
     "last_error": null,
-    "created_at": "2026-03-07T22:09:01.474"
+    "created_at": "2026-03-13T23:27:06.579"
   },
   {
-    "trigger_id": "17d5d501-69a",
+    "trigger_id": "86051fa9-d66",
     "name": "主动交互巡检",
     "trigger_type": "interval",
     "job_type": "proactive_tick",
@@ -68,9 +68,9 @@
     "config": {
       "interval_seconds": 1800
     },
-    "last_run": "2026-03-12T00:59:03.159",
-    "run_count": 29,
+    "last_run": null,
+    "run_count": 0,
     "last_error": null,
-    "created_at": "2026-03-09T00:13:33.001"
+    "created_at": "2026-03-13T23:27:06.581"
   }
 ]

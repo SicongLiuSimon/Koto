@@ -427,6 +427,19 @@ class WindowAPI:
         """关闭窗口"""
         self.window.destroy()
 
+    def open_url(self, url: str):
+        """在系统默认浏览器中打开外部链接，防止 webview 导航离开 Koto"""
+        import webbrowser
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                return {"success": False, "error": "不允许的协议"}
+            webbrowser.open(url)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
 
 def _pre_check_syntax(filepath: str):
     """
@@ -1139,6 +1152,7 @@ def main():
     window.expose(window_api.minimize)
     window.expose(window_api.maximize)
     window.expose(window_api.close)
+    window.expose(window_api.open_url)
 
     # 窗口引用（供托盘使用）
     window_ref = [window]
