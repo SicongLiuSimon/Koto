@@ -82,12 +82,22 @@ def metrics():
         from app.core.tasks.task_ledger import TaskStatus, get_ledger
 
         ledger = get_ledger()
+        running_tasks = ledger.list_tasks(status=TaskStatus.RUNNING, limit=20)
+        pending_tasks = ledger.list_tasks(status=TaskStatus.PENDING, limit=20)
         data["jobs"] = {
             "running": ledger.count(status=TaskStatus.RUNNING),
             "pending": ledger.count(status=TaskStatus.PENDING),
             "completed": ledger.count(status=TaskStatus.COMPLETED),
             "failed": ledger.count(status=TaskStatus.FAILED),
             "cancelled": ledger.count(status=TaskStatus.CANCELLED),
+            "running_list": [
+                {"id": t.task_id[:8], "type": t.task_type or "agent", "input": (t.user_input or "")[:40]}
+                for t in running_tasks
+            ],
+            "pending_list": [
+                {"id": t.task_id[:8], "type": t.task_type or "agent", "input": (t.user_input or "")[:40]}
+                for t in pending_tasks
+            ],
         }
     except Exception as exc:
         data["jobs"] = {"error": str(exc)}
