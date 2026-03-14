@@ -11,8 +11,8 @@
     "session_id": "system",
     "enabled": true,
     "config": {},
-    "last_run": "2026-03-16T18:53:18.848",
-    "run_count": 49,
+    "last_run": "2026-03-14T12:31:49.205",
+    "run_count": 54,
     "last_error": null,
     "created_at": "2026-03-07T22:09:01.473"
   },
@@ -50,7 +50,7 @@
     "config": {
       "interval_seconds": 3600
     },
-    "last_run": "2026-03-16T18:31:51.353",
+    "last_run": "2026-03-14T11:59:15.302",
     "run_count": 18,
     "last_error": null,
     "created_at": "2026-03-07T22:09:01.474"
@@ -68,8 +68,8 @@
     "config": {
       "interval_seconds": 1800
     },
-    "last_run": "2026-03-16T19:01:55.875",
-    "run_count": 31,
+    "last_run": "2026-03-14T12:31:12.561",
+    "run_count": 30,
     "last_error": null,
     "created_at": "2026-03-09T00:13:33.001"
   }
