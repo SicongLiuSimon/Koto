@@ -1,4 +1,4 @@
-﻿name: Build & Release Koto
+name: Build & Release Koto
 
 # ─── 触发条件 ───────────────────────────────────────────────────────────────
 # 1. 推送版本标签（如 v1.2.0）→ 自动构建 + 创建 GitHub Release
@@ -50,7 +50,7 @@ jobs:
           Write-Host "Building Koto version: $v"
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~\AppData\Local\pip\Cache
           key: ${{ runner.os }}-pip-${{ hashFiles('config/requirements.txt') }}
@@ -249,7 +249,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -259,7 +259,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
@@ -269,7 +269,7 @@ jobs:
             type=sha
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: config/deploy/Dockerfile
