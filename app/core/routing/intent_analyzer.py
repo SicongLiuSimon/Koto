@@ -52,7 +52,7 @@ class IntentAnalyzer:
 2. 如果用户要求“修改/换成...”，请结合上一个任务的内容，生成包含修改要求的新指令。
 3. 如果用户的输入已经很清晰，不需要上下文也能理解，请直接返回原输入。
 4. 只输出重写后的指令文本，不要任何解释、前缀或多余的话。绝对不要输出“重写后的独立指令：”这样的前缀。
-
+{memory_block}
 历史对话：
 {history}
 
@@ -69,10 +69,11 @@ class IntentAnalyzer:
         )
 
     @classmethod
-    def rewrite_intent(cls, user_input: str, history: list) -> str:
+    def rewrite_intent(cls, user_input: str, history: list, memory_context: str = "") -> str:
         """
         使用本地模型（优先）或直接返回（如果不可用）来重写意图。
         history: 格式为 [{"role": "user", "parts": ["..."]}, {"role": "model", "parts": ["..."]}]
+        memory_context: 来自长期记忆/画像的用户信息（可选，用于跨 session 指代消歧）
         """
         if not history:
             return user_input
@@ -88,7 +89,13 @@ class IntentAnalyzer:
                 recent_history.append(f"{role}: {content}")
 
         history_text = "\n".join(recent_history)
-        prompt = cls.REWRITE_PROMPT.format(history=history_text, user_input=user_input)
+        _mem_block = (
+            f"\n关于用户的长期记忆（辅助理解跨会话指代词）：\n{memory_context[:400]}\n"
+            if memory_context else ""
+        )
+        prompt = cls.REWRITE_PROMPT.format(
+            memory_block=_mem_block, history=history_text, user_input=user_input
+        )
 
         # 尝试使用本地模型（通过共享 Ollama 调用工具）
         if LocalModelRouter.is_ollama_available():

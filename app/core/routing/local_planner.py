@@ -1,10 +1,7 @@
 import json
-import logging
 import re
 
 from app.core.routing.local_model_router import LocalModelRouter
-
-logger = logging.getLogger(__name__)
 
 class LocalPlanner:
     """Local planner/controller using Ollama for multi-step task planning."""
@@ -19,34 +16,6 @@ class LocalPlanner:
         "SYSTEM",
         "AGENT",
     }
-
-    # ── 重规划提示（用于 replan()）─────────────────────────────────────────────
-    REPLAN_PROMPT = '''你是一个多步任务重规划器，只输出 JSON。
-任务执行中断，需要重新规划剩余步骤。
-
-允许的任务类型：WEB_SEARCH / RESEARCH / FILE_GEN / PAINTER / CODER / SYSTEM / AGENT
-
-【原始目标】
-{goal}
-
-【已完成步骤】
-{completed_summary}
-
-【失败步骤】
-{failed_desc}
-失败原因: {error}
-
-【原剩余步骤】（可参考调整）
-{remaining_desc}
-
-请分析失败原因，给出从当前状态出发完成目标的修订步骤。规则：
-- 如果可以绕过失败步骤，提供替代方案
-- 如果目标真的无法继续完成，输出 {{"use_planner": false, "steps": []}}
-- 步骤 id 从 {next_id} 开始递增，depends_on 可引用已完成步骤的 id
-
-只输出 JSON:
-{{"use_planner":true|false,"steps":[{{"id":{next_id},"task":"...","input":"...","description":"...","output_key":"...","depends_on":[],"context_keys":[]}}]}}
-'''
 
     PLAN_PROMPT = '''你是一个多步任务规划器，只输出 JSON。
 
@@ -196,17 +165,43 @@ class LocalPlanner:
         return False
 
     @classmethod
-    def plan(cls, user_input: str, timeout: float = 4.0) -> dict:
-        """返回规划结果: {use_planner: bool, steps: list} 或 None"""
+    def plan(cls, user_input: str, timeout: float = 6.0) -> dict:
+        """
+        返回规划结果: {use_planner: bool, steps: list} 或 None
+
+        架构：云端 Orchestrator 优先规划，Ollama 仅作离线兜底。
+        最强可用云端模型（gemini-3.1-pro-preview → gemini-2.5-pro → gemini-2.5-flash → gemini-2.0-flash）
+        负责多步任务拆解，保证规划质量。
+        """
+        # ── 1. 云端 Orchestrator（主路径）────────────────────────────────────
+        result = cls._plan_with_cloud(user_input)
+        if result is not None:
+            return result
+
+        # ── 2. Ollama 离线兜底（仅在云端不可用时触发）────────────────────────
         try:
             if not LocalModelRouter.is_ollama_available():
-                # Ollama 不可用 → 立即尝试 Cloud fallback
-                return cls._plan_with_cloud(user_input)
-
+                return None
             if not LocalModelRouter.init_model():
-                return cls._plan_with_cloud(user_input)
+                return None
+
+            # 注入记忆快照（来自 PersonalityMatrix）
+            _memory_hint = ""
+            try:
+                import sys as _sys
+                _app = _sys.modules.get("web.app") or _sys.modules.get("app")
+                _get_mgr = getattr(_app, "get_memory_manager", None) if _app else None
+                if _get_mgr:
+                    _mgr = _get_mgr()
+                    if _mgr and hasattr(_mgr, "get_compact_memory_snapshot"):
+                        _memory_hint = _mgr.get_compact_memory_snapshot(max_chars=150) or ""
+            except Exception:
+                pass
 
             prompt = cls.PLAN_PROMPT.format(input=user_input[:600])
+            if _memory_hint:
+                prompt = f"[用户背景：{_memory_hint}]\n\n" + prompt
+
             raw, err = LocalModelRouter.call_ollama_chat(
                 messages=[
                     {"role": "system", "content": prompt},
@@ -217,17 +212,12 @@ class LocalPlanner:
                 timeout=timeout,
             )
             if err:
-                # Ollama 调用失败 → Cloud fallback
-                return cls._plan_with_cloud(user_input)
+                return None
 
-            result = cls._parse_plan_json(raw)
-            if result is not None:
-                return result
-            # 解析失败 → Cloud fallback
-            return cls._plan_with_cloud(user_input)
+            return cls._parse_plan_json(raw)
 
         except Exception:
-            return cls._plan_with_cloud(user_input)
+            return None
 
     @classmethod
     def _parse_plan_json(cls, raw: str):
@@ -273,8 +263,9 @@ class LocalPlanner:
     @classmethod
     def _plan_with_cloud(cls, user_input: str) -> dict:
         """
-        Cloud fallback 规划器：当 Ollama 不可用时，用 Gemini 2.5 Flash 生成计划。
+        Cloud fallback 规划器：当 Ollama 不可用时，用 Gemini 生成计划。
         同步调用，适合在普通线程中运行。
+        自动选择当前可用的最轻量云端模型，优先使用 gemini-2.5-flash。
         """
         try:
             # 延迟导入，避免循环依赖
@@ -291,13 +282,34 @@ class LocalPlanner:
             if _client is None:
                 return None
 
+            # ── 选择规划模型：Orchestrator 使用最强可用云端模型 ────────────────
+            # 规划质量直接影响多步任务成功率，优先最强 generate_content 兼容模型
+            # 只从明确支持 generate_content 的模型里选，不选 Interactions-only
+            _safe_plan_models = [
+                "gemini-3.1-pro-preview",  # 目前最强 generate_content 兼容模型
+                "gemini-2.5-pro",          # 次选：强推理
+                "gemini-2.5-flash",        # 高质量快速模型
+                "gemini-2.0-flash",        # 备选
+                "gemini-1.5-flash",        # 降级兜底
+            ]
+            _planning_model = _safe_plan_models[1]  # 默认 gemini-2.5-flash
+            try:
+                from app.core.llm.model_fallback import get_fallback_executor
+                _fbe = get_fallback_executor()
+                _planning_model = next(
+                    (m for m in _safe_plan_models if _fbe.is_available(m)),
+                    _safe_plan_models[1],
+                )
+            except Exception:
+                pass
+
             cloud_prompt = (
                 cls.PLAN_PROMPT.format(input=user_input[:600])
                 + '\n\n注意：如果任务不需要多步，请直接输出 {"use_planner": false, "steps": []}'
             )
 
             resp = _client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=_planning_model,
                 contents=user_input[:600],
                 config=_types.GenerateContentConfig(
                     system_instruction=cloud_prompt,
@@ -309,27 +321,29 @@ class LocalPlanner:
             raw = resp.text or ""
             result = cls._parse_plan_json(raw)
             if result:
-                print(
-                    f"[LocalPlanner] ✅ Cloud fallback 规划成功: {len(result.get('steps', []))} 步"
-                )
+                print(f"[LocalPlanner] ✅ Cloud fallback 规划成功 ({_planning_model}): {len(result.get('steps', []))} 步")
             return result
         except Exception as e:
             print(f"[LocalPlanner] ⚠️ Cloud fallback 规划失败: {e}")
             return None
 
     @classmethod
-    def self_check(
-        cls, user_input: str, steps: list, results: list, timeout: float = 4.0
-    ) -> dict:
-        """对执行结果进行自检"""
+    def self_check(cls, user_input: str, steps: list, results: list, timeout: float = 6.0) -> dict:
+        """
+        对执行结果进行验证（Result Verification）。
+
+        架构：云端模型优先做结果审核，Ollama 仅作离线兜底。
+        使用与规划相同等级的模型（gemini-2.5-flash 或更强）确保验证质量。
+        """
+        # ── 1. 云端验证（主路径）────────────────────────────────────────────
+        cloud_result = cls._self_check_with_cloud(user_input, steps, results)
+        if cloud_result is not None:
+            return cloud_result
+
+        # ── 2. Ollama 离线兜底 ───────────────────────────────────────────────
         try:
             if not LocalModelRouter.is_ollama_available():
-                return {
-                    "status": "complete",
-                    "summary": "(本地模型不可用，跳过自检)",
-                    "next_actions": [],
-                }
-
+                return {"status": "complete", "summary": "(云端验证不可用，离线模式跳过自检)", "next_actions": []}
             if not LocalModelRouter.init_model():
                 return {
                     "status": "complete",
@@ -393,120 +407,70 @@ class LocalPlanner:
         except Exception:
             return {"status": "partial", "summary": "(自检异常)", "next_actions": []}
 
-    # ── 动态重规划（Reflexion 风格）─────────────────────────────────────────────
-
     @classmethod
-    def replan(
-        cls,
-        user_input: str,
-        completed_steps: list,
-        completed_outputs: list,
-        failed_step: dict,
-        error: str,
-        remaining_steps: list,
-        next_id: int = 1,
-        timeout: float = 4.0,
-    ) -> dict:
+    def _self_check_with_cloud(cls, user_input: str, steps: list, results: list) -> dict | None:
         """
-        动态重规划：某步骤失败后，根据失败原因生成修订的后续步骤。
-
-        Args:
-            user_input:        原始用户目标
-            completed_steps:   已完成步骤列表 (dict with task_type/description/id)
-            completed_outputs: 对应的输出摘要文本列表
-            failed_step:       失败步骤 dict
-            error:             失败错误信息
-            remaining_steps:   原计划中未执行的步骤（可参考调整）
-            next_id:           新生成步骤的起始 id
-            timeout:           Ollama 调用超时秒数
-
-        Returns:
-            {use_planner: bool, steps: list} — 新的剩余步骤，或 {use_planner: False} 表示放弃
+        使用云端模型验证多步任务执行结果。
+        返回标准验证 dict，失败则返回 None。
+        使用 gemini-2.5-flash 或更强模型以保证验证质量。
         """
-        # 构建摘要上下文
-        completed_summary = "\n".join(
-            f"  步骤{s.get('id', i + 1)} ({s.get('task_type', '?')}): "
-            f"{s.get('description', '')} → {out[:80]}"
-            for i, (s, out) in enumerate(zip(completed_steps, completed_outputs))
-        ) or "  (无已完成步骤)"
-
-        failed_desc = (
-            f"步骤{failed_step.get('id', '?')} "
-            f"({failed_step.get('task_type', '?')}): "
-            f"{failed_step.get('description', '')}"
-        )
-
-        remaining_desc = "\n".join(
-            f"  步骤{s.get('id', '?')} ({s.get('task_type', '?')}): {s.get('description', '')}"
-            for s in remaining_steps
-        ) or "  (无)"
-
-        prompt = cls.REPLAN_PROMPT.format(
-            goal=user_input[:400],
-            completed_summary=completed_summary[:800],
-            failed_desc=failed_desc,
-            error=str(error)[:300],
-            remaining_desc=remaining_desc[:400],
-            next_id=next_id,
-        )
-
-        # 尝试 Ollama 本地模型
         try:
-            if LocalModelRouter.is_ollama_available() and LocalModelRouter.init_model():
-                raw, err = LocalModelRouter.call_ollama_chat(
-                    messages=[
-                        {"role": "system", "content": prompt},
-                        {"role": "user", "content": user_input[:400]},
-                    ],
-                    fmt="json",
-                    options={"temperature": 0.0, "num_predict": 500},
-                    timeout=timeout,
-                )
-                if not err:
-                    result = cls._parse_plan_json(raw)
-                    if result:
-                        logger.info(
-                            f"[LocalPlanner] ✅ Replan (Ollama): "
-                            f"{len(result.get('steps', []))} 新步骤"
-                        )
-                        return result
-        except Exception as _e:
-            logger.debug(f"[LocalPlanner] Replan Ollama 失败: {_e}")
-
-        # Cloud fallback
-        return cls._replan_with_cloud(prompt, user_input)
-
-    @classmethod
-    def _replan_with_cloud(cls, prompt: str, user_input: str) -> dict:
-        """Cloud fallback for replan()."""
-        try:
-            import sys
             import importlib
             _types = importlib.import_module("google.genai.types")
+            import sys
             _app_module = sys.modules.get("web.app") or sys.modules.get("app")
             _client = getattr(_app_module, "client", None) if _app_module else None
-            if not _client:
-                return {"use_planner": False, "steps": []}
+            if _client is None:
+                return None
+
+            # 验证使用强模型保证准确性，gemini-3.1-pro-preview 为首选
+            _check_models = ["gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+            _check_model = _check_models[0]
+            try:
+                from app.core.llm.model_fallback import get_fallback_executor
+                _fbe = get_fallback_executor()
+                _check_model = next(
+                    (m for m in _check_models if _fbe.is_available(m)),
+                    _check_models[0],
+                )
+            except Exception:
+                pass
+
+            summary_lines = []
+            for i, (s, r) in enumerate(zip(steps, results), start=1):
+                ok = r.get("success") if isinstance(r, dict) else False
+                out = (r.get("output") or r.get("error") or "")[:120] if isinstance(r, dict) else ""
+                summary_lines.append(f"步骤{i}: {s.get('task_type')} - {'OK' if ok else 'FAIL'} - {out}")
+
+            check_prompt = (
+                cls.CHECK_PROMPT
+                + "\n用户需求:\n" + user_input[:400]
+                + "\n\n执行摘要:\n" + "\n".join(summary_lines)
+            )
 
             resp = _client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=user_input[:400],
+                model=_check_model,
+                contents=check_prompt,
                 config=_types.GenerateContentConfig(
-                    system_instruction=prompt,
                     response_mime_type="application/json",
-                    temperature=0.1,
-                    max_output_tokens=600,
+                    temperature=0.0,
+                    max_output_tokens=200,
                 ),
             )
             raw = resp.text or ""
-            result = cls._parse_plan_json(raw)
-            if result:
-                logger.info(
-                    f"[LocalPlanner] ✅ Replan (Cloud): "
-                    f"{len(result.get('steps', []))} 新步骤"
-                )
+            try:
+                check = json.loads(raw)
+            except (json.JSONDecodeError, ValueError):
+                check = None
+            if isinstance(check, dict):
+                result = {
+                    "status": check.get("status", "partial"),
+                    "summary": check.get("summary", ""),
+                    "next_actions": check.get("next_actions", []) if isinstance(check.get("next_actions", []), list) else [],
+                    "model": _check_model,
+                }
+                print(f"[LocalPlanner] ✅ 云端验证完成 ({_check_model}): {result['status']}")
                 return result
         except Exception as e:
-            logger.warning(f"[LocalPlanner] Replan cloud fallback 失败: {e}")
-        return {"use_planner": False, "steps": []}
-
+            print(f"[LocalPlanner] ⚠️ 云端验证失败: {e}")
+        return None

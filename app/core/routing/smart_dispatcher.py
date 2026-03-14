@@ -193,172 +193,6 @@ class SmartDispatcher:
         ],
     }
 
-    # ── analyze() 高频常量（提升为类级别，避免每次调用重新分配对象）──────────────
-    # Force-Plan 触发词
-    _FORCE_PLAN_TRIGGERS: tuple = (
-        "请制定计划", "拆解任务", "帮我计划", "分步骤", "一步步",
-        "分步完成", "制定方案", "拆分任务", "步骤规划",
-        "step by step", "step-by-step", "plan and execute",
-    )
-    # 文档编辑意图词
-    _DOC_EDIT_KEYWORDS: tuple = (
-        "修改", "更改", "标注", "批注", "润色", "改写", "校对", "审校", "修订",
-        "纠错", "改善", "优化", "调整", "精炼", "通畅", "通顺", "流畅", "精简",
-        "凝练", "简洁", "整理", "梳理", "提炼", "整体修改", "修一下", "帮我改",
-        "改一改", "改得", "写得", "polish", "refine", "revise", "edit", "improve",
-    )
-    # 指定路径列举关键词
-    _PATH_LIST_KWS: tuple = (
-        "归纳", "列出", "列举", "有哪些", "所有", "全部",
-        "找", "查", "看看", "显示", "汇总", "整理",
-        "监控", "监视", "停止监控", "自动归类",
-        "提取", "关键信息", "合同信息", "解读", "分析",
-        "哪个", "哪些", "里面", "这几份", "对比",
-        "哪几", "几个", "几份", "路径下", "下有", "下面有",
-        "属于", "什么文件", "文件类型", "下的文件",
-    )
-    # 系统命令动词（快速通道 + 兜底共享）
-    _SYS_ACTION_STARTERS: tuple = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
-    # 快速通道系统命令排除词（宽）
-    _SYS_FAST_EXCLUDE: tuple = (
-        "怎么", "如何", "什么", "为什么", "能不能", "可以吗", "怎样", "咋",
-        "文件", "网页", "网址", "url", "网站", "链接", "附件",
-        "思路", "方式", "方法", "问题", "功能",
-    )
-    # 兜底系统命令排除词（窄）
-    _SYS_FALLBACK_EXCLUDE: tuple = (
-        "怎么", "如何", "什么", "文件", "网页", "网站", "思路", "方法", "功能",
-    )
-    # 提醒/消息快速通道正则
-    _AGENT_NOTIFY_PATTERNS: tuple = (
-        r'(设置?|帮我设?)(提醒|闹钟|定时).{0,20}',
-        r'提醒我.{0,25}(点|时|分|号|日)',
-        r'(给|向).{1,8}(发|回)(微信|消息|邮件)',
-        r'(发|回)(微信|消息).{0,15}给.{1,8}',
-    )
-    # AI 绘画快速通道正则
-    _PAINTER_FAST_PATTERNS: tuple = (
-        r'(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,20}(图片|照片|壁纸|头像|封面)',
-        r'(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,3}(一张|一幅|一个|张|幅).{0,30}图',
-        r'(一张|一幅).{1,20}(图|图片|照片)',
-        r'(ai|AI).{0,5}(画|绘|生成|创作)',
-    )
-    # 图表/可视化排除词（区分 PAINTER vs CODER）
-    _PAINTER_CHART_EXCLUDE: tuple = (
-        "图表", "折线图", "柱状图", "饼图", "散点图", "直方图", "条形图",
-        "可视化", "统计图", "数据图", "chart", "plot", "matplotlib",
-    )
-    # 天气快速通道关键词
-    _WEATHER_KWS: tuple = (
-        "天气", "气温", "下雨吗", "下雨", "下雪吗", "下雪", "天气怎么样", "天气怎样",
-        "天气预报", "weather", "温度多少", "穿什么衣服",
-    )
-    # 代码编写快速通道
-    _CODE_WRITE_VERBS: tuple = (
-        "帮我写", "给我写", "写一个", "写个", "实现", "编写", "开发", "编程",
-    )
-    _CODE_CONCEPTS: tuple = (
-        "函数", "算法", "类", "接口", "脚本", "程序", "代码",
-        "排序", "查找", "递归", "遍历", "爬虫", "api", "模块",
-    )
-    _CODE_LANGS: tuple = (
-        "python", "javascript", "java", "c++", "golang", "rust",
-        "typescript", "kotlin", "swift", "php", "ruby", "sql",
-    )
-    # 时效性快速通道
-    _REALTIME_SIGNALS: tuple = (
-        "目前", "现在", "当前", "最新", "近期", "今日", "近况",
-    )
-    _REALTIME_TOPIC_KWS: tuple = (
-        "新闻", "消息", "进展", "动态", "局势", "战况", "现状", "情况",
-        "比分", "结果", "成绩", "排名", "股价", "金价", "油价",
-    )
-    _REALTIME_EXCLUDE_KWS: tuple = (
-        "历史", "是什么", "什么是", "定义", "原理", "原因", "介绍", "解释",
-    )
-    # 数据图表/可视化快速通道
-    _CHART_KWS: tuple = (
-        "图表", "折线图", "柱状图", "饼图", "散点图", "直方图", "条形图", "热力图",
-        "作图", "可视化", "统计图", "数据图", "chart", "plot", "graph",
-        "matplotlib", "seaborn", "plotly", "echarts",
-    )
-    # 出行查询快速通道正则
-    _TRAVEL_SEARCH_PATTERNS: tuple = (
-        r'(查|查询|查一下|看|有没有|有无|还有).{0,8}(火车票|高铁票|动车票|机票|余票|班次)',
-        r'(下周|明天|后天|今天|大后天|[0-9]+[号日]).{0,14}(去|到|从).{0,14}(高铁|动车|火车|航班|机票)',
-        r'(去|从).{1,14}(去|到).{1,20}(火车|高铁|动车|机)',
-        r'(几点|什么时候).{0,8}(从|到|出发|到达).{0,12}(车|班|次|机)',
-        r'(余票|时刻表|列车时刻|航班动态|航班查询)',
-    )
-    # 购票意图词（出行快速通道 + 本地模型 override 共享）
-    _TICKET_BUY_KWS: tuple = ("订票", "买票", "购票", "帮我买", "帮我订", "12306")
-    # 出行查询关键词（本地模型 override 用）
-    _TICKET_QUERY_KWS: tuple = ("12306", "火车票", "高铁票", "动车票")
-    # 金融资产/价格快速通道
-    _PRICE_ASSETS: tuple = (
-        "原油", "布伦特", "wti", "天然气", "黄金", "白银", "铜", "铁矿石",
-        "大豆", "小麦", "棉花", "黄铜", "铝", "锌", "铅", "镍",
-        "比特币", "以太坊", "btc", "eth", "加密货币", "数字货币",
-        "美元", "欧元", "日元", "英镑", "港币", "外汇", "汇率",
-        "a股", "港股", "道琼斯", "纳斯达克", "标普", "上证", "深证",
-        "期货", "基金", "债券", "股票",
-        "金价", "油价", "银价", "铜价",
-    )
-    _PRICE_SIGNALS: tuple = (
-        "价格", "现价", "报价", "行情", "走势", "涨跌", "多少钱",
-        "今日价", "实时", "最新价", "开盘", "收盘", "涨了", "跌了",
-    )
-    # AGENT override 正则（本地模型 override 段）
-    _AGENT_OVERRIDE_PATTERNS: tuple = (
-        r"发微信", r"回微信", r"微信发", r"微信回",
-        r"给.{1,6}发消息", r"给.{1,6}发微信",
-        r"浏览器打开", r"点击.{1,6}按钮",
-    )
-    # FILE_GEN 意图词（本地模型 override 段）
-    _FILE_GEN_INTENT_KWS: tuple = (
-        "生成", "创建", "导出", "制作", "做", "写", "帮我做", "帮我写",
-        "ppt", "word", "docx", "pdf", "excel", "报告", "文档", "幻灯片",
-        "输出", "保存", "做成", "转成", "介绍",
-    )
-    # FILE_GEN 意图词（AI 路由 override 段，语义更宽）
-    _AI_FILE_GEN_OUTPUT_KWS: tuple = (
-        "生成", "创建", "导出", "制作", "输出", "保存为", "做成", "转成",
-        "写份", "写一份", "写一个", "做一个", "做一份", "做个",
-        "word", "docx", ".doc", "pdf", "excel", "ppt", "幻灯片",
-        "帮我做", "帮我写", "帮我生成", "报告", "文档", "介绍文档",
-    )
-    # PPT/文档生成兜底关键词
-    _PPT_KEYWORDS: tuple = (
-        "ppt", "幻灯片", "演示文稿", "presentation", "slide", "slides", ".pptx",
-    )
-    _PPT_ACTION_KWS: tuple = (
-        "做", "生成", "创建", "制作", "做一个", "做个", "帮我做", "帮我生成",
-    )
-    _DOC_GEN_OUTPUT_KWS: tuple = (
-        "word", "docx", ".doc", "pdf", "excel", ".xlsx", "报告", "文档", "介绍文档", "word版",
-    )
-    _DOC_GEN_ACTION_KWS: tuple = (
-        "做一个", "做一份", "做个", "写一份", "写一个", "帮我做", "帮我写",
-        "生成一个", "生成一份", "生成", "创建一个", "创建一份", "制作",
-    )
-    # 文件搜索兜底正则
-    _FILE_SEARCH_PATTERNS: tuple = (
-        r"帮我找.{0,20}文件", r"找一下.{1,30}", r"找找.{1,30}",
-        r"找到.{1,20}文件", r"定位.{1,20}文件", r"搜索文件",
-        r"在哪(里|儿|个目录)", r"哪个文件.{0,10}",
-        r"扫描(我的)?(电脑|磁盘|硬盘|文件)", r"全盘扫描",
-        r"帮我打开.{1,30}(文件|\.)",
-    )
-    # RAG 搜索跟进动词
-    _SEARCH_VERBS: tuple = (
-        "查", "搜", "搜索", "查询", "找", "再找", "再查", "再搜", "再看看",
-    )
-    # ML 兜底疑问词
-    _QUESTION_WORDS: tuple = (
-        "怎么", "如何", "什么", "为什么", "能不能", "可以吗",
-        "怎样", "咋", "啥", "how", "what", "why", "which",
-    )
-
     # 预计算特征 (字符级 n-gram)
     _features = None
     _task_vectors = None
@@ -460,11 +294,11 @@ class SmartDispatcher:
         "ok",
         "okay",
     }
-    _TRIVIAL_IDENTITY: tuple = (
+    _TRIVIAL_IDENTITY = [
         "你是谁", "你叫什么", "你叫啥", "你是什么", "介绍一下你自己", "你是koto", "koto是什么",
-    )
+    ]
     # 若存在这些词，再短也不能走极简通道
-    _TRIVIAL_EXCLUDE: tuple = (
+    _TRIVIAL_EXCLUDE = [
         "画", "图片", "照片", "图", "代码", "程序", "脚本", "文件", "文档", "报告",
         "pdf", "word", "excel", "ppt", "天气", "股价", "新闻", "汇率",
         "打开", "关闭", "截图", "启动", "运行", "搜索",
@@ -526,7 +360,7 @@ class SmartDispatcher:
         "api",
         # 时效性信号词 — 防止「目前金价」「近期AI动态」被极简通道漏判
         "目前", "近期", "局势", "战况", "动态", "进展", "现状", "近况",
-    )
+    ]
 
     @classmethod
     def _is_trivial_input(cls, user_input: str) -> bool:
@@ -781,7 +615,12 @@ class SmartDispatcher:
         ).strip()
 
         # === 0. Force Plan Mode (New Feature) ===
-        if user_input.strip().startswith("/plan ") or any(t in user_input for t in cls._FORCE_PLAN_TRIGGERS):
+        _FORCE_PLAN_TRIGGERS = [
+            "请制定计划", "拆解任务", "帮我计划", "分步骤", "一步步",
+            "分步完成", "制定方案", "拆分任务", "步骤规划",
+            "step by step", "step-by-step", "plan and execute",
+        ]
+        if user_input.strip().startswith("/plan ") or any(t in user_input for t in _FORCE_PLAN_TRIGGERS):
             context_info = {"complexity": "complex", "is_multi_step_task": True}
             context_info["multi_step_info"] = {
                 "pattern": "forced_plan",
@@ -797,7 +636,13 @@ class SmartDispatcher:
         # === 优先：文件附件处理 logic ===
         if file_context and file_context.get("has_file"):
             file_ext = file_context.get("file_type", "")
-            has_edit_intent = any(kw in user_lower for kw in cls._DOC_EDIT_KEYWORDS)
+            edit_keywords = [
+                "修改", "更改", "标注", "批注", "润色", "改写", "校对", "审校", "修订",
+                "纠错", "改善", "优化", "调整", "精炼", "通畅", "通顺", "流畅", "精简",
+                "凝练", "简洁", "整理", "梳理", "提炼", "整体修改", "修一下", "帮我改",
+                "改一改", "改得", "写得", "polish", "refine", "revise", "edit", "improve",
+            ]
+            has_edit_intent = any(kw in user_lower for kw in edit_keywords)
             
             if has_edit_intent and file_ext in [".docx", ".doc"]:
                 context_info = {"complexity": "complex"}
@@ -839,7 +684,18 @@ class SmartDispatcher:
         # === 指定路径文件列举快速通道（最高优先级，防止被误路由到 FILE_GEN/CHAT）===
         # 匹配：输入含 Windows 路径（如 C:\xxx）且含列举/归纳/查找意图关键词
         if re.search(r'[A-Za-z]:[\\]', user_input):
-            if any(k in user_input for k in cls._PATH_LIST_KWS):
+            _path_list_kws = [
+                "归纳", "列出", "列举", "有哪些", "所有", "全部",
+                "找", "查", "看看", "显示", "汇总", "整理",
+                # Watch Mode / 字段提取 / 问答
+                "监控", "监视", "停止监控", "自动归类",
+                "提取", "关键信息", "合同信息", "解读", "分析",
+                "哪个", "哪些", "里面", "这几份", "对比",
+                # 内容过滤搜索（如"哪几个是报告/合同/简历/访谈"）
+                "哪几", "几个", "几份", "路径下", "下有", "下面有",
+                "属于", "什么文件", "文件类型", "下的文件",
+            ]
+            if any(k in user_input for k in _path_list_kws):
                 context_info = context_info or {}
                 context_info["routing_list"] = cls._build_routing_list(
                     similarity_scores,
@@ -853,11 +709,17 @@ class SmartDispatcher:
 
         # === 系统操作快速通道（打开/启动/关闭 + 应用名，不依赖 APP_ALIASES）===
         # 命令语气、短输入、不含问句/文件/网页关键词
+        _sys_action_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
+        _sys_exclude_kws = (
+            "怎么", "如何", "什么", "为什么", "能不能", "可以吗", "怎样", "咋",
+            "文件", "网页", "网址", "url", "网站", "链接", "附件",
+            "思路", "方式", "方法", "问题", "功能",
+        )
         _stripped = user_input.strip()
         if (
             len(_stripped) <= 18
-            and any(_stripped.startswith(s) for s in cls._SYS_ACTION_STARTERS)
-            and not any(k in user_lower for k in cls._SYS_FAST_EXCLUDE)
+            and any(_stripped.startswith(s) for s in _sys_action_starters)
+            and not any(k in user_lower for k in _sys_exclude_kws)
         ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -871,7 +733,13 @@ class SmartDispatcher:
             return "SYSTEM", "🖥️ Action-Direct", context_info
 
         # === 提醒/日程/消息发送快速通道 → AGENT ===
-        if any(re.search(p, user_input) for p in cls._AGENT_NOTIFY_PATTERNS):
+        _AGENT_NOTIFY_PATTERNS = [
+            r'(设置?|帮我设?)(提醒|闹钟|定时).{0,20}',
+            r'提醒我.{0,25}(点|时|分|号|日)',
+            r'(给|向).{1,8}(发|回)(微信|消息|邮件)',
+            r'(发|回)(微信|消息).{0,15}给.{1,8}',
+        ]
+        if any(re.search(p, user_input) for p in _AGENT_NOTIFY_PATTERNS):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
                 similarity_scores,
@@ -885,9 +753,19 @@ class SmartDispatcher:
 
         # === AI绘画/图片生成快速通道（在极简通道之前，防止短句被误分到 CHAT）===
         # 匹配：画/做/生成 + 一张/个/幅 + 任意内容 + 图/图片/照片；或含明确图片生成词
-        if any(re.search(p, user_input) for p in cls._PAINTER_FAST_PATTERNS):
+        _PAINTER_PATTERNS = [
+            r'(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,20}(图片|照片|壁纸|头像|封面)',
+            r'(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,3}(一张|一幅|一个|张|幅).{0,30}图',
+            r'(一张|一幅).{1,20}(图|图片|照片)',
+            r'(ai|AI).{0,5}(画|绘|生成|创作)',
+        ]
+        import re as _re_painter
+        if any(_re_painter.search(p, user_input) for p in _PAINTER_PATTERNS):
             # 排除图表/可视化词（那些走 CODER）
-            _not_chart = not any(k in user_lower for k in cls._PAINTER_CHART_EXCLUDE)
+            _not_chart = not any(k in user_lower for k in [
+                "图表", "折线图", "柱状图", "饼图", "散点图", "直方图", "条形图",
+                "可视化", "统计图", "数据图", "chart", "plot", "matplotlib",
+            ])
             if _not_chart:
                 context_info = context_info or {}
                 context_info["routing_list"] = cls._build_routing_list(
@@ -915,7 +793,11 @@ class SmartDispatcher:
             return "CHAT", "⚡ Trivial", context_info
 
         # === 天气 / 实时信息快速通道（在 Trivial 之后、模型之前，防止冷启动漏判）===
-        if any(k in user_lower for k in cls._WEATHER_KWS):
+        _WEATHER_KWS = [
+            "天气", "气温", "下雨吗", "下雨", "下雪吗", "下雪", "天气怎么样", "天气怎样",
+            "天气预报", "weather", "温度多少", "穿什么衣服",
+        ]
+        if any(k in user_lower for k in _WEATHER_KWS):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
                 similarity_scores,
@@ -929,9 +811,18 @@ class SmartDispatcher:
 
         # === 代码编写快速通道（在本地模型之前，避免 koto-router 误判明确写代码请求）===
         # 条件：含写作动词 + 编程语言/代码概念，但不是"帮我写一段自我介绍"这类纯文本
-        _has_code_verb = any(v in user_lower for v in cls._CODE_WRITE_VERBS)
-        _has_code_concept = any(c in user_lower for c in cls._CODE_CONCEPTS)
-        _has_code_lang = any(l in user_lower for l in cls._CODE_LANGS)
+        _CODE_WRITE_VERBS = ["帮我写", "给我写", "写一个", "写个", "实现", "编写", "开发", "编程"]
+        _CODE_CONCEPTS = [
+            "函数", "算法", "类", "接口", "脚本", "程序", "代码",
+            "排序", "查找", "递归", "遍历", "爬虫", "api", "模块",
+        ]
+        _CODE_LANGS = [
+            "python", "javascript", "java", "c++", "golang", "rust",
+            "typescript", "kotlin", "swift", "php", "ruby", "sql",
+        ]
+        _has_code_verb = any(v in user_lower for v in _CODE_WRITE_VERBS)
+        _has_code_concept = any(c in user_lower for c in _CODE_CONCEPTS)
+        _has_code_lang = any(l in user_lower for l in _CODE_LANGS)
         if _has_code_verb and (_has_code_concept or _has_code_lang):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -945,10 +836,16 @@ class SmartDispatcher:
             return "CODER", "💻 Code-Write-Direct", context_info
 
         # === 时效性关键词快速通道（目前/近期/最新 + 时事主题）===
+        _REALTIME_SIGNALS = ["目前", "现在", "当前", "最新", "近期", "今日", "近况"]
+        _REALTIME_TOPIC_KWS = [
+            "新闻", "消息", "进展", "动态", "局势", "战况", "现状", "情况",
+            "比分", "结果", "成绩", "排名", "股价", "金价", "油价",
+        ]
+        _REALTIME_EXCLUDE_KWS = ["历史", "是什么", "什么是", "定义", "原理", "原因", "介绍", "解释"]
         if (
-            any(s in user_lower for s in cls._REALTIME_SIGNALS)
-            and any(t in user_lower for t in cls._REALTIME_TOPIC_KWS)
-            and not any(e in user_lower for e in cls._REALTIME_EXCLUDE_KWS)
+            any(s in user_lower for s in _REALTIME_SIGNALS)
+            and any(t in user_lower for t in _REALTIME_TOPIC_KWS)
+            and not any(e in user_lower for e in _REALTIME_EXCLUDE_KWS)
         ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -962,7 +859,15 @@ class SmartDispatcher:
             return "WEB_SEARCH", "⏰ Realtime-Direct", context_info
 
         # === 数据图表/可视化快速通道（在所有模型之前，防止被误路由到 PAINTER/CHAT）===
-        if any(k in user_lower for k in cls._CHART_KWS):
+        _CHART_KWS = [
+            "图表", "折线图", "柱状图", "饼图", "散点图", "直方图", "条形图", "热力图",
+            "作图", "可视化", "统计图", "数据图", "chart", "plot", "graph",
+            "matplotlib", "seaborn", "plotly", "echarts",
+        ]
+        _CHART_ACTION_KWS = [
+            "画", "作", "生成", "做", "绘制", "创建", "画出", "plot", "draw", "show", "显示",
+        ]
+        if any(k in user_lower for k in _CHART_KWS):
             # 包含图表类型词就直接走 CODER（数据可视化），不必配合动作词
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -976,8 +881,17 @@ class SmartDispatcher:
             return "CODER", "📊 Chart-Direct", context_info
 
         # === 实时出行查询快速通道（在所有模型之前，确保不被误判为CHAT/AGENT）===
-        if any(re.search(p, user_input) for p in cls._TRAVEL_SEARCH_PATTERNS):
-            if any(k in user_lower for k in cls._TICKET_BUY_KWS):
+        _travel_search_patterns = [
+            r'(查|查询|查一下|看|有没有|有无|还有).{0,8}(火车票|高铁票|动车票|机票|余票|班次)',
+            r'(下周|明天|后天|今天|大后天|[0-9]+[号日]).{0,14}(去|到|从).{0,14}(高铁|动车|火车|航班|机票)',
+            r'(去|从).{1,14}(去|到).{1,20}(火车|高铁|动车|机)',
+            r'(几点|什么时候).{0,8}(从|到|出发|到达).{0,12}(车|班|次|机)',
+            r'(余票|时刻表|列车时刻|航班动态|航班查询)',
+        ]
+        import re as _re_travel
+        if any(_re_travel.search(p, user_input) for p in _travel_search_patterns):
+            _buy_kw_early = ["订票", "买票", "购票", "帮我买", "帮我订", "12306"]
+            if any(k in user_lower for k in _buy_kw_early):
                 context_info = context_info or {}
                 context_info["routing_list"] = cls._build_routing_list(
                     similarity_scores,
@@ -997,8 +911,22 @@ class SmartDispatcher:
             return "WEB_SEARCH", "🌐 Travel-Query", context_info
 
         # === 金融/商品价格快速通道（价格 = 实时数据，强制 WEB_SEARCH）===
-        _has_asset = any(k in user_lower for k in cls._PRICE_ASSETS)
-        _has_price_signal = any(k in user_lower for k in cls._PRICE_SIGNALS)
+        _PRICE_ASSETS = [
+            "原油", "布伦特", "wti", "天然气", "黄金", "白银", "铜", "铁矿石",
+            "大豆", "小麦", "棉花", "黄铜", "铝", "锌", "铅", "镍",
+            "比特币", "以太坊", "btc", "eth", "加密货币", "数字货币",
+            "美元", "欧元", "日元", "英镑", "港币", "外汇", "汇率",
+            "a股", "港股", "道琼斯", "纳斯达克", "标普", "上证", "深证",
+            "期货", "基金", "债券", "股票",
+            # 简写形式（如「目前金价」「油价多少」）
+            "金价", "油价", "银价", "铜价",
+        ]
+        _PRICE_SIGNALS = [
+            "价格", "现价", "报价", "行情", "走势", "涨跌", "多少钱",
+            "今日价", "实时", "最新价", "开盘", "收盘", "涨了", "跌了",
+        ]
+        _has_asset = any(k in user_lower for k in _PRICE_ASSETS)
+        _has_price_signal = any(k in user_lower for k in _PRICE_SIGNALS)
         # 资产名称 + 价格信号词 → 强制 WEB_SEARCH（无需时效词）
         # 纯资产名称（无价格词）也路由 WEB_SEARCH，因询问资产名称本身通常是为了了解价格
         if _has_asset and (_has_price_signal or len(user_input.strip()) <= 12):
@@ -1043,191 +971,120 @@ class SmartDispatcher:
         except Exception as _pe:
             logger.info(f"[SmartDispatcher] ⚠️ 多步抢先规划异常（跳过）: {_pe}")
 
-        # === 本地 Ollama 路由（优先信号，低置信再回退规则） ===
-        # classify_with_hint() 同时返回任务分类 + skill_prompt + complexity，实现「本地理解意图 → 生成执行指令 → 云端模型执行」
-        local_task, local_confidence, local_source, local_hint, local_complexity = (
-            _get_local_model_router().classify_with_hint(user_input, timeout=4.5)
-        )
-        local_conf_value = 0.0
-        if isinstance(local_confidence, str):
-            m = re.search(r"(\d+\.\d+)", local_confidence)
-            if m:
-                try:
-                    local_conf_value = float(m.group(1))
-                except Exception:
-                    local_conf_value = 0.0
-        elif isinstance(local_confidence, (int, float)):
-            local_conf_value = float(local_confidence)
+        # === 云端 AI 路由（主要语义分类器：Gemini Flash 快速分类）===
+        # 架构：AIRouter 是主分类器，Ollama 仅作离线兜底。
+        # 快速规则通道已过滤了明显输入，到这里的都是需要语义理解的请求。
+        if client:
+            print(f"[SmartDispatcher] 🌐 云端 AI 路由分类...")
+            ai_task, ai_confidence, ai_source, ai_hint = _get_ai_router().classify_with_hint(client, user_input, timeout=3.0)
+            if ai_task:
+                latency = (time.time() - start_time) * 1000
 
-        local_confident = local_conf_value >= 0.70
-        if local_task:
-            if (
-                local_task == "CHAT"
-                and WebSearcher
-                and WebSearcher.needs_web_search(user_input)
-            ):
-                context_info = context_info or {}
-                context_info["routing_list"] = cls._build_routing_list(
-                    similarity_scores,
-                    boosts={"WEB_SEARCH": 0.95},
-                    reasons={"WEB_SEARCH": ["override:chat_to_web_search"]},
-                )
-                return "WEB_SEARCH", "🌐 Override-Detected", context_info
-
-            if (
-                LocalExecutor
-                and LocalExecutor.is_system_command(user_input)
-                and local_task != "SYSTEM"
-            ):
-                context_info = context_info or {}
-                context_info["routing_list"] = cls._build_routing_list(
-                    similarity_scores,
-                    boosts={"SYSTEM": 0.95},
-                    reasons={"SYSTEM": ["local_override:system"]},
-                )
-                return "SYSTEM", "🖥️ Local-Override", context_info
-
-            if any(re.search(p, user_lower) for p in cls._AGENT_OVERRIDE_PATTERNS):
-                context_info = context_info or {}
-                context_info["routing_list"] = cls._build_routing_list(
-                    similarity_scores,
-                    boosts={"AGENT": 0.95},
-                    reasons={"AGENT": ["local_override:agent"]},
-                )
-                return "AGENT", "🤖 Local-Override", context_info
-
-            if any(k in user_lower for k in cls._TICKET_QUERY_KWS):
-                # 区分「查票」→ WEB_SEARCH 和「买/订票」→ AGENT
-                context_info = context_info or {}
-                if any(k in user_lower for k in cls._TICKET_BUY_KWS):
+                # ── 共用 override 检查（与旧版 Ollama 路由一致）────────────────
+                if ai_task == "CHAT" and WebSearcher and WebSearcher.needs_web_search(user_input):
+                    context_info = context_info or {}
                     context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores,
-                        boosts={"AGENT": 0.95},
-                        reasons={"AGENT": ["local_override:ticket_buy"]},
+                        similarity_scores, boosts={"WEB_SEARCH": 0.95},
+                        reasons={"WEB_SEARCH": ["override:chat_to_web_search"]}
                     )
-                    return "AGENT", "🤖 Local-Override", context_info
-                else:
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores,
-                        boosts={"WEB_SEARCH": 0.95},
-                        reasons={"WEB_SEARCH": ["local_override:ticket_query"]},
-                    )
-                    logger.info(f"[SmartDispatcher] 🌐 票务查询 → WEB_SEARCH")
-                    return "WEB_SEARCH", "🌐 Ticket-Query", context_info
+                    return "WEB_SEARCH", "🌐 Override-Detected", context_info
 
-            # DOC_ANNOTATE 需要文件附件（编辑已有文档）；FILE_GEN 是生成新文件，无需附件
-            if local_task == "DOC_ANNOTATE":
-                has_file = file_context and file_context.get("has_file")
-                if not has_file:
-                    logger.info(
-                        f"[SmartDispatcher] ⚠️ 本地模型返回 DOC_ANNOTATE 但无文件上下文，跳过"
+                if LocalExecutor and LocalExecutor.is_system_command(user_input) and ai_task != "SYSTEM":
+                    context_info = context_info or {}
+                    context_info["routing_list"] = cls._build_routing_list(
+                        similarity_scores, boosts={"SYSTEM": 0.95},
+                        reasons={"SYSTEM": ["ai_override:system"]}
                     )
-                    pass
-                else:
-                    if not local_confident:
-                        logger.info(
-                            f"[SmartDispatcher] ⚠️ 本地模型低置信度({local_conf_value:.2f})，回退规则判断"
-                        )
-                        pass
-                    else:
-                        context_info = context_info or {}
+                    return "SYSTEM", "🖥️ AI-Override", context_info
+
+                _agent_overrides = [
+                    r"发微信", r"回微信", r"微信发", r"微信回",
+                    r"给.{1,6}发消息", r"给.{1,6}发微信",
+                    r"浏览器打开", r"点击.{1,6}按钮",
+                ]
+                if any(re.search(p, user_lower) for p in _agent_overrides):
+                    context_info = context_info or {}
+                    context_info["routing_list"] = cls._build_routing_list(
+                        similarity_scores, boosts={"AGENT": 0.95},
+                        reasons={"AGENT": ["ai_override:agent"]}
+                    )
+                    return "AGENT", "🤖 AI-Override", context_info
+
+                ticket_keywords = ["12306", "火车票", "高铁票", "动车票"]
+                if any(k in user_lower for k in ticket_keywords):
+                    _buy_kw = ["12306", "订票", "买票", "购票", "帮我买", "帮我订"]
+                    context_info = context_info or {}
+                    if any(k in user_lower for k in _buy_kw):
                         context_info["routing_list"] = cls._build_routing_list(
-                            similarity_scores,
-                            boosts={"DOC_ANNOTATE": 0.9},
-                            reasons={"DOC_ANNOTATE": ["local_model_with_file"]},
+                            similarity_scores, boosts={"AGENT": 0.95},
+                            reasons={"AGENT": ["ai_override:ticket_buy"]}
                         )
-                        if local_hint:
-                            context_info["skill_prompt"] = local_hint
-                        if local_complexity == "complex":
-                            context_info["complexity"] = "complex"
-                        return "DOC_ANNOTATE", f"{local_confidence}", context_info
-            elif local_task == "FILE_GEN":
-                # FILE_GEN 不需要已有文件——检测生成意图关键词即可放行
-                _has_file_gen_intent = any(w in user_lower for w in cls._FILE_GEN_INTENT_KWS)
-                if _has_file_gen_intent and local_confident:
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores,
-                        boosts={"FILE_GEN": 0.9},
-                        reasons={"FILE_GEN": ["local_model_file_gen"]},
-                    )
-                    if local_hint:
-                        context_info["skill_prompt"] = local_hint
-                    if local_complexity == "complex":
-                        context_info["complexity"] = "complex"
-                    logger.info(
-                        f"[SmartDispatcher] 📄 本地模型 FILE_GEN 意图确认: '{user_input[:30]}'"
-                    )
-                    return "FILE_GEN", f"{local_confidence}", context_info
-                else:
-                    logger.info(
-                        f"[SmartDispatcher] ⚠️ 本地模型返回 FILE_GEN 但{'无生成意图' if not _has_file_gen_intent else '低置信度'}，继续评估"
-                    )
-            else:
-                if not local_confident:
-                    logger.info(
-                        f"[SmartDispatcher] ⚠️ 本地模型低置信度({local_conf_value:.2f})，回退规则判断"
-                    )
-                else:
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores,
-                        boosts={local_task: 0.9},
-                        reasons={local_task: ["local_model"]},
-                    )
-                    if local_hint:
-                        context_info["skill_prompt"] = local_hint
-                    # 只有本地模型明确判定为 complex 时才升级；CHAT 任务不受复杂度影响（始终走 Flash）
-                    if local_complexity == "complex" and local_task != "CHAT":
-                        context_info["complexity"] = "complex"
-                    return local_task, f"{local_confidence}", context_info
+                        return "AGENT", "🤖 Ticket-Buy", context_info
+                    else:
+                        context_info["routing_list"] = cls._build_routing_list(
+                            similarity_scores, boosts={"WEB_SEARCH": 0.95},
+                            reasons={"WEB_SEARCH": ["ai_override:ticket_query"]}
+                        )
+                        return "WEB_SEARCH", "🌐 Ticket-Query", context_info
 
-        # === 在线 AI 路由（本地模型不可用或低置信时的第二优先级） ===
-        # 放在关键词规则之前，用语义理解而非关键词匹配来判断任务
-        if not local_task or not local_confident:
-            if client:
-                logger.info(
-                    f"[SmartDispatcher] 🌐 本地模型{'不可用' if not local_task else f'低置信({local_conf_value:.2f})'}，尝试在线 AI 路由..."
+                # DOC_ANNOTATE 需要文件附件；FILE_GEN 只需有生成意图
+                if ai_task == "DOC_ANNOTATE":
+                    has_file = file_context and file_context.get("has_file")
+                    if not has_file:
+                        print(f"[SmartDispatcher] ⚠️ AI路由返回 DOC_ANNOTATE，但无文件附件，降级 CHAT")
+                        ai_task = "CHAT"
+                elif ai_task == "FILE_GEN":
+                    _ai_has_output_intent = any(w in user_lower for w in [
+                        "生成", "创建", "导出", "制作", "输出", "保存为", "做成", "转成",
+                        "写份", "写一份", "写一个", "做一个", "做一份", "做个",
+                        "word", "docx", ".doc", "pdf", "excel", "ppt", "幻灯片",
+                        "帮我做", "帮我写", "帮我生成", "报告", "文档", "介绍文档",
+                    ])
+                    if not (file_context and file_context.get("has_file")) and not _ai_has_output_intent:
+                        print(f"[SmartDispatcher] ⚠️ AI路由返回 FILE_GEN，但无文件且无生成意图，降级 CHAT")
+                        ai_task = "CHAT"
+
+                context_info = context_info or {}
+                context_info["routing_list"] = cls._build_routing_list(
+                    similarity_scores, boosts={ai_task: 0.85},
+                    reasons={ai_task: ["ai_router"]}
                 )
-                ai_task, ai_confidence, ai_source, ai_hint = (
-                    _get_ai_router().classify_with_hint(client, user_input, timeout=3.0)
+                if ai_hint:
+                    context_info["skill_prompt"] = ai_hint
+                print(f"[SmartDispatcher] ✅ AI路由决策: {ai_task} ({ai_confidence}) hint={'yes' if ai_hint else 'no'} ({latency:.0f}ms)")
+                return ai_task, f"{ai_confidence} ({latency:.0f}ms)", context_info
+
+        # === 离线兜底：本地 Ollama 路由（云端不可用时的后备）===
+        # 仅在没有 API 密钥或网络不通时触发
+        if not client:
+            print(f"[SmartDispatcher] 🔌 云端不可用，尝试本地 Ollama 路由...")
+            local_task, local_confidence, local_source, local_hint, local_complexity = _get_local_model_router().classify_with_hint(user_input, timeout=4.5)
+            local_conf_value = 0.0
+            if isinstance(local_confidence, str):
+                m = re.search(r"(\d+\.\d+)", local_confidence)
+                if m:
+                    try:
+                        local_conf_value = float(m.group(1))
+                    except Exception:
+                        local_conf_value = 0.0
+            elif isinstance(local_confidence, (int, float)):
+                local_conf_value = float(local_confidence)
+
+            local_confident = local_conf_value >= 0.70
+            if local_task and local_confident:
+                context_info = context_info or {}
+                context_info["routing_list"] = cls._build_routing_list(
+                    similarity_scores, boosts={local_task: 0.9},
+                    reasons={local_task: ["local_model_offline"]}
                 )
-                if ai_task:
-                    latency = (time.time() - start_time) * 1000
+                if local_hint:
+                    context_info["skill_prompt"] = local_hint
+                if local_complexity == "complex" and local_task != "CHAT":
+                    context_info["complexity"] = "complex"
+                return local_task, f"{local_confidence}", context_info
 
-                    # 对 FILE_GEN/DOC_ANNOTATE 额外检查：
-                    # DOC_ANNOTATE 需要文件；FILE_GEN 只需有生成意图（创建新文件）
-                    if ai_task == "DOC_ANNOTATE":
-                        has_file = file_context and file_context.get("has_file")
-                        if not has_file:
-                            logger.info(
-                                f"[SmartDispatcher] ⚠️ AI路由返回 DOC_ANNOTATE，但无文件附件，降级 CHAT"
-                            )
-                            ai_task = "CHAT"
-                    elif ai_task == "FILE_GEN":
-                        has_file = file_context and file_context.get("has_file")
-                        _ai_has_output_intent = any(w in user_lower for w in cls._AI_FILE_GEN_OUTPUT_KWS)
-                        if not has_file and not _ai_has_output_intent:
-                            logger.info(
-                                f"[SmartDispatcher] ⚠️ AI路由返回 FILE_GEN，但无文件且无生成意图，降级 CHAT"
-                            )
-                            ai_task = "CHAT"
-
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores,
-                        boosts={ai_task: 0.85},
-                        reasons={ai_task: ["ai_router"]},
-                    )
-                    if ai_hint:
-                        context_info["skill_prompt"] = ai_hint
-                    logger.info(
-                        f"[SmartDispatcher] ✅ AI路由决策: {ai_task} ({ai_confidence}) hint={'yes' if ai_hint else 'no'}"
-                    )
-                    return ai_task, f"{ai_confidence} ({latency:.0f}ms)", context_info
-
-        # === 关键词兜底规则（仅在本地模型+在线模型都无法判断时触发） ===
-        logger.info(f"[SmartDispatcher] ⚠️ 模型路由均未成功，回退关键词兜底规则...")
+        # === 关键词兜底规则（云端和本地模型都无法判断时触发）===
+        print(f"[SmartDispatcher] ⚠️ 模型路由均未成功，回退关键词兜底规则...")
 
         # -- 附件文档标注 (需要 file_context 支撑，不纯靠关键词) --
         if file_context and file_context.get("has_file"):
@@ -1246,7 +1103,9 @@ class SmartDispatcher:
                     pass
 
         # -- PPT 直通 (需要同时有 PPT 关键词 + 动作词) --
-        if any(k in user_lower for k in cls._PPT_KEYWORDS) and any(a in user_lower for a in cls._PPT_ACTION_KWS):
+        _ppt_direct_keywords = ["ppt", "幻灯片", "演示文稿", "presentation", "slide", "slides", ".pptx"]
+        _ppt_action_words = ["做", "生成", "创建", "制作", "做一个", "做个", "帮我做", "帮我生成"]
+        if any(k in user_lower for k in _ppt_direct_keywords) and any(a in user_lower for a in _ppt_action_words):
             context_info = {"complexity": "complex"}
             context_info["routing_list"] = cls._build_routing_list(
                 similarity_scores,
@@ -1257,7 +1116,10 @@ class SmartDispatcher:
             return "FILE_GEN", "📄 PPT-Direct", context_info
 
         # -- 文档/报告生成直通 (Word/PDF/Excel 等明确输出格式 + 动作意图，不含PPT已有规则) --
-        if any(k in user_lower for k in cls._DOC_GEN_OUTPUT_KWS) and any(a in user_lower for a in cls._DOC_GEN_ACTION_KWS):
+        _doc_gen_output_kws = ["word", "docx", ".doc", "pdf", "excel", ".xlsx", "报告", "文档", "介绍文档", "word版"]
+        _doc_gen_action_kws = ["做一个", "做一份", "做个", "写一份", "写一个", "帮我做", "帮我写",
+                               "生成一个", "生成一份", "生成", "创建一个", "创建一份", "制作"]
+        if any(k in user_lower for k in _doc_gen_output_kws) and any(a in user_lower for a in _doc_gen_action_kws):
             context_info = context_info or {"complexity": "complex"}
             context_info["complexity"] = "complex"
             context_info["routing_list"] = cls._build_routing_list(
@@ -1271,7 +1133,15 @@ class SmartDispatcher:
             return "FILE_GEN", "📄 DocGen-Direct", context_info
 
         # -- 全盘文件搜索/打开（优先于系统命令，避免"打开xxx文件"被误判为SYSTEM）--
-        if any(re.search(p, user_input) for p in cls._FILE_SEARCH_PATTERNS):
+        _file_search_patterns = [
+            r"帮我找.{0,20}文件", r"找一下.{1,30}", r"找找.{1,30}",
+            r"找到.{1,20}文件", r"定位.{1,20}文件", r"搜索文件",
+            r"在哪(里|儿|个目录)", r"哪个文件.{0,10}",
+            r"扫描(我的)?(电脑|磁盘|硬盘|文件)", r"全盘扫描",
+            r"帮我打开.{1,30}(文件|\.)",
+        ]
+        import re as _re
+        if any(_re.search(p, user_input) for p in _file_search_patterns):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
                 similarity_scores,
@@ -1292,11 +1162,13 @@ class SmartDispatcher:
             return "SYSTEM", "🖥️ Fallback-System", context_info
 
         # -- 系统命令兜底：命令动词 + 短输入（不依赖 APP_ALIASES）--
+        _fb_sys_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
+        _fb_sys_exclude = ("怎么", "如何", "什么", "文件", "网页", "网站", "思路", "方法", "功能")
         _stripped_fb = user_input.strip()
         if (
             len(_stripped_fb) <= 18
-            and any(_stripped_fb.startswith(s) for s in cls._SYS_ACTION_STARTERS)
-            and not any(k in user_lower for k in cls._SYS_FALLBACK_EXCLUDE)
+            and any(_stripped_fb.startswith(s) for s in _fb_sys_starters)
+            and not any(k in user_lower for k in _fb_sys_exclude)
         ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -1339,20 +1211,18 @@ class SmartDispatcher:
             return "MULTI_STEP", "🔄 Fallback-MultiStep", context_info
 
         # -- RAG 上下文延续 --
-        # -- RAG 上下文延续（单次 analyze_context，跨两个匹配检查复用）--
-        _rag_ctx = None
         if history and len(history) >= 2 and ContextAnalyzer:
-            _rag_ctx = ContextAnalyzer.analyze_context(user_input, history)
-            if _rag_ctx.get("is_continuation"):
-                # 1) WEB_SEARCH 跟进动作词（如「再搜一下」）
-                if _rag_ctx.get("related_task") == "WEB_SEARCH" and any(v in user_lower for v in cls._SEARCH_VERBS):
-                    _rag_ctx["routing_list"] = cls._build_routing_list(
+            context_info = ContextAnalyzer.analyze_context(user_input, history)
+            if context_info.get("is_continuation") and context_info.get("related_task") == "WEB_SEARCH":
+                search_verbs = ["查", "搜", "搜索", "查询", "找", "再找", "再查", "再搜", "再看看"]
+                if any(v in user_lower for v in search_verbs):
+                    context_info["routing_list"] = cls._build_routing_list(
                         similarity_scores,
                         boosts={"WEB_SEARCH": 0.9},
                         reasons={"WEB_SEARCH": ["fallback:search_followup"]},
                     )
-                    return "WEB_SEARCH", "🌐 Fallback-SearchFollowup", _rag_ctx
-
+                    return "WEB_SEARCH", "🌐 Fallback-SearchFollowup", context_info
+        
         # -- 网页搜索检测 --
         if WebSearcher and WebSearcher.needs_web_search(user_input):
             context_info = context_info or {}
@@ -1362,18 +1232,22 @@ class SmartDispatcher:
                 reasons={"WEB_SEARCH": ["fallback:web_search"]},
             )
             return "WEB_SEARCH", "🌐 Fallback-WebSearch", context_info
-
-        # -- RAG 历史延续（复用已计算的 _rag_ctx，避免重复调用 analyze_context）--
-        if _rag_ctx and _rag_ctx.get("is_continuation") and _rag_ctx.get("confidence", 0) > 0.7:
-            related_task = _rag_ctx.get("related_task")
-            continuation_type = _rag_ctx.get("continuation_type", "unknown")
-            if related_task:
-                _rag_ctx["routing_list"] = cls._build_routing_list(
-                    similarity_scores,
-                    boosts={related_task: 0.88},
-                    reasons={related_task: [f"fallback:rag_{continuation_type}"]}
-                )
-                return related_task, f"🔗 Fallback-RAG-{continuation_type}", _rag_ctx
+        
+        # -- RAG 历史延续 --
+        if history and len(history) >= 2 and ContextAnalyzer:
+            context_info = ContextAnalyzer.analyze_context(user_input, history)
+            
+            if context_info.get("is_continuation") and context_info.get("confidence", 0) > 0.7:
+                related_task = context_info.get("related_task")
+                continuation_type = context_info.get("continuation_type", "unknown")
+                
+                if related_task:
+                    context_info["routing_list"] = cls._build_routing_list(
+                        similarity_scores,
+                        boosts={related_task: 0.88},
+                        reasons={related_task: [f"fallback:rag_{continuation_type}"]}
+                    )
+                    return related_task, f"🔗 Fallback-RAG-{continuation_type}", context_info
         
         # === 最终兜底：ML 相似度 → 默认 CHAT ===
         scores = similarity_scores
@@ -1382,7 +1256,9 @@ class SmartDispatcher:
         latency = (time.time() - start_time) * 1000
 
         if best_score > 0.45:
-            is_q = any(qw in user_lower for qw in cls._QUESTION_WORDS)
+            _q_words = ["怎么", "如何", "什么", "为什么", "能不能", "可以吗",
+                        "怎样", "咋", "啥", "how", "what", "why", "which"]
+            is_q = any(qw in user_lower for qw in _q_words)
             if is_q and best_score < 0.6 and best_task != "CHAT":
                 pass
             else:
@@ -1408,43 +1284,64 @@ class SmartDispatcher:
 
     @classmethod
     def get_model_for_task(cls, task_type, has_image=False, complexity="normal"):
-        """根据任务类型获取最优模型。
-        
-        优先级（由高到低）：
-        1. MODEL_MAP 中的 "<TASK>_COMPLEX" 复杂度变体键（如 FILE_GEN_COMPLEX）
-        2. MODEL_MAP 中的标准任务键（如 FILE_GEN）
-        3. MODEL_MAP["COMPLEX"] — 通用复杂度升级兜底
-        4. MODEL_MAP["CHAT"] — 最终默认
-        
-        全部走 MODEL_MAP，不再内嵌硬编码模型名，方便后台动态覆盖。
-        """
+        """根据任务类型获取最优模型（自动跳过当前不可用的模型）"""
         MODEL_MAP = cls._get_dep("MODEL_MAP")
         if not MODEL_MAP:
-            MODEL_MAP = {"CHAT": "gemini-3-flash-preview"}
+            MODEL_MAP = {"CHAT": "gemini-2.5-flash"}
 
-        # 本地任务直通，不走模型
-        if task_type in ("SYSTEM", "FILE_OP"):
-            return MODEL_MAP.get(task_type, "local-executor")
+        # ── 咨询 ModelFallbackExecutor：若首选模型当前不可用，直接返回备选 ──
+        try:
+            from app.core.llm.model_fallback import get_fallback_executor
+            _fbe = get_fallback_executor()
+        except Exception:
+            _fbe = None
 
-        # 图片附件但任务非 PAINTER → 视觉模型
-        if has_image and task_type not in ("PAINTER", "VISION"):
-            return MODEL_MAP.get("VISION", MODEL_MAP.get("CHAT", "gemini-3-flash-preview"))
+        def _avail(preferred: str, fb_task: str = task_type) -> str:
+            """若 preferred 当前可用则直接返回；否则从降级链取第一个可用模型。"""
+            if _fbe and not _fbe.is_available(preferred):
+                alt = _fbe.get_best_available(task_type=fb_task, preferred=preferred)
+                if alt and alt != preferred:
+                    import logging as _log
+                    _log.getLogger(__name__).warning(
+                        "[Dispatcher] 模型 %s 当前不可用，改用 %s (task=%s)",
+                        preferred, alt, task_type,
+                    )
+                    return alt
+            return preferred
 
-        # 优先检查调用方手动注入的复杂度变体键（如 FILE_GEN_COMPLEX）
+        if task_type == "FILE_GEN":
+            base = MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
+            if complexity == "complex":
+                base = MODEL_MAP.get("COMPLEX", "gemini-3.1-pro-preview")
+            return _avail(base)
+
+        if task_type == "DOC_ANNOTATE":
+            if complexity == "complex":
+                return _avail(MODEL_MAP.get("COMPLEX", "gemini-3.1-pro-preview"))
+            return _avail(MODEL_MAP.get("DOC_ANNOTATE", "gemini-3.1-pro-preview"))
+
+        if task_type == "RESEARCH":
+            return _avail(MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025"))
+
+        if task_type == "CODER":
+            return _avail(MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
+
+        # 多步复杂任务 → Pro 模型确保执行质量
+        if task_type == "MULTI_STEP":
+            return _avail(MODEL_MAP.get("MULTI_STEP", "gemini-3.1-pro-preview"))
+
+        # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
+        if task_type == "CHAT":
+            return _avail(MODEL_MAP.get("CHAT", "gemini-3-flash-preview"))
+
+        # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型
         if complexity == "complex":
-            complex_key = f"{task_type}_COMPLEX"
-            if complex_key in MODEL_MAP:
-                return MODEL_MAP[complex_key]
-            # 有标准键时，非 CHAT/本地任务统一升级到 COMPLEX 兜底
-            if task_type not in ("CHAT",) and "COMPLEX" in MODEL_MAP:
-                return MODEL_MAP["COMPLEX"]
+            return _avail(MODEL_MAP.get("COMPLEX", "gemini-2.5-flash"))
 
-        # 标准任务键查询
-        if task_type in MODEL_MAP:
-            return MODEL_MAP[task_type]
+        if has_image and task_type != "PAINTER":
+            return _avail(MODEL_MAP.get("VISION", MODEL_MAP.get("CHAT", "gemini-2.5-flash")), "VISION")
 
-        # 最终兜底
-        return MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+        return _avail(MODEL_MAP.get(task_type, MODEL_MAP.get("CHAT", "gemini-2.5-flash")))
 
     # ── LangGraph 工作流集成 ────────────────────────────────────────────────
     @classmethod

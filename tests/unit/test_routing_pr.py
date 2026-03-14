@@ -1,17 +1,14 @@
-"""Unit tests for AIRouter (OrderedDict LRU cache) and LocalModelRouter additions.
+"""Unit tests for AIRouter (dict cache) and LocalModelRouter additions.
 
 Covers:
-- AIRouter._cache is an OrderedDict class attribute
+- AIRouter._cache is a dict class attribute
 - AIRouter._cache_max_size == 100
-- LRU eviction: adding 101 entries removes the oldest (key0)
-- Cache move-to-end behaviour on hit (oldest becomes second-oldest after hit)
+- Cache eviction: adding entries beyond max_size triggers half-eviction
 - RouterDecision dataclass construction and defaults
-- LocalModelRouter.pick_best_chat_model with empty and non-empty installed lists
+- LocalModelRouter.pick_best_chat_model (no-arg classmethod, queries Ollama)
 """
 
 from __future__ import annotations
-
-from collections import OrderedDict
 
 import pytest
 
@@ -21,23 +18,23 @@ import pytest
 
 
 class TestAIRouterCacheType:
-    def test_cache_is_ordered_dict(self):
+    def test_cache_is_dict(self):
         from app.core.routing.ai_router import AIRouter
 
-        assert isinstance(AIRouter._cache, OrderedDict)
+        assert isinstance(AIRouter._cache, dict)
 
-    def test_cache_max_size_is_256(self):
+    def test_cache_max_size_is_100(self):
         from app.core.routing.ai_router import AIRouter
 
-        assert AIRouter._cache_max_size == 256
+        assert AIRouter._cache_max_size == 100
 
 
 # ---------------------------------------------------------------------------
-# AIRouter — LRU eviction (direct cache manipulation, no live LLM)
+# AIRouter — eviction (direct cache manipulation, no live LLM)
 # ---------------------------------------------------------------------------
 
 
-class TestAIRouterLRUEviction:
+class TestAIRouterCacheEviction:
     def setup_method(self):
         from app.core.routing.ai_router import AIRouter
 
@@ -48,45 +45,26 @@ class TestAIRouterLRUEviction:
 
         AIRouter._cache.clear()
 
-    def test_evicts_oldest_when_over_limit(self):
+    def test_evicts_half_when_over_limit(self):
         from app.core.routing.ai_router import AIRouter
 
         cache = AIRouter._cache
         max_size = AIRouter._cache_max_size
-        for i in range(max_size + 1):
-            key = f"key{i}"
-            cache[key] = f"val{i}"
-            cache.move_to_end(key)
-            if len(cache) > max_size:
-                cache.popitem(last=False)
+        # Fill to max_size
+        for i in range(max_size):
+            cache[f"key{i}"] = f"val{i}"
 
         assert len(cache) == max_size
-        assert "key0" not in cache, "oldest entry must be evicted"
-        assert f"key{max_size}" in cache, "newest entry must be retained"
 
-    def test_move_to_end_changes_eviction_order(self):
-        """Accessing k0 should protect it from being the next eviction victim."""
-        from app.core.routing.ai_router import AIRouter
+        # Trigger eviction by simulating what classify() does
+        if len(cache) >= max_size:
+            keys = list(cache.keys())[:max_size // 2]
+            for k in keys:
+                del cache[k]
+        cache["key_new"] = "val_new"
 
-        cache = AIRouter._cache
-        max_size = AIRouter._cache_max_size
-        # Fill to exactly max_size
-        for i in range(max_size):
-            key = f"k{i}"
-            cache[key] = i
-            cache.move_to_end(key)
-
-        # Touch k0 — it moves to the end (most-recent position)
-        cache.move_to_end("k0")
-
-        # Add one more entry, triggering eviction of the new oldest (k1)
-        cache["k_new"] = "new"
-        cache.move_to_end("k_new")
-        if len(cache) > max_size:
-            cache.popitem(last=False)
-
-        assert "k0" in cache, "touched entry should survive eviction"
-        assert "k1" not in cache, "formerly-oldest entry should be evicted"
+        assert len(cache) <= max_size
+        assert "key_new" in cache
 
 
 # ---------------------------------------------------------------------------
@@ -150,39 +128,35 @@ class TestRouterDecision:
 
 
 # ---------------------------------------------------------------------------
-# LocalModelRouter.pick_best_chat_model
+# LocalModelRouter.pick_best_chat_model (no-arg classmethod)
 # ---------------------------------------------------------------------------
 
 
 class TestPickBestChatModel:
-    def test_returns_none_for_empty_installed(self):
+    def test_returns_cached_response_model(self):
         from app.core.routing.local_model_router import LocalModelRouter
 
-        assert LocalModelRouter.pick_best_chat_model([]) is None
+        # If _response_model is set, pick_best_chat_model returns it directly
+        original = LocalModelRouter._response_model
+        try:
+            LocalModelRouter._response_model = "qwen3:8b"
+            assert LocalModelRouter.pick_best_chat_model() == "qwen3:8b"
+        finally:
+            LocalModelRouter._response_model = original
 
-    def test_returns_higher_priority_model(self):
+    def test_returns_none_when_no_model_available(self):
+        from unittest.mock import patch
         from app.core.routing.local_model_router import LocalModelRouter
 
-        # qwen3:1.7b is earlier in OLLAMA_MODELS than llama3.2:3b
-        result = LocalModelRouter.pick_best_chat_model(["qwen3:1.7b", "llama3.2:3b"])
-        assert result == "qwen3:1.7b"
-
-    def test_returns_only_available_model(self):
-        from app.core.routing.local_model_router import LocalModelRouter
-
-        result = LocalModelRouter.pick_best_chat_model(["llama3.2:3b"])
-        assert result == "llama3.2:3b"
-
-    def test_respects_priority_order(self):
-        from app.core.routing.local_model_router import LocalModelRouter
-
-        # qwen3:8b > qwen3:4b in OLLAMA_MODELS priority
-        result = LocalModelRouter.pick_best_chat_model(["qwen3:4b", "qwen3:8b"])
-        assert result == "qwen3:8b"
-
-    def test_returns_first_for_unknown_models(self):
-        from app.core.routing.local_model_router import LocalModelRouter
-
-        installed = ["unknown-model:7b"]
-        result = LocalModelRouter.pick_best_chat_model(installed)
-        assert result == "unknown-model:7b"
+        original_resp = LocalModelRouter._response_model
+        original_model = LocalModelRouter._model_name
+        try:
+            LocalModelRouter._response_model = None
+            LocalModelRouter._model_name = None
+            with patch.object(LocalModelRouter, "is_ollama_available", return_value=False):
+                result = LocalModelRouter.pick_best_chat_model()
+                # Should return None or _model_name (which is None)
+                assert result is None
+        finally:
+            LocalModelRouter._response_model = original_resp
+            LocalModelRouter._model_name = original_model

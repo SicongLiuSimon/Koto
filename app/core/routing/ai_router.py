@@ -1,15 +1,54 @@
-﻿import threading
+import threading
 import hashlib
-import json
-from collections import OrderedDict
 # google.genai.types 延迟到 classify() 内部加载，避免启动时加载 (~4.7s)
 
 
 class AIRouter:
     """
     基于轻量级 AI 模型的智能任务路由器
-    使用 gemini-2.0-flash-lite 进行任务分类
+    默认使用 gemini-2.5-flash，如不可用则自动降级至 gemini-2.0-flash / gemini-2.0-flash-lite
     """
+
+    # 路由器当前使用的模型（由 ModelManager 初始化后可更新；不可用时自动降级）
+    _router_model: str = "gemini-2.5-flash"
+
+    # 路由模型降级链（所有模型必须支持 generate_content，不能是 interactions_only）
+    _ROUTER_MODEL_CHAIN: list = [
+        "gemini-2.5-flash",       # 首选：最快且兼容 generate_content 的模型
+        "gemini-2.0-flash",       # 备选1
+        "gemini-2.0-flash-lite",  # 备选2：轻量级，几乎必然可用
+    ]
+
+    # 已知 Interactions-only 模型前缀（不能用 generate_content，拒绝设为路由模型）
+    _INTERACTIONS_ONLY_PREFIXES: tuple = (
+        "gemini-3-flash-preview", "gemini-3-pro-preview", "deep-research-",
+    )
+
+    # 判定模型不可用的错误信号词
+    _MODEL_UNAVAILABLE_KEYWORDS: tuple = (
+        "404", "not found", "not supported", "unavailable", "deprecated",
+        "invalid_argument", "is not supported", "does not exist",
+        "interactions api only", "interactions only",
+    )
+
+    @classmethod
+    def set_router_model(cls, model_id: str) -> None:
+        """由 ModelManager 在发现可用模型后调用，切换路由器使用的轻量模型。
+        会拒绝 Interactions-only 模型（不兼容 generate_content）。"""
+        if not model_id:
+            return
+        if any(model_id.startswith(p) for p in cls._INTERACTIONS_ONLY_PREFIXES):
+            print(f"[AIRouter] ⚠️ 拒绝设置 Interactions-only 模型为路由器: {model_id}")
+            return
+        if model_id != cls._router_model:
+            cls._router_model = model_id
+            print(f"[AIRouter] 路由模型已更新: {model_id}")
+
+    @classmethod
+    def _is_model_unavailable(cls, error_str: str) -> bool:
+        """Return True if the error indicates the model is not found / unsupported."""
+        err_lower = error_str.lower()
+        return any(kw in err_lower for kw in cls._MODEL_UNAVAILABLE_KEYWORDS)
 
     # 路由器专用系统指令
     ROUTER_INSTRUCTION = """你是任务分类器。根据用户输入判断任务类型。只输出一个类型名称。
@@ -43,8 +82,8 @@ class AIRouter:
 
 只输出类型名称，如: CHAT"""
 
-    # 缓存最近的分类结果（OrderedDict 实现标准 LRU 淡汰）
-    _cache: "OrderedDict" = OrderedDict()
+    # 缓存最近的分类结果（避免重复调用）
+    _cache = {}
     _cache_max_size = 100
     
     @classmethod
@@ -66,7 +105,6 @@ class AIRouter:
         # Check cache (thread-safe)
         cache_key = hashlib.md5(user_input.encode()).hexdigest()[:16]
         if cache_key in cls._cache:
-            cls._cache.move_to_end(cache_key)  # 更新访问顺序
             cached = cls._cache[cache_key]
             print(f"[AIRouter] Cache hit: {cached}")
             return cached[0], cached[1], "Cache"
@@ -75,43 +113,47 @@ class AIRouter:
             result_holder = {"task": None, "error": None}
 
             def call_model():
-                try:
-                    from google.genai import types
-
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",  # 最快的模型
-                        contents=user_input,
-                        config=types.GenerateContentConfig(
-                            system_instruction=cls.ROUTER_INSTRUCTION,
-                            max_output_tokens=20,  # 只需要一个词
-                            temperature=0.1,  # 低温度，更确定性
-                        ),
-                    )
-                    if response.candidates and response.candidates[0].content.parts:
-                        text = (
-                            response.candidates[0].content.parts[0].text.strip().upper()
+                from google.genai import types
+                valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
+                               "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+                # 构建尝试顺序：当前模型优先，再按降级链补全
+                models_to_try = [cls._router_model]
+                for m in cls._ROUTER_MODEL_CHAIN:
+                    if m not in models_to_try:
+                        models_to_try.append(m)
+                for model_id in models_to_try:
+                    try:
+                        response = client.models.generate_content(
+                            model=model_id,
+                            contents=user_input,
+                            config=types.GenerateContentConfig(
+                                system_instruction=cls.ROUTER_INSTRUCTION,
+                                max_output_tokens=20,
+                                temperature=0.1,
+                            )
                         )
-                        # 清理输出
-                        valid_tasks = [
-                            "PAINTER",
-                            "FILE_GEN",
-                            "DOC_ANNOTATE",
-                            "RESEARCH",
-                            "CODER",
-                            "FILE_SEARCH",
-                            "SYSTEM",
-                            "AGENT",
-                            "WEB_SEARCH",
-                            "CHAT",
-                        ]
-                        for task in valid_tasks:
-                            if task in text:
-                                result_holder["task"] = task
-                                return
-                        result_holder["task"] = "CHAT"  # 默认
-                except Exception as e:
-                    result_holder["error"] = str(e)
-
+                        if response.candidates and response.candidates[0].content.parts:
+                            text = response.candidates[0].content.parts[0].text.strip().upper()
+                            for task in valid_tasks:
+                                if task in text:
+                                    result_holder['task'] = task
+                                    break
+                            else:
+                                result_holder['task'] = "CHAT"
+                        else:
+                            result_holder['task'] = "CHAT"
+                        if model_id != cls._router_model:
+                            print(f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}")
+                            cls._router_model = model_id
+                        return
+                    except Exception as e:
+                        if cls._is_model_unavailable(str(e)):
+                            print(f"[AIRouter] 模型 {model_id} 不可用，尝试下一个: {e}")
+                            continue
+                        result_holder['error'] = str(e)
+                        return
+                result_holder['error'] = "所有路由模型均不可用"
+            
             # 带超时的调用
             thread = threading.Thread(target=call_model, daemon=True)
             thread.start()
@@ -127,11 +169,13 @@ class AIRouter:
 
             task = result_holder["task"]
             if task:
-                # 写入缓存，淡汰最久未使用的条目（LRU）
+                # 缓存结果
+                if len(cls._cache) >= cls._cache_max_size:
+                    # 清除一半缓存
+                    keys = list(cls._cache.keys())[:cls._cache_max_size // 2]
+                    for k in keys:
+                        del cls._cache[k]
                 cls._cache[cache_key] = (task, "🤖 AI")
-                cls._cache.move_to_end(cache_key)
-                if len(cls._cache) > cls._cache_max_size:
-                    cls._cache.popitem(last=False)
                 
                 print(f"[AIRouter] Classified as: {task}")
                 return task, "🤖 AI", "AI"
@@ -181,7 +225,6 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
         """
         cache_key = "h:" + hashlib.md5(user_input.encode()).hexdigest()[:16]
         if cache_key in cls._cache:
-            cls._cache.move_to_end(cache_key)  # 更新访问顺序
             cached = cls._cache[cache_key]
             return cached[0], cached[1], "Cache", cached[2] if len(cached) > 2 else None
 
@@ -189,68 +232,66 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             result_holder = {"task": None, "hint": None, "error": None}
 
             def call_model():
-                try:
-                    from google.genai import types
-
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=user_input,
-                        config=types.GenerateContentConfig(
-                            system_instruction=cls.ROUTER_WITH_HINT_INSTRUCTION,
-                            max_output_tokens=150,
-                            temperature=0.1,
-                            response_mime_type="application/json",
-                        ),
-                    )
-                    if response.candidates and response.candidates[0].content.parts:
-                        raw = response.candidates[0].content.parts[0].text.strip()
-                        try:
-                            data = json.loads(raw)
-                            task = str(data.get("task", "")).strip().upper()
-                            hint_raw = data.get("hint") or None
-                            valid_tasks = [
-                                "PAINTER",
-                                "FILE_GEN",
-                                "DOC_ANNOTATE",
-                                "RESEARCH",
-                                "CODER",
-                                "FILE_SEARCH",
-                                "SYSTEM",
-                                "AGENT",
-                                "WEB_SEARCH",
-                                "CHAT",
-                            ]
-                            if task in valid_tasks:
-                                result_holder["task"] = task
-                                if (
-                                    hint_raw
-                                    and isinstance(hint_raw, str)
-                                    and len(hint_raw.strip()) > 3
-                                ):
-                                    result_holder["hint"] = hint_raw.strip()
-                                return
-                        except Exception:
-                            pass
-                        # Fallback: plain text extraction
-                        valid_tasks = [
-                            "PAINTER",
-                            "FILE_GEN",
-                            "DOC_ANNOTATE",
-                            "RESEARCH",
-                            "CODER",
-                            "FILE_SEARCH",
-                            "SYSTEM",
-                            "AGENT",
-                            "WEB_SEARCH",
-                            "CHAT",
-                        ]
-                        for task in valid_tasks:
-                            if task in raw.upper():
-                                result_holder["task"] = task
-                                return
-                        result_holder["task"] = "CHAT"
-                except Exception as e:
-                    result_holder["error"] = str(e)
+                from google.genai import types
+                import json as _json
+                valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
+                               "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+                # 构建尝试顺序：当前模型优先，再按降级链补全
+                models_to_try = [cls._router_model]
+                for m in cls._ROUTER_MODEL_CHAIN:
+                    if m not in models_to_try:
+                        models_to_try.append(m)
+                for model_id in models_to_try:
+                    try:
+                        response = client.models.generate_content(
+                            model=model_id,
+                            contents=user_input,
+                            config=types.GenerateContentConfig(
+                                system_instruction=cls.ROUTER_WITH_HINT_INSTRUCTION,
+                                max_output_tokens=150,
+                                temperature=0.1,
+                                response_mime_type="application/json",
+                            )
+                        )
+                        if response.candidates and response.candidates[0].content.parts:
+                            raw = response.candidates[0].content.parts[0].text.strip()
+                            # 优先 JSON 解析
+                            try:
+                                data = _json.loads(raw)
+                                task = str(data.get("task", "")).strip().upper()
+                                hint_raw = data.get("hint") or None
+                                if task in valid_tasks:
+                                    result_holder['task'] = task
+                                    if hint_raw and isinstance(hint_raw, str) and len(hint_raw.strip()) > 3:
+                                        result_holder['hint'] = hint_raw.strip()
+                                    if model_id != cls._router_model:
+                                        print(f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}")
+                                        cls._router_model = model_id
+                                    return
+                            except Exception:
+                                pass
+                            # 纯文本回退解析
+                            for task in valid_tasks:
+                                if task in raw.upper():
+                                    result_holder['task'] = task
+                                    if model_id != cls._router_model:
+                                        print(f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}")
+                                        cls._router_model = model_id
+                                    return
+                            result_holder['task'] = "CHAT"
+                        else:
+                            result_holder['task'] = "CHAT"
+                        if model_id != cls._router_model:
+                            print(f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}")
+                            cls._router_model = model_id
+                        return
+                    except Exception as e:
+                        if cls._is_model_unavailable(str(e)):
+                            print(f"[AIRouter] 模型 {model_id} 不可用，尝试下一个: {e}")
+                            continue
+                        result_holder['error'] = str(e)
+                        return
+                result_holder['error'] = "所有路由模型均不可用"
 
             thread = threading.Thread(target=call_model, daemon=True)
             thread.start()
@@ -268,11 +309,12 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             task = result_holder["task"]
             hint = result_holder["hint"]
             if task:
-                # 写入缓存（LRU）
+                # Cache: store task + hint
+                if len(cls._cache) >= cls._cache_max_size:
+                    keys = list(cls._cache.keys())[:cls._cache_max_size // 2]
+                    for k in keys:
+                        del cls._cache[k]
                 cls._cache[cache_key] = (task, "🤖 AI+Hint", hint)
-                cls._cache.move_to_end(cache_key)
-                if len(cls._cache) > cls._cache_max_size:
-                    cls._cache.popitem(last=False)
                 print(f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}")
                 return task, "🤖 AI+Hint", "AI", hint
 
@@ -283,5 +325,3 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             print(f"[AIRouter] classify_with_hint exception: {e}")
             task, conf, src = cls.classify(client, user_input, timeout=timeout)
             return task, conf, src, None
-
-
