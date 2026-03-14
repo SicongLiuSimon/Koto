@@ -285,7 +285,7 @@ function showNotification(message, type = 'info', duration = 3000) {
 
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
-    notification.innerHTML = `<span>${message}</span><button class="notif-dismiss" onclick="this.parentElement.remove()" title="关闭">×</button>`;
+    notification.innerHTML = `<span>${escapeHtml(message)}</span><button class="notif-dismiss" onclick="this.parentElement.remove()" title="关闭">×</button>`;
     stack.appendChild(notification);
 
     // 自动消失
