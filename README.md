@@ -5,6 +5,10 @@
 [![Docker Build](https://github.com/Loganwon/Koto/actions/workflows/docker.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/docker.yml)
 [![Release](https://github.com/Loganwon/Koto/actions/workflows/release.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/release.yml)
 
+> 🌐 **Marketing site** — a standalone landing page lives in [`docs/index.html`](docs/index.html).
+> To publish it on GitHub Pages: **Settings → Pages → Source: Deploy from a branch → `main` / `/docs` → Save**.
+> It will be live at `https://loganwon.github.io/Koto/`.
+
 Koto 是一个基于多模型 AI 的桌面 / 云端智能助手，支持多轮对话、长期记忆、知识库、文件分析、语音交互和工作流自动化。
 
 ## 快速开始（本地运行）
