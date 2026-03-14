@@ -18,13 +18,13 @@
     "required_json_keys": [],
     "description": "以逐段批注格式输出，包含修改建议和修改理由"
   },
-  "bound_tools": [],
+  "bound_tools": ["read_docx_paragraphs", "annotate_document", "write_file"],
   "task_types": [
     "DOC_ANNOTATE"
   ],
   "enabled": false,
   "prompt": "\n\n## 📚 领域要求：学术批注\n- 采用「原文 → 修改建议 → 修改理由」三段式逐段批注\n- 重点关注：措辞精确性、被动语态使用、逻辑连接词、数据引用格式（APA/GB/MLA）\n- 标注可能引发审稿人质疑的逻辑断层或过度主张\n- 区分「必须修改」（❌）和「建议优化」（⚠️）两个层级\n- 最终附「总体评估」：语言水平评分、逻辑严密性评分、是否符合期刊投稿规范",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "koto",
   "created_at": "2026-03-07T00:00:00Z",
   "tags": [
@@ -32,5 +32,35 @@
     "annotation",
     "polishing",
     "research"
-  ]
+  ],
+  "plan_template": [
+    {
+      "name": "read_doc",
+      "description": "读取文档段落结构，了解整体内容和规模",
+      "step_type": "tool",
+      "depends_on": [],
+      "executor_tools": ["read_docx_paragraphs"],
+      "expected_output": "文档段落列表"
+    },
+    {
+      "name": "apply_annotations",
+      "description": "执行学术批注：逐段识别语言问题并生成修改建议",
+      "step_type": "tool",
+      "depends_on": ["read_doc"],
+      "executor_tools": ["annotate_document"],
+      "executor_prompt": "## 📚 执行学术批注\n重点关注：措辞精确性、逻辑连接词、被动语态、引用格式。\n每处修改须提供：原文 → 修改建议 → 修改理由。",
+      "expected_output": "生成 _revised 副本，并返回修改处数统计"
+    },
+    {
+      "name": "summarize",
+      "description": "汇总批注结果，生成评估报告",
+      "step_type": "llm",
+      "depends_on": ["apply_annotations"],
+      "executor_tools": [],
+      "executor_prompt": "根据上方的标注结果，输出：总体评估（语言水平/逻辑严密性/投稿规范各1-5分）+ Top 3 必须修复项。",
+      "expected_output": "Markdown 评估报告"
+    }
+  ],
+  "executor_tools": ["read_docx_paragraphs", "annotate_document"],
+  "entry_point": "app.core.agent.plugins.annotation_plugin:AnnotationPlugin.annotate_document"
 }

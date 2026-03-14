@@ -1,0 +1,57 @@
+{
+  "id": "file_converter",
+  "name": "文件格式转换",
+  "icon": "🔄",
+  "category": "domain",
+  "description": "将任意文件转换为另一种格式：PDF/Word/TXT/Markdown/Excel/CSV/PPT/图片互转",
+  "intent_description": "用户提到「转换」「转成」「导出为」「另存为」某种格式，或上传文件后要求改变格式时",
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [],
+    "must_not_contain": [],
+    "min_chars": 30,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "简短的转换结果通知，包含文件路径和可能的格式降级警告"
+  },
+  "bound_tools": [
+    "convert_file",
+    "list_conversions"
+  ],
+  "task_types": [
+    "CHAT",
+    "FILE_GEN"
+  ],
+  "priority": 78,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 🔄 能力增强：文件格式转换专家\n\n你现在具备真实的文件格式转换能力，可以通过工具直接执行转换，无需借助外部软件。\n\n### 支持的转换矩阵\n\n| 来源格式 | 可转换为 |\n|----------|----------|\n| .docx / .doc | PDF · TXT · MD（.doc 还可转 DOCX）|\n| .pdf | DOCX · TXT |\n| .txt | DOCX · PDF · MD |\n| .md / .markdown | DOCX · PDF · HTML · TXT |\n| .xlsx / .xls | CSV · TXT（.xls 还可转 XLSX）|\n| .csv | XLSX |\n| .pptx / .ppt | TXT · PDF |\n| 图片 (.jpg/.png/.webp/.bmp/.gif) | 互转任意图片格式 |\n\n### 工作流程\n\n**步骤 1 — 理解需求**\n当用户提到「转换」「转成」「导出为」「变成 XX 格式」时，识别：\n- 源文件路径（来自上传或用户提供的路径）\n- 目标格式（如 pdf / docx / csv / png 等）\n\n**步骤 2 — 执行转换**\n调用 `convert_file` 工具：\n```\nconvert_file(\n  file_path  = \"<源文件绝对路径>\",\n  target_format = \"<目标格式，如 pdf>\",\n  output_path = \"\"   # 留空=输出到源文件同目录\n)\n```\n\n**步骤 3 — 反馈结果**\n- 成功：告知用户输出文件路径，如有降级警告（如缺少 Word/LibreOffice）一并说明\n- 失败：给出明确原因和建议（如该格式不支持此转换）\n\n### 不确定格式支持时\n先调用 `list_conversions(file_ext=\".pdf\")` 确认该格式的支持目标列表，再执行转换。\n\n### 约束\n- **不要** 在没有文件路径的情况下调用工具；如用户未提供路径，先请用户上传/告知路径\n- **不要** 凭空捏造转换结果；必须实际调用工具执行\n- 如工具返回降级警告（⚠️），务必原文转告用户\n\n### 示例对话\n\n用户：「帮我把这个报告 .docx 转成 PDF」  \n→ 调用 `convert_file(file_path=\"...\", target_format=\"pdf\")`  \n→ 回复：「✅ 已转换完成：report.docx → report.pdf，保存在 D:\\\\Documents\\\\report.pdf」\n\n用户：「把刚刚上传的图片转成 PNG」  \n→ 调用 `convert_file(file_path=\"...\", target_format=\"png\")`  \n→ 如源文件已是 PNG：回复「源文件已是 PNG 格式，无需转换」\n\n用户：「PDF 能直接转成 Excel 吗？」  \n→ 调用 `list_conversions(file_ext=\".pdf\")`  \n→ 回复：「PDF 直接转 Excel 暂不支持。可以先转为 TXT（`convert_file(..., target_format='txt')`），然后手动整理为 Excel，或告诉我 PDF 里的表格内容由我来帮你整理」",
+  "entry_point": "web.file_converter:skill_entry",
+  "plan_template": [],
+  "executor_tools": [
+    "convert_file",
+    "list_conversions"
+  ],
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-14T00:00:00Z",
+  "tags": [
+    "convert",
+    "format",
+    "transform",
+    "转换",
+    "格式转换",
+    "导出",
+    "pdf",
+    "word",
+    "docx",
+    "excel",
+    "csv",
+    "markdown",
+    "图片转换",
+    "ppt",
+    "txt",
+    "html",
+    "文件处理"
+  ]
+}

@@ -53,117 +53,51 @@ BUILTIN_SKILLS: List[Dict] = [
         "id": "step_by_step",
         "name": "步骤化输出",
         "icon": "🪜",
-        "category": "agent",
-        "skill_nature": "system",
-        "description": "Copilot 风格：实时告知每步在做什么，自动适配操作/排查/复杂任务等场景",
-        "intent_description": "用户需要操作指南、安装配置、故障排查、复杂多步任务或任何需要实时知晓进度的场景",
+        "category": "behavior",
+        "skill_nature": "model_hint",
+        "description": "将回答拆解为带编号的清晰步骤，自动适配操作/排查/决策等不同场景",
+        "intent_description": "用户需要操作指南、安装配置步骤、故障排查流程、学习路径或任何有先后顺序的内容",
         "task_types": [],
         "prompt": (
-            "\n\n## 🪜 行为要求：步骤化实时输出（Copilot 风格）"
-            "\n\n### 核心原则：让用户实时知道你在做什么"
-            "\n每次开始新操作前，先输出一行简短的状态通知，再执行。这让用户像看 Copilot 一样"
-            "\n清楚地知道每一步发生了什么。"
-            "\n\n### 第一步：判断任务类型（必须检查）"
-            "\n- **复杂任务**（需要多步操作/工具调用/多阶段处理）→ 使用「任务规划 + 逐步执行」格式"
-            "\n- **操作教程**（安装、配置、使用指南）→ 使用「标准步骤」格式"
-            "\n- **故障排查**（含「报错/失败/bug/无法」关键词）→ 使用「四步诊断」格式"
-            "\n- **简单问答**（单一事实、是否判断、简单计算）→ 直接回答，不强行加步骤"
-            "\n\n### 实时状态通知规则（适用所有类型）"
-            "\n在每次调用工具或开始新子任务**之前**，先输出一行状态通知："
-            "\n- 格式：`⏳ 正在[动词][对象]...` （≤25字）"
-            "\n- 示例：`⏳ 正在搜索今日黄金现货价格...`"
-            "\n- 示例：`⏳ 正在读取文件内容...`"
-            "\n- 示例：`⏳ 正在对比两组数据...`"
-            "\n得到工具结果后，输出一行简短确认："
-            "\n- 格式：`✅ [结果摘要]` （≤25字）"
-            "\n- 示例：`✅ 已获取金价数据，正在整理`"
-            "\n- 示例：`✅ 文件读取成功，共 1024 行`"
-            "\n\n### 复杂任务格式（需要多步操作时）"
+            "\n\n## 🪜 行为要求：步骤化输出"
+            "\n\n**第一步：判断是否适合步骤化（必须检查）**"
+            "\n- ✅ 适用：操作流程、安装配置、故障排查、学习路径、多阶段决策"
+            "\n- ❌ 不适用：单一事实、词汇定义、是/否判断、简单数值计算、情感回应"
+            "\n  → 不适用时，直接给出结论，不要强行加编号。"
+            "\n\n**操作 / 教程类问题 — 标准格式**"
             "\n```"
-            "\n📋 任务计划："
-            "\n  步骤 1：[简洁描述]"
-            "\n  步骤 2：[简洁描述]"
-            "\n  步骤 3：[简洁描述]"
+            "\n📋 【前提条件】（无则省略）"
+            "\n- 所需工具 / 权限 / 基础知识"
             "\n"
-            "\n⏳ 正在执行步骤 1：[描述]..."
-            "\n✅ 步骤 1 完成：[结果摘要]"
+            "\n步骤 1：[简洁动词短语，说明目标]"
+            "\n  ▸ 操作：（每步限 1-3 个动作；内容复杂时用子步骤 1.1 / 1.2 展开）"
+            "\n  ▸ 预期结果：（完成操作后应看到或得到什么）"
+            "\n  ⚠️ 注意：（仅在有易错点或风险时写，否则省略）"
             "\n"
-            "\n⏳ 正在执行步骤 2：[描述]..."
-            "\n✅ 步骤 2 完成：[结果摘要]"
+            "\n步骤 2：…"
+            "\n（依此格式直到流程完成）"
             "\n"
-            "\n---"
-            "\n📊 最终结果："
-            "\n[完整回答]"
+            "\n✅ 完成验证：[如何确认全部步骤执行成功的具体指标]"
+            "\n🔁 常见失败处理：[最高频的失败场景及对应排查方向]"
             "\n```"
-            "\n\n### 操作 / 教程格式（指导用户操作时）"
+            "\n\n**故障排查 / 调试类问题 — 四步诊断格式**"
+            "\n（当用户问题含「报错/异常/失败/不正常/bug/无法」等关键词时优先用此格式）"
             "\n```"
-            "\n📋 前提条件（无则省略）：[所需工具/权限]"
-            "\n"
-            "\n**步骤 1：[动词短语说明目标]**"
-            "\n  ▸ 操作：（≤3个动作；复杂时展开 1.1/1.2）"
-            "\n  ▸ 预期结果：（完成后应看到什么）"
-            "\n  ⚠️ 注意：（仅有易错点时写）"
-            "\n"
-            "\n**步骤 2：…**"
-            "\n"
-            "\n✅ 验证：[成功的具体指标]"
-            "\n🔁 常见问题：[最高频失败场景及排查方向]"
+            "\n步骤 1：🔍 定位问题"
+            "\n  ▸ 从错误信息/现象出发，排除明显原因，缩小范围"
+            "\n步骤 2：🧪 验证假设"
+            "\n  ▸ 给出能快速确认根因的最小测试命令 / 操作"
+            "\n步骤 3：🔧 应用修复"
+            "\n  ▸ 针对根本原因的最小改动方案（附代码块如适用）"
+            "\n步骤 4：✅ 验证修复"
+            "\n  ▸ 执行后应看到的成功信号"
             "\n```"
-            "\n\n### 故障排查格式（报错/异常/失败场景）"
-            "\n```"
-            "\n**步骤 1：🔍 定位问题** — 从报错信息出发，缩小范围"
-            "\n**步骤 2：🧪 验证假设** — 最小测试命令快速确认根因"
-            "\n**步骤 3：🔧 应用修复** — 最小改动方案（附代码块）"
-            "\n**步骤 4：✅ 验证修复** — 执行后应看到的成功信号"
-            "\n```"
-            "\n\n### 格式规范"
-            "\n- 步骤编号用阿拉伯数字，禁用「首先/其次/然后/最后」过渡词"
-            "\n- 状态通知用主动语态动词开头，不超过 25 字"
-            "\n- 代码独占代码块，不放在普通段落中"
-            "\n- 单步骤任务不加编号，直接给答案"
-            "\n- 完成后不写「总结一下以上步骤」等重复内容"
-        ),
-        "enabled": False,
-    },
-    {
-        "id": "complex_task_planner",
-        "name": "复杂任务规划",
-        "icon": "🗂️",
-        "category": "agent",
-        "skill_nature": "system",
-        "description": "针对多步骤复杂任务：先给出完整执行计划，再逐步执行并实时汇报进度",
-        "intent_description": "用户请求包含多个子任务、需要多步操作才能完成，例如「查询数据并生成报告」「搜索信息后整理对比」",
-        "task_types": ["AGENT", "MULTI_STEP", "RESEARCH"],
-        "prompt": (
-            "\n\n## 🗂️ 行为要求：复杂任务规划执行"
-            "\n\n**你负责执行复杂的多步骤任务，必须遵循以下流程：**"
-            "\n\n### Phase 1 — 任务规划（开始前必须输出）"
-            "\n收到任务后，立即输出完整执行计划："
-            "\n```"
-            "\n🗂️ 任务规划"
-            "\n├─ 步骤 1：[简洁描述，8字内]"
-            "\n├─ 步骤 2：[简洁描述，8字内]"
-            "\n├─ 步骤 3：[简洁描述，8字内]"
-            "\n└─ 步骤 N：[简洁描述，8字内]"
-            "\n预计共 N 步，开始执行..."
-            "\n```"
-            "\n\n### Phase 2 — 逐步执行（每步必须通知）"
-            "\n执行每个步骤时："
-            "\n1. **执行前**：输出 `⏳ [步骤 X/N] 正在[动作]...`"
-            "\n2. **执行后**：输出 `✅ [步骤 X/N] 完成 — [结果摘要，≤20字]`"
-            "\n3. **遇到问题**：输出 `⚠️ [步骤 X/N] 遇到问题：[简要说明]，尝试[备选方案]`"
-            "\n\n### Phase 3 — 汇总输出"
-            "\n所有步骤完成后："
-            "\n```"
-            "\n✅ 任务完成（共 N 步）"
-            "\n\n---"
-            "\n[完整的最终结果，使用标题、列表、代码块等清晰组织]"
-            "\n```"
-            "\n\n### 关键规则"
-            "\n- 每步执行前后都必须有状态通知，让用户始终知晓进度"
-            "\n- 步骤描述用动词开头（搜索/读取/分析/整理/生成）"
-            "\n- 发现任务无法完成的某步时，可以跳过并说明原因，继续后续步骤"
-            "\n- 最终结果要完整，不要用「如上所示」等省略方式"
+            "\n\n**格式规则**"
+            "\n- 步骤编号用阿拉伯数字（1、2、3），禁止「首先/其次/然后/最后」等过渡词"
+            "\n- 步骤描述用主动语态动词开头（「点击 X」而非「X 需要被点击」）"
+            "\n- 代码独占代码块，不嵌在普通段落行内"
+            "\n- 理想步骤数量 3-6 步；超过 7 步时将流程拆为「阶段」再细分"
+            "\n- 全部完成后不要再写「总结一下以上步骤…」重复内容"
         ),
         "enabled": False,
     },
@@ -618,7 +552,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "id": "long_term_memory",
         "name": "长期记忆",
         "icon": "🧠",
-        "category": "agent",
+        "category": "memory",
         "skill_nature": "system",
         "description": "跨会话记住用户偏好、项目背景和习惯，无需每次重复说明。通过「记忆」管理页面增删查看已存记忆。",
         "task_types": [],  # 所有任务类型均生效
@@ -1970,8 +1904,14 @@ class SkillManager:
 
             # 优先使用新版 SkillDefinition 的 render_prompt()
             skill_def = cls._def_registry.get(skill_id)
-            if skill_def and skill_def.system_prompt_template:
-                p = skill_def.render_prompt().strip()
+            if skill_def:
+                _is_domain = (
+                    getattr(skill_def.category, "value", skill_def.category) == "domain"
+                )
+                p = skill_def.render_prompt(
+                    with_examples=_is_domain,
+                    with_output_spec=_is_domain,
+                ).strip()
             else:
                 p = s.get("prompt", "").strip()
 
@@ -2024,8 +1964,14 @@ class SkillManager:
                 logger.debug(f"[SkillManager] 临时 Skill 不存在，跳过: {skill_id}")
                 continue
             skill_def = cls._def_registry.get(skill_id)
-            if skill_def and skill_def.system_prompt_template:
-                p = skill_def.render_prompt().strip()
+            if skill_def:
+                _is_domain = (
+                    getattr(skill_def.category, "value", skill_def.category) == "domain"
+                )
+                p = skill_def.render_prompt(
+                    with_examples=_is_domain,
+                    with_output_spec=_is_domain,
+                ).strip()
             else:
                 p = s.get("prompt", "").strip()
             if p:
@@ -2252,8 +2198,30 @@ class SkillManager:
                     with open(skill_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     skill_def = SkillDefinition.from_dict(data)
-                    # 自定义 Skill 不覆盖内置（内置在初始化时已先加载）
-                    if skill_def.id not in cls._def_registry:
+
+                    if skill_def.id in cls._def_registry:
+                        # 内置 Skill 已存在 —— 仅合并「能力扩展」字段：
+                        #   plan_template / executor_tools / entry_point / bound_tools
+                        # 其他核心字段（prompt / enabled 等）由内置版本维护，
+                        # 避免用户误覆盖内置行为。
+                        existing = cls._def_registry[skill_def.id]
+                        if skill_def.plan_template:
+                            existing.plan_template = skill_def.plan_template
+                        if skill_def.executor_tools:
+                            existing.executor_tools = skill_def.executor_tools
+                        if skill_def.entry_point:
+                            existing.entry_point = skill_def.entry_point
+                        if skill_def.bound_tools:
+                            existing.bound_tools = skill_def.bound_tools
+                        if skill_def.output_spec and skill_def.output_spec.description:
+                            existing.output_spec = skill_def.output_spec
+                        if skill_def.examples:
+                            existing.examples = skill_def.examples
+                        logger.debug(
+                            "[SkillManager] 内置 Skill '%s' 能力层已由 JSON 扩展",
+                            skill_def.id,
+                        )
+                    else:
                         cls._def_registry[skill_def.id] = skill_def
                         entry = {
                             "id": skill_def.id,

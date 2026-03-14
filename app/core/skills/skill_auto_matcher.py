@@ -89,10 +89,6 @@ class SkillAutoMatcher:
          "patterns": ["深入分析", "深度研究", "详细分析", "全面比较", "in-depth", "comprehensive"]},
         {"skill_id": "task_planner",
          "patterns": ["计划", "安排", "待办", "路线图", "拆解任务", "里程碑", "plan", "roadmap", "todo"]},
-        {"skill_id": "complex_task_planner",
-         "patterns": ["复杂任务", "多步骤", "分阶段", "系统化", "全套流程", "综合执行", "整体规划",
-                       "complex task", "multi-step", "全流程", "逐步完成", "分步执行",
-                       "帮我完成一个复杂", "我需要分多步", "step-by-step execution"]},
         {"skill_id": "data_analysis",
          "patterns": ["数据分析", "统计", "图表", "可视化", "趋势", "data analysis", "visualization"]},
         # ── 专项调试技能（必须在 debug_python 前，避免被截胡）──
@@ -959,7 +955,10 @@ class SkillAutoMatcher:
 
     @classmethod
     def _has_active_skills_for_task(cls, task_type: str) -> bool:
-        """判断当前 task_type 下是否已有用户手动启用的 Skill。"""
+        """判断当前 task_type 下是否已有用户手动启用的领域/工作流类 Skill。
+        behavior / memory / addon 等全局增强类 Skill 不计入判断，
+        避免它们阻止域技能的自动匹配。
+        """
         try:
             from app.core.skills.skill_manager import SkillManager
 
@@ -967,6 +966,9 @@ class SkillAutoMatcher:
             tt = task_type.upper() if task_type else ""
             for s in SkillManager._registry.values():
                 if not s.get("enabled", False):
+                    continue
+                # 只有 domain / workflow 类 Skill 才视为"已覆盖本次任务"
+                if s.get("category") not in ("domain", "workflow"):
                     continue
                 applicable = s.get("task_types", [])
                 if not applicable or tt in applicable:
@@ -977,12 +979,10 @@ class SkillAutoMatcher:
 
     @classmethod
     def _match_with_patterns(cls, user_input: str, candidates: List[dict]) -> List[str]:
-        """规则屎底：先查静态 _PATTERN_MAP，册履查 SkillBindingManager 用户意图绑定。"""
+        """规则兜底：简单关键词匹配，返回匹配到的 skill_id 列表。"""
         candidate_ids = {c["id"] for c in candidates}
         matched: List[str] = []
         lowered = user_input.lower()
-
-        # 静态内置匹配表
         for entry in cls._PATTERN_MAP:
             sid = entry["skill_id"]
             if sid not in candidate_ids:
@@ -991,22 +991,6 @@ class SkillAutoMatcher:
                 matched.append(sid)
                 if len(matched) >= _MAX_AUTO_SKILLS:
                     break
-
-        # 用户注册的意图绑定（导入失败时静默跳过）
-        if len(matched) < _MAX_AUTO_SKILLS:
-            try:
-                from app.core.skills.skill_trigger_binding import get_skill_binding_manager
-                user_matched = get_skill_binding_manager().match_intent(user_input)
-                seen = set(matched)
-                for sid in user_matched:
-                    if sid in candidate_ids and sid not in seen:
-                        matched.append(sid)
-                        seen.add(sid)
-                        if len(matched) >= _MAX_AUTO_SKILLS:
-                            break
-            except Exception:
-                pass
-
         return matched
 
     @classmethod
@@ -1116,11 +1100,6 @@ class SkillAutoMatcher:
         ----
         List[str]  : 推荐临时激活的 skill_id 列表；空列表表示不需要额外注入
         """
-        # ── 如果用户已经手动启用了适合本轮任务的 Skill，默认退出 ─────────────
-        if not force and cls._has_active_skills_for_task(task_type):
-            logger.debug(f"[AutoMatcher] 用户已启用 Skill，跳过自动匹配")
-            return []
-
         # ── 构建候选 Skill 目录 ─────────────────────────────────────────────
         candidates, catalog_text = cls._build_skill_catalog(task_type)
         if not candidates:
@@ -1128,20 +1107,27 @@ class SkillAutoMatcher:
 
         candidate_ids = {c["id"] for c in candidates}
 
-        # ── 优先尝试本地模型匹配 ────────────────────────────────────────────
-        model_result = cls._match_with_local_model(
-            user_input, task_type, catalog_text, candidate_ids
-        )
-        if model_result is not None:
-            return model_result
-
-        # ── 模型不可用时规则兜底 ────────────────────────────────────────────
+        # ── 规则匹配先行（快速、零成本） ──────────────────────────────────────
         pattern_result = cls._match_with_patterns(user_input, candidates)
         if pattern_result:
             logger.info(
-                f"[AutoMatcher] 📋 规则兜底匹配: {task_type} → {pattern_result}"
+                f"[AutoMatcher] 📋 规则匹配: {task_type} → {pattern_result}"
             )
-        return pattern_result
+            return pattern_result
+
+        # ── 如果已有活跃领域 Skill，跳过 LLM 调用（只节省 LLM 开销） ───────────
+        if not force and cls._has_active_skills_for_task(task_type):
+            logger.debug(f"[AutoMatcher] 用户已启用域 Skill，跳过 LLM 自动匹配")
+            return []
+
+        # ── 规则未命中，尝试本地模型语义匹配 ──────────────────────────────────
+        model_result = cls._match_with_local_model(
+            user_input, task_type, catalog_text, candidate_ids
+        )
+        if model_result:
+            return model_result
+
+        return []
 
     @classmethod
     def describe_matched(cls, skill_ids: List[str]) -> str:

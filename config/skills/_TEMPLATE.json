@@ -1,0 +1,131 @@
+{
+  "_comment": [
+    "====================================================================",
+    "  Koto Skill 创建模板  ─  参考 Anthropic 提示工程最佳实践",
+    "====================================================================",
+    "",
+    "【Anthropic 做了什么？】",
+    "  Anthropic 的 Prompt Library 和 Claude.ai Projects 遵循同一套结构：",
+    "    1. 明确角色（Role）         ← 你在 prompt 里的 '你是一个...'",
+    "    2. 明确任务（Task）         ← 遇到什么输入，要做什么",
+    "    3. 少样本示例（Examples）   ← 最关键：2-3 个输入/输出例子",
+    "    4. 输出格式（Format）       ← 精确告知格式，否则模型随机发挥",
+    "    5. 约束规则（Constraints） ← 不允许做什么",
+    "",
+    "  核心结论：小白想让 skill 好用，最重要的不是写复杂的 prompt，",
+    "  而是 '写够 2-3 个具体例子'。模型会从例子中学到细节，",
+    "  就算 prompt 写得很简单，效果也会远优于没有例子的长篇 prompt。",
+    "",
+    "【如何使用本模板】",
+    "  1. 把这个文件复制成 my_skill.json（文件名 = skill id，小写+下划线）",
+    "  2. 删掉所有 _comment 字段",
+    "  3. 填写各个字段，不需要全填，最少填：name / description / prompt / examples",
+    "  4. 放到 config/skills/ 目录，重启 Koto 即可生效"
+  ],
+
+  "id": "my_custom_skill",
+  "_id_comment": "唯一ID，小写字母+下划线，不能和其他 skill 重复",
+
+  "name": "我的自定义技能",
+  "icon": "✨",
+  "_icon_comment": "直接输入一个 emoji，会显示在 UI 上",
+
+  "category": "domain",
+  "_category_comment": "三选一：behavior（改变 AI 行为）| style（改变风格）| domain（专业领域技能）",
+
+  "description": "简短描述这个 skill 是干什么的（20 字以内，显示在 Skill 列表里）",
+
+  "intent_description": "描述什么情况下应该自动激活这个 skill（30 字以内，AI 匹配意图用）",
+  "_intent_description_comment": "例：'用户需要分析、总结、改写某类文本时'",
+
+  "prompt": "\n\n## ✨ 领域要求：[技能名称]\n\n你是一名 [角色描述]。\n\n当用户提交 [输入类型] 时，你必须：\n1. [第一步要做什么]\n2. [第二步要做什么]\n3. [第三步要做什么]\n\n### 输出格式\n[精确描述格式，比如：Markdown 表格 / JSON / 带编号的列表]\n\n### 不允许\n- [禁止做的事情1]\n- [禁止做的事情2]",
+  "_prompt_comment": [
+    "prompt 是最核心的字段，决定 AI 怎么工作。",
+    "Anthropic 建议的结构：角色 → 任务 → 格式 → 约束",
+    "越具体越好，用 '必须' '不允许' 代替模糊词语。",
+    "写完 prompt 后，写几个 examples（下面的字段），效果会大幅提升。"
+  ],
+
+  "examples": [
+    {
+      "_comment": "examples 是 Anthropic 强调的最重要元素。写 2-3 个就够了。",
+      "input": "用户输入的例子（真实情境，越具体越好）",
+      "output": "期望的模型输出（格式要和 prompt 里描述的一致）",
+      "note": "这个例子展示什么特点（可选，帮助自己记忆）"
+    },
+    {
+      "input": "另一个输入例子（最好覆盖不同情况）",
+      "output": "对应的期望输出",
+      "note": "边界情况 / 特殊格式的例子"
+    }
+  ],
+  "_examples_comment": [
+    "为什么 examples 这么重要？",
+    "  · 模型能从例子里学到 prompt 文字没法准确传达的格式细节",
+    "  · 小白写的 prompt 往往模糊，但例子是明确的",
+    "  · 有 2-3 个例子的 skill，比没有例子的 skill 一致性高 3-5 倍",
+    "",
+    "写好例子的技巧：",
+    "  · 用真实场景，不要写 '测试输入'",
+    "  · input 和 output 格式要和你在 prompt 里描述的完全一致",
+    "  · 至少一个 '典型例子' + 一个 '边界/特殊例子'"
+  ],
+
+  "output_spec": {
+    "format": "markdown",
+    "_format_comment": "markdown | plain | json | table | code | any",
+    "must_contain": [],
+    "_must_contain_comment": "输出中必须包含的字符串列表，用于自动质量检查。例如 ['建议', '##']",
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "在这里描述期望的输出格式（比 output_spec.format 更详细的文字说明）"
+  },
+
+  "task_types": ["CHAT"],
+  "_task_types_comment": [
+    "决定这个 skill 在哪些任务类型下生效。常用：",
+    "  CHAT        通用对话（绝大多数情况）",
+    "  DOC_ANNOTATE 文档批注任务",
+    "  CODER       写代码任务",
+    "  FILE_GEN    生成文件任务",
+    "  RESEARCH    研究/查询任务",
+    "留空 [] 或省略 = 所有任务类型都生效"
+  ],
+
+  "bound_tools": [],
+  "_bound_tools_comment": "这个 skill 推荐使用的工具名列表。填了之后 AI 会优先调用这些工具。常见工具：read_file, write_file, web_search, list_directory, annotate_document",
+
+  "enabled": false,
+  "_enabled_comment": "false = 默认关闭，用户在 UI 里手动开启 | true = 默认开启",
+
+  "tags": ["自定义", "示例"],
+  "_tags_comment": "搜索标签，中英文均可，方便在 Skill 市场里被找到",
+
+  "priority": 50,
+  "_priority_comment": "0-100，数字越大越先注入到 prompt。默认 50，重要 skill 可设 70-80",
+
+  "version": "1.0.0",
+  "author": "your_name",
+  "created_at": "2026-03-14T00:00:00Z",
+
+  "_advanced_comment": [
+    "====================================================================",
+    "  进阶字段（小白可以忽略，熟练后再添加）",
+    "====================================================================",
+    "",
+    "plan_template  : 让这个 skill 变成「确定性流程」，不依赖 AI 自己想步骤",
+    "                 适合多步骤、固定流程的任务（批注 → 分析 → 汇总）",
+    "",
+    "executor_tools : AI 执行这个 skill 时，只允许调用哪些工具",
+    "                 减少 AI 误用其他工具，让结果更可预期",
+    "",
+    "entry_point    : 绑定一个 Python 函数实现，让 skill 直接调用真实代码",
+    "                 格式：'module.path:function_name'"
+  ],
+
+  "plan_template": [],
+  "executor_tools": [],
+  "entry_point": null
+}

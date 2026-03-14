@@ -16,12 +16,41 @@
     "required_json_keys": [],
     "description": "以批注表格和修订全文两部分输出"
   },
-  "bound_tools": [],
+  "bound_tools": ["read_docx_paragraphs", "annotate_document", "write_file"],
   "task_types": ["DOC_ANNOTATE", "FILE_GEN"],
   "enabled": true,
   "prompt": "\n\n## 💼 领域要求：商务批注\n- 聚焦「语气是否专业」「结构是否清晰」「表达是否精准」三个维度\n- 标注过于口语化、产生歧义或可能引发误解的措辞，给出替代表达\n- 检查文档逻辑结构：开头目的是否明确、中间论据是否支撑结论、结尾行动项是否清晰\n- 对关键数据或承诺用「🔍 建议核实」标注，防止后期争议\n- 输出格式：批注表格（位置 | 原文 | 问题 | 建议） + 下方附修订版全文",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "koto",
   "created_at": "2026-03-07T00:00:00Z",
-  "tags": ["business", "annotation", "report", "email", "contract"]
+  "tags": ["business", "annotation", "report", "email", "contract"],
+  "plan_template": [
+    {
+      "name": "read_doc",
+      "description": "读取文档内容，了解结构和主要议题",
+      "step_type": "tool",
+      "depends_on": [],
+      "executor_tools": ["read_docx_paragraphs"],
+      "expected_output": "文档段落列表"
+    },
+    {
+      "name": "apply_annotations",
+      "description": "执行商务批注：识别语气、结构、歧义问题并生成修改意见",
+      "step_type": "tool",
+      "depends_on": ["read_doc"],
+      "executor_tools": ["annotate_document"],
+      "executor_prompt": "## 💼 执行商务批注\n聚焦：语气专业性、结构清晰度、表达精准度。\n生成「批注表格（位置|原文|问题|建议）」，并提供修订版全文。",
+      "expected_output": "生成 _revised 副本，返回修改处数统计"
+    },
+    {
+      "name": "summarize",
+      "description": "生成批注总结报告",
+      "step_type": "llm",
+      "depends_on": ["apply_annotations"],
+      "executor_tools": [],
+      "expected_output": "批注表格 + 修订版全文摘要"
+    }
+  ],
+  "executor_tools": ["read_docx_paragraphs", "annotate_document"],
+  "entry_point": "app.core.agent.plugins.annotation_plugin:AnnotationPlugin.annotate_document"
 }
