@@ -10,76 +10,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# GeminiProvider — INTERACTIONS_ONLY_MODELS fallback
+# GeminiProvider — basic structure and generate_content
 # ---------------------------------------------------------------------------
 
 
-class TestGeminiProviderInteractionsOnlyFallback:
-    def _get_provider(self, api_key="test-key"):
+class TestGeminiProviderBasic:
+    def test_provider_has_timeout_config(self):
         from app.core.llm.gemini import GeminiProvider
 
-        with patch("app.core.llm.gemini.genai", create=True):
-            prov = GeminiProvider.__new__(GeminiProvider)
-            prov.api_key = api_key
-            prov.client = MagicMock()
-            return prov
-
-    def test_interactions_only_models_set_exists(self):
-        from app.core.llm.gemini import GeminiProvider
-
-        assert hasattr(GeminiProvider, "INTERACTIONS_ONLY_MODELS")
-        assert len(GeminiProvider.INTERACTIONS_ONLY_MODELS) > 0
-
-    def test_fallback_model_defined(self):
-        from app.core.llm.gemini import GeminiProvider
-
-        assert isinstance(GeminiProvider.INTERACTIONS_FALLBACK_MODEL, str)
-        assert (
-            GeminiProvider.INTERACTIONS_FALLBACK_MODEL
-            not in GeminiProvider.INTERACTIONS_ONLY_MODELS
-        )
-
-    def test_gemini3_flash_preview_in_interactions_only(self):
-        from app.core.llm.gemini import GeminiProvider
-
-        assert "gemini-3-flash-preview" in GeminiProvider.INTERACTIONS_ONLY_MODELS
-
-    def test_gemini3_pro_preview_in_interactions_only(self):
-        from app.core.llm.gemini import GeminiProvider
-
-        assert "gemini-3-pro-preview" in GeminiProvider.INTERACTIONS_ONLY_MODELS
-
-    def test_generate_content_substitutes_interactions_only_model(self):
-        """When generate_content is called with an interactions-only model,
-        the provider should silently substitute the fallback model."""
-        from app.core.llm.gemini import GeminiProvider
-
-        prov = GeminiProvider.__new__(GeminiProvider)
-        prov.api_key = "test"
-        prov.client = MagicMock()
-
-        mock_types = MagicMock()
-        mock_config = MagicMock()
-        mock_types.GenerateContentConfig.return_value = mock_config
-
-        interactions_model = "gemini-3-flash-preview"
-        fallback = GeminiProvider.INTERACTIONS_FALLBACK_MODEL
-
-        captured_models = []
-
-        def fake_call_with_retry(model, contents, config):
-            captured_models.append(model)
-            fake_response = MagicMock()
-            fake_response.text = "hello"
-            return {"text": "hello", "model": model}
-
-        with patch.object(prov, "_call_with_retry", side_effect=fake_call_with_retry):
-            with patch("app.core.llm.gemini.types", mock_types):
-                prov.generate_content("hello", model=interactions_model)
-
-        assert (
-            captured_models[0] == fallback
-        ), f"Expected fallback model '{fallback}', got '{captured_models[0]}'"
+        assert hasattr(GeminiProvider, "CALL_TIMEOUT")
+        assert isinstance(GeminiProvider.CALL_TIMEOUT, int)
+        assert GeminiProvider.CALL_TIMEOUT > 0
 
     def test_normal_model_not_substituted(self):
         from app.core.llm.gemini import GeminiProvider

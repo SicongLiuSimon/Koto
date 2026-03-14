@@ -1,6 +1,6 @@
 [
   {
-    "trigger_id": "29d3367f-2cc",
+    "trigger_id": "09d42457-6bc",
     "name": "启动自检摘要",
     "trigger_type": "startup",
     "job_type": "agent_query",
@@ -14,10 +14,10 @@
     "last_run": null,
     "run_count": 0,
     "last_error": null,
-    "created_at": "2026-03-13T23:30:42.066"
+    "created_at": "2026-03-13T23:33:51.057"
   },
   {
-    "trigger_id": "5962228d-6be",
+    "trigger_id": "492f75f7-158",
     "name": "每日任务规划",
     "trigger_type": "cron",
     "job_type": "skill_exec",
@@ -34,10 +34,10 @@
     "last_run": null,
     "run_count": 0,
     "last_error": null,
-    "created_at": "2026-03-13T23:30:42.068"
+    "created_at": "2026-03-13T23:33:51.059"
   },
   {
-    "trigger_id": "42758d1a-9aa",
+    "trigger_id": "b49a575a-3cd",
     "name": "下载目录自动整理",
     "trigger_type": "interval",
     "job_type": "auto_catalog",
@@ -53,10 +53,10 @@
     "last_run": null,
     "run_count": 0,
     "last_error": null,
-    "created_at": "2026-03-13T23:30:42.070"
+    "created_at": "2026-03-13T23:33:51.061"
   },
   {
-    "trigger_id": "c4d2062b-641",
+    "trigger_id": "4266055e-92e",
     "name": "主动交互巡检",
     "trigger_type": "interval",
     "job_type": "proactive_tick",
@@ -71,6 +71,6 @@
     "last_run": null,
     "run_count": 0,
     "last_error": null,
-    "created_at": "2026-03-13T23:30:42.071"
+    "created_at": "2026-03-13T23:33:51.062"
   }
 ]
