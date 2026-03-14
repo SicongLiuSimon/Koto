@@ -102,6 +102,16 @@ class AnnotationPlugin(AgentPlugin):
         if not os.path.isabs(file_path):
             return f"错误：file_path 必须是绝对路径，当前值: {file_path!r}"
 
+        # Sandbox: only allow access to files within known safe directories
+        resolved = os.path.realpath(file_path)
+        safe_dirs = [
+            os.path.realpath(os.path.join(os.getcwd(), "workspace")),
+            os.path.realpath(os.path.join(os.getcwd(), "uploads")),
+            os.path.realpath(os.path.join(os.getcwd(), "dist")),
+        ]
+        if not any(resolved.startswith(d + os.sep) for d in safe_dirs):
+            return f"错误：文件路径不在允许的目录范围内: {file_path}"
+
         if not os.path.exists(file_path):
             return f"错误：文件不存在: {file_path}"
 

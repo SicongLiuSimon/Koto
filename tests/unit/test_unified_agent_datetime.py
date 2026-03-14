@@ -48,18 +48,24 @@ def _make_agent(system_instruction: Optional[str] = None) -> UnifiedAgent:
 
 
 def _run_and_capture_user_message(agent: UnifiedAgent, message: str = "hello") -> str:
-    """Run agent once and return the first user message sent to generate_content.
+    """Run agent once and return the system_instruction or user message containing datetime.
 
-    The datetime is injected into the user message (history prompt), not into
-    system_instruction — this keeps system_instruction stable for Gemini caching.
+    The datetime is injected into system_instruction (not user message) to keep
+    Gemini context caching stable. We check system_instruction first.
     """
     for _ in agent.run(input_text=message):
         break
     call_kwargs = agent.llm.generate_content.call_args
+    if call_kwargs is None:
+        return ""
+    # Check system_instruction first (new behavior)
+    sys_instr = call_kwargs.kwargs.get("system_instruction", "")
+    if sys_instr:
+        return sys_instr
+    # Fallback: check prompt user message (old behavior)
     prompt = call_kwargs.kwargs.get("prompt") or (
         call_kwargs.args[0] if call_kwargs.args else []
     )
-    # Find the first user turn
     for turn in prompt:
         if isinstance(turn, dict) and turn.get("role") == "user":
             return turn.get("content", "")
@@ -93,13 +99,23 @@ class TestDatetimeInjection:
         ), f"User message should start with datetime prefix, got: {user_msg[:100]!r}"
 
     def test_original_instruction_preserved_after_prefix(self):
-        """The original user input must still be present after the datetime prefix."""
+        """The original user input must still be present in the prompt."""
         custom_input = "You are a specialized assistant for tests."
         agent = _make_agent()
-        user_msg = _run_and_capture_user_message(agent, message=custom_input)
+        for _ in agent.run(input_text=custom_input):
+            break
+        call_kwargs = agent.llm.generate_content.call_args
+        prompt = call_kwargs.kwargs.get("prompt") or (
+            call_kwargs.args[0] if call_kwargs.args else []
+        )
+        user_content = ""
+        for turn in prompt:
+            if isinstance(turn, dict) and turn.get("role") == "user":
+                user_content = turn.get("content", "")
+                break
         assert (
-            custom_input in user_msg
-        ), "Original user input was lost after datetime injection."
+            custom_input in user_content
+        ), "Original user input was lost in prompt."
 
     def test_weekday_label_is_correct(self):
         """The injected weekday label must match the frozen datetime's weekday."""
@@ -141,19 +157,25 @@ class TestDatetimeInjection:
             mock_dt.now.return_value = dt1
             for _ in agent.run(input_text="first call"):
                 break
-            prompt1 = agent.llm.generate_content.call_args.kwargs.get("prompt", [])
-            instr1 = next(
-                (t["content"] for t in prompt1 if t.get("role") == "user"), ""
-            )
+            call1 = agent.llm.generate_content.call_args
+            instr1 = call1.kwargs.get("system_instruction", "")
+            if not instr1:
+                prompt1 = call1.kwargs.get("prompt", [])
+                instr1 = next(
+                    (t["content"] for t in prompt1 if t.get("role") == "user"), ""
+                )
 
         with patch("app.core.agent.unified_agent.datetime") as mock_dt:
             mock_dt.now.return_value = dt2
             for _ in agent.run(input_text="second call"):
                 break
-            prompt2 = agent.llm.generate_content.call_args.kwargs.get("prompt", [])
-            instr2 = next(
-                (t["content"] for t in prompt2 if t.get("role") == "user"), ""
-            )
+            call2 = agent.llm.generate_content.call_args
+            instr2 = call2.kwargs.get("system_instruction", "")
+            if not instr2:
+                prompt2 = call2.kwargs.get("prompt", [])
+                instr2 = next(
+                    (t["content"] for t in prompt2 if t.get("role") == "user"), ""
+                )
 
         assert "10:00" in instr1, f"First call: expected 10:00 in {instr1[:100]!r}"
         assert "11:30" in instr2, f"Second call: expected 11:30 in {instr2[:100]!r}"
