@@ -5,7 +5,6 @@ import logging
 import queue
 import threading
 import concurrent.futures
-from typing import Any, Dict, Generator, List, Optional, Union
 from .base import LLMProvider
 
 try:
@@ -28,15 +27,6 @@ class GeminiProvider(LLMProvider):
     CALL_TIMEOUT: int = int(os.getenv("GEMINI_CALL_TIMEOUT", "30"))
     # 流式调用每个 chunk 之间的最长等待（秒）
     STREAM_CHUNK_TIMEOUT: int = int(os.getenv("GEMINI_STREAM_CHUNK_TIMEOUT", "15"))
-
-    # These models only support the Interactions API and cannot use generate_content().
-    # Any direct generate_content call with these models will receive a 400 INVALID_ARGUMENT.
-    INTERACTIONS_ONLY_MODELS: frozenset = frozenset({
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
-    })
-    # Fallback model used whenever an Interactions-only model is passed to generate_content
-    INTERACTIONS_FALLBACK_MODEL: str = "gemini-2.5-flash"
 
     def __init__(self, api_key: str = None):
         self.api_key = (
@@ -71,15 +61,6 @@ class GeminiProvider(LLMProvider):
     ) -> Union[Dict[str, Any], Generator[Dict[str, Any], None, None]]:
         if not self.client or not types:
             raise ImportError("google.genai client not initialized")
-
-        # Interactions-only models cannot use generate_content(); substitute fallback model
-        if model in self.INTERACTIONS_ONLY_MODELS:
-            logger.warning(
-                "[GeminiProvider] model '%s' only supports Interactions API; "
-                "substituting '%s' for generate_content call",
-                model, self.INTERACTIONS_FALLBACK_MODEL,
-            )
-            model = self.INTERACTIONS_FALLBACK_MODEL
 
         try:
             config = types.GenerateContentConfig(
@@ -137,18 +118,9 @@ class GeminiProvider(LLMProvider):
                 raise
             except Exception as exc:
                 last_exc = exc
-                exc_str = str(exc)
-                # If model was somehow still Interactions-only, fall back immediately (no retry)
-                if "Interactions API" in exc_str and model in self.INTERACTIONS_ONLY_MODELS:
-                    logger.warning(
-                        "[GeminiProvider] Caught Interactions-API-only error for '%s'; "
-                        "retrying once with '%s'",
-                        model, self.INTERACTIONS_FALLBACK_MODEL,
-                    )
-                    model = self.INTERACTIONS_FALLBACK_MODEL
-                    continue
                 # Check if retryable
                 status_code = getattr(exc, "status_code", None)
+                exc_str = str(exc)
                 is_retryable = (
                     (status_code and status_code in self.RETRYABLE_STATUS_CODES)
                     or "429" in exc_str
