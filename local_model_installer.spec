@@ -21,7 +21,7 @@ block_cipher = None
 
 a = Analysis(
     ["src/local_model_installer.py"],
-    pathex=[".", "src"],
+    pathex=["."],
     binaries=[],
     datas=[
         # 如果有图标资源可加入：

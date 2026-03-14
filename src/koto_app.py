@@ -425,13 +425,12 @@ class WindowAPI:
     def open_url(self, url: str):
         """在系统默认浏览器中打开外部链接，防止 webview 导航离开 Koto"""
         import webbrowser
-        from urllib.parse import urlparse
         try:
-            parsed = urlparse(url)
-            if parsed.scheme not in ("http", "https"):
-                return {"success": False, "error": "不允许的协议"}
-            webbrowser.open(url)
-            return {"success": True}
+            # 只允许 http / https，防止其他协议注入
+            if url.startswith('http://') or url.startswith('https://'):
+                webbrowser.open(url)
+                return {"success": True}
+            return {"success": False, "error": "不允许的协议"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
