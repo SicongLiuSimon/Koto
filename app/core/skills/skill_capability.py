@@ -187,6 +187,13 @@ class SkillCapabilityRegistry:
         )
         return fn(user_input=user_input, context=ctx)
 
+    # Allowlist of module prefixes that entry_points may load.
+    _ALLOWED_MODULE_PREFIXES: tuple = (
+        "app.",
+        "web.",
+        "src.",
+    )
+
     # ── 内部工具 ─────────────────────────────────────────────────────────────
 
     @classmethod
@@ -204,6 +211,13 @@ class SkillCapabilityRegistry:
             )
 
         module_path, attr_path = entry_point.split(":", 1)
+
+        # Security: only allow importing from known project modules
+        if not any(module_path.startswith(prefix) for prefix in cls._ALLOWED_MODULE_PREFIXES):
+            raise ImportError(
+                f"entry_point 模块 '{module_path}' 不在允许的模块前缀列表中: "
+                f"{cls._ALLOWED_MODULE_PREFIXES}"
+            )
 
         try:
             mod = importlib.import_module(module_path)

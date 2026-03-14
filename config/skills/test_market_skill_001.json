@@ -37,5 +37,8 @@
   "permissions": [],
   "update_url": "",
   "publisher": "user",
-  "default_triggers": []
+  "default_triggers": [],
+  "plan_template": [],
+  "executor_tools": [],
+  "entry_point": null
 }

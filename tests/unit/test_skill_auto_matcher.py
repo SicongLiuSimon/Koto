@@ -59,10 +59,15 @@ class TestMatchContract:
     def test_skips_when_user_has_active_skills(self, mocker):
         matcher = _get_matcher()
         mocker.patch.object(matcher, "_has_active_skills_for_task", return_value=True)
-        build_mock = mocker.patch.object(matcher, "_build_skill_catalog")
+        mocker.patch.object(
+            matcher, "_build_skill_catalog",
+            return_value=([{"id": "s1", "name": "s1", "desc": "", "task_types": []}], "s1"),
+        )
+        mocker.patch.object(matcher, "_match_with_patterns", return_value=[])
+        ollama_mock = mocker.patch.object(matcher, "_match_with_local_model")
         result = matcher.match("some input", task_type="CHAT")
         assert result == []
-        build_mock.assert_not_called()
+        ollama_mock.assert_not_called()
 
     def test_force_flag_overrides_active_skill_check(self, mocker):
         matcher = _get_matcher()
@@ -144,7 +149,7 @@ class TestHasActiveSkillsForTask:
         mocker.patch.object(
             SkillManager,
             "_registry",
-            {"skill_a": {"enabled": True, "task_types": ["CHAT"]}},
+            {"skill_a": {"enabled": True, "task_types": ["CHAT"], "category": "domain"}},
             create=True,
         )
         matcher = _get_matcher()
