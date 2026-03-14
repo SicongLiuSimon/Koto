@@ -128,6 +128,15 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "display": "Gemini 3.0 Flash ⚡",
         "strengths": ["快速", "对话", "多模态"],
     },
+    "gemini-3.1-pro-preview": {
+        "provider": "gemini", "tier": 9,
+        "speed": 4,  "quality": 10, "reasoning": 10,
+        "context": 10, "multimodal": True, "function_calling": True,
+        "grounding": True, "image_gen": False,
+        "interactions_only": False,
+        "display": "Gemini 3.1 Pro 🎯",
+        "strengths": ["推理", "代码", "分析", "复杂任务"],
+    },
     "gemini-3.1-flash-image-preview": {
         "provider": "gemini", "tier": 7,
         "speed": 7,  "quality": 8,  "reasoning": 5,
@@ -171,7 +180,7 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "speed": 1,  "quality": 10, "reasoning": 10,
         "context": 10, "multimodal": False, "function_calling": False,
         "grounding": True, "image_gen": False,
-        "interactions_only": False,
+        "interactions_only": True,   # 必须走 Interactions API，不支持 generate_content
         "display": "Deep Research Pro 🔬",
         "strengths": ["深度研究", "学术分析", "综合报告"],
     },
@@ -558,7 +567,7 @@ class ModelManager:
         """API 不可用时的静态兜底映射（与原 MODEL_MAP 保持一致）。"""
         defaults = {
             "CHAT":       "gemini-3-flash-preview",
-            "CODER":      "gemini-3-pro-preview",
+            "CODER":      "gemini-3.1-pro-preview",
             "WEB_SEARCH": "gemini-2.5-flash",
             "VISION":     "gemini-3-flash-preview",
             "RESEARCH":   "deep-research-pro-preview-12-2025",
@@ -567,6 +576,7 @@ class ModelManager:
             "AGENT":      "gemini-3-flash-preview",
             "SYSTEM":     "local-executor",
             "FILE_OP":    "local-executor",
+            "COMPLEX":    "gemini-3.1-pro-preview",
         }
         return defaults
 

@@ -8,7 +8,7 @@ Koto LangChain Adapter
 用法示例:
     from app.core.llm.langchain_adapter import KotoLangChainLLM
 
-    llm = KotoLangChainLLM(model_id="gemini-2.5-flash-preview-05-20")
+    llm = KotoLangChainLLM(model_id="gemini-2.5-flash")
     response = llm.invoke("你好")
 
     # 配合 LangGraph ReAct 使用
@@ -113,12 +113,12 @@ if _LANGCHAIN_AVAILABLE:
         - 支持 stream() → yield AIMessageChunk
 
         参数:
-            model_id    : Gemini 模型 ID（默认: gemini-2.5-flash-preview-05-20）
+            model_id    : Gemini 模型 ID（默认: gemini-2.5-flash）
             temperature : 生成温度（默认 0.7）
             max_tokens  : 最大输出 token 数（默认 8192）
         """
 
-        model_id: str = "gemini-3-flash-preview"
+        model_id: str = "gemini-2.5-flash"
         temperature: float = 0.7
         max_tokens: int = 8192
         _koto_provider: Any = None  # GeminiProvider 实例（私有，不序列化）
@@ -126,7 +126,7 @@ if _LANGCHAIN_AVAILABLE:
         class Config:
             arbitrary_types_allowed = True
 
-        def __init__(self, model_id: str = "gemini-3-flash-preview",
+        def __init__(self, model_id: str = "gemini-2.5-flash",
                      temperature: float = 0.7, max_tokens: int = 8192, **kwargs):
             _assert_langchain()
             super().__init__(model_id=model_id, temperature=temperature,

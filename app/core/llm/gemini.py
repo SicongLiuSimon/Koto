@@ -2,6 +2,9 @@ from typing import Any, Dict, List, Optional, Union, Generator
 import os
 import time
 import logging
+import queue
+import threading
+import concurrent.futures
 from .base import LLMProvider
 
 try:
@@ -20,15 +23,10 @@ class GeminiProvider(LLMProvider):
     MAX_RETRIES = 3
     RETRY_BASE_DELAY = 2.0   # seconds
     RETRYABLE_STATUS_CODES = {429, 503}
-
-    # These models only support the Interactions API and cannot use generate_content().
-    # Any direct generate_content call with these models will receive a 400 INVALID_ARGUMENT.
-    INTERACTIONS_ONLY_MODELS: frozenset = frozenset({
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
-    })
-    # Fallback model used whenever an Interactions-only model is passed to generate_content
-    INTERACTIONS_FALLBACK_MODEL: str = "gemini-2.5-flash"
+    # 非流式调用整体超时（秒），超时后抛出 TimeoutError 触发本地模型兜底
+    CALL_TIMEOUT: int = int(os.getenv("GEMINI_CALL_TIMEOUT", "30"))
+    # 流式调用每个 chunk 之间的最长等待（秒）
+    STREAM_CHUNK_TIMEOUT: int = int(os.getenv("GEMINI_STREAM_CHUNK_TIMEOUT", "15"))
 
     def __init__(self, api_key: str = None):
         self.api_key = (
@@ -64,15 +62,6 @@ class GeminiProvider(LLMProvider):
         if not self.client or not types:
             raise ImportError("google.genai client not initialized")
 
-        # Interactions-only models cannot use generate_content(); substitute fallback model
-        if model in self.INTERACTIONS_ONLY_MODELS:
-            logger.warning(
-                "[GeminiProvider] model '%s' only supports Interactions API; "
-                "substituting '%s' for generate_content call",
-                model, self.INTERACTIONS_FALLBACK_MODEL,
-            )
-            model = self.INTERACTIONS_FALLBACK_MODEL
-
         try:
             config = types.GenerateContentConfig(
                 temperature=kwargs.get("temperature", 0.7),
@@ -102,30 +91,36 @@ class GeminiProvider(LLMProvider):
             raise
 
     def _call_with_retry(self, model: str, contents, config):
-        """Call generate_content with exponential backoff retry on 429/503."""
+        """Call generate_content with exponential backoff retry on 429/503.
+        
+        每次调用在独立线程中执行，若超过 CALL_TIMEOUT 秒无响应则抛出
+        TimeoutError（消息含 "timed out"），触发上层本地模型兜底逻辑。
+        """
         last_exc = None
         for attempt in range(self.MAX_RETRIES):
             try:
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=config,
-                )
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                    _future = _pool.submit(
+                        self.client.models.generate_content,
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    )
+                    try:
+                        response = _future.result(timeout=self.CALL_TIMEOUT)
+                    except concurrent.futures.TimeoutError:
+                        raise TimeoutError(
+                            f"LLM call timed out after {self.CALL_TIMEOUT}s"
+                        )
                 return self._format_response(response)
+            except TimeoutError:
+                # 超时不重试，直接向上抛，由 UnifiedAgent 产生 ERROR step
+                raise
             except Exception as exc:
                 last_exc = exc
-                exc_str = str(exc)
-                # If model was somehow still Interactions-only, fall back immediately (no retry)
-                if "Interactions API" in exc_str and model in self.INTERACTIONS_ONLY_MODELS:
-                    logger.warning(
-                        "[GeminiProvider] Caught Interactions-API-only error for '%s'; "
-                        "retrying once with '%s'",
-                        model, self.INTERACTIONS_FALLBACK_MODEL,
-                    )
-                    model = self.INTERACTIONS_FALLBACK_MODEL
-                    continue
                 # Check if retryable
                 status_code = getattr(exc, "status_code", None)
+                exc_str = str(exc)
                 is_retryable = (
                     (status_code and status_code in self.RETRYABLE_STATUS_CODES)
                     or "429" in exc_str
@@ -282,14 +277,42 @@ class GeminiProvider(LLMProvider):
         }
 
     def _stream_generator(self, response_iterator: Any):
-        """Yield standardized chunks from google.genai stream."""
-        for chunk in response_iterator:
-            text = getattr(chunk, "text", "") or ""
+        """Yield standardized chunks from google.genai stream.
+
+        后台线程负责迭代 SDK 流并向队列投递 chunk；主生成器以 STREAM_CHUNK_TIMEOUT
+        秒超时读取队列。若超时则认为云端流卡住，抛出 TimeoutError 触发兜底。
+        """
+        _q: queue.Queue = queue.Queue()
+        _SENTINEL = object()
+
+        def _feed():
+            try:
+                for chunk in response_iterator:
+                    _q.put(chunk)
+            except Exception as exc:
+                _q.put(exc)
+            finally:
+                _q.put(_SENTINEL)
+
+        _t = threading.Thread(target=_feed, daemon=True)
+        _t.start()
+
+        while True:
+            try:
+                item = _q.get(timeout=self.STREAM_CHUNK_TIMEOUT)
+            except queue.Empty:
+                raise TimeoutError(
+                    f"Stream stalled: no chunk received in {self.STREAM_CHUNK_TIMEOUT}s"
+                )
+            if item is _SENTINEL:
+                break
+            if isinstance(item, Exception):
+                raise item
+            text = getattr(item, "text", "") or ""
             finish_reason = None
-            candidates = getattr(chunk, "candidates", None) or []
+            candidates = getattr(item, "candidates", None) or []
             if candidates:
                 finish_reason = getattr(candidates[0], "finish_reason", None)
-
             yield {
                 "content": text,
                 "finish_reason": finish_reason,
