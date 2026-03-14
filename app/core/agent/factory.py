@@ -98,12 +98,19 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     except Exception as _e:
         logger.debug(f"[_build_registry] TemplateFillPlugin 跳过: {_e}")
 
-    # ── 文档生成工具（Word / PDF / Excel / PPT） ──────────────────────
+    # ── 文档标注技能工具 ───────────────────────────────────────────────
     try:
-        from app.core.agent.plugins.doc_gen_plugin import DocGenPlugin
-        registry.register_plugin(DocGenPlugin())
+        from app.core.agent.plugins.annotation_plugin import AnnotationPlugin
+        registry.register_plugin(AnnotationPlugin())
     except Exception as _e:
-        logger.debug(f"[_build_registry] DocGenPlugin 跳过: {_e}")
+        logger.debug(f"[_build_registry] AnnotationPlugin 跳过: {_e}")
+
+    # ── 文件格式转换工具 ───────────────────────────────────────────────
+    try:
+        from app.core.agent.plugins.file_converter_plugin import FileConverterPlugin
+        registry.register_plugin(FileConverterPlugin())
+    except Exception as _e:
+        logger.debug(f"[_build_registry] FileConverterPlugin 跳过: {_e}")
 
     return registry
 
@@ -175,7 +182,7 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
 
 def create_langgraph_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-3-flash-preview",
+    model_id: str = "gemini-2.5-flash",
     enable_pii_filter: bool = True,
     enable_output_validation: bool = True,
 ) -> "LangGraphAgent":
