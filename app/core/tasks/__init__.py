@@ -10,9 +10,26 @@ app.core.tasks
   task_planner  — 通用多步骤 DAG 规划器
 """
 
-from .progress_bus import ProgressBus, ProgressEvent, get_progress_bus
-from .task_ledger import TaskLedger, TaskRecord, TaskStatus, get_ledger
-from .task_planner import Plan, PlanStep, StepStatus, TaskPlanner
+from .task_ledger import (
+    TaskLedger,
+    TaskRecord,
+    TaskStatus,
+    get_ledger,
+)
+
+from .progress_bus import (
+    ProgressBus,
+    ProgressEvent,
+    get_progress_bus,
+)
+
+from .task_planner import (
+    TaskPlanner,
+    PlanStep,
+    StepStatus,
+    StepResult,
+    Plan,
+)
 
 __all__ = [
     # ledger
@@ -28,5 +45,6 @@ __all__ = [
     "TaskPlanner",
     "PlanStep",
     "StepStatus",
+    "StepResult",
     "Plan",
 ]

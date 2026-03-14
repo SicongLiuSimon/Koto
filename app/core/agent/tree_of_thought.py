@@ -143,7 +143,7 @@ class TreeOfThought:
     timeout_sec      : 单分支生成超时（秒）
     """
 
-    DEFAULT_MODEL = "gemini-2.5-flash-preview-05-20"
+    DEFAULT_MODEL = "gemini-2.5-flash"
 
     def __init__(
         self,

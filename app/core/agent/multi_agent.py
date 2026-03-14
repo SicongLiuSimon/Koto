@@ -30,7 +30,7 @@ Koto Multi-Agent Orchestrator
     # 预置角色 + 自动 Critic 循环
     orch = MultiAgentOrchestrator(
         roles=[ROLES.RESEARCHER, ROLES.WRITER, ROLES.CRITIC],
-        model_id="gemini-2.5-flash-preview-05-20",
+        model_id="gemini-2.5-flash",
         max_revisions=2,
     )
     result = orch.run("帮我写一篇关于大模型应用的技术博客")
@@ -270,7 +270,7 @@ def _make_agent_node(role: AgentRole):
     """工厂函数：为给定 AgentRole 生成 LangGraph 节点函数。"""
 
     def node_fn(state: "MultiAgentState") -> Dict:
-        model_id = state.get("model_id", "gemini-2.5-flash-preview-05-20")
+        model_id = state.get("model_id", "gemini-2.5-flash")
         user_context = _build_context(state, role)
 
         logger.info(f"[MultiAgent] [{role.display_name}] 开始执行")
@@ -349,7 +349,7 @@ class MultiAgentOrchestrator:
     def __init__(
         self,
         roles: List[AgentRole],
-        model_id: str = "gemini-2.5-flash-preview-05-20",
+        model_id: str = "gemini-2.5-flash",
         max_revisions: int = 1,
         checkpointer=None,
     ):
@@ -570,7 +570,7 @@ class MultiAgentOrchestrator:
     @classmethod
     def preset_content_pipeline(
         cls,
-        model_id: str = "gemini-2.5-flash-preview-05-20",
+        model_id: str = "gemini-2.5-flash",
         max_revisions: int = 1,
     ) -> "MultiAgentOrchestrator":
         """预置：内容创作管线（研究 → 写作 → Critic → 修订）"""
@@ -583,7 +583,7 @@ class MultiAgentOrchestrator:
     @classmethod
     def preset_code_pipeline(
         cls,
-        model_id: str = "gemini-2.5-flash-preview-05-20",
+        model_id: str = "gemini-2.5-flash",
         max_revisions: int = 1,
     ) -> "MultiAgentOrchestrator":
         """预置：代码生成管线（研究 → 编码 → 代码审查 → 修订）"""

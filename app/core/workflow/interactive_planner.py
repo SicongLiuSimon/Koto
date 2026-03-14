@@ -181,23 +181,56 @@ class InteractivePlanner:
         return planner.plan_with_llm(_tid, user_input, llm_provider, model_id=model_id)
 
     @staticmethod
+    def create_plan_with_context(
+        user_input: str,
+        llm_provider: Any,
+        task_id: Optional[str] = None,
+        model_id: str = "gemini-3-flash-preview",
+        tool_registry: Any = None,
+        history: Optional[list] = None,
+    ):
+        """
+        增强版 LLM 规划：自动注入可用工具列表和会话历史摘要，
+        生成工具感知、上下文感知的步骤 DAG（减少 token 消耗，提高精度）。
+
+        Args:
+            tool_registry: ToolRegistry 实例（提取可用工具名）
+            history:       消息历史列表（生成会话上下文摘要）
+        """
+        from app.core.tasks.task_planner import TaskPlanner
+        _tid = task_id or str(uuid.uuid4())
+        planner = TaskPlanner()
+        return planner.plan_with_context(
+            task_id=_tid,
+            user_input=user_input,
+            llm_provider=llm_provider,
+            model_id=model_id,
+            tool_registry=tool_registry,
+            history=history,
+        )
+
+    @staticmethod
     def execute(
         plan,
         executor_fn,
         approval_fn=None,
         cancel_check=None,
+        llm_provider: Any = None,
+        replan_model_id: str = "gemini-3-flash-preview",
     ) -> Generator[Dict[str, Any], None, None]:
         """
         执行 Plan（新引擎格式）。
 
         Args:
-            plan:         app.core.tasks.task_planner.Plan
-            executor_fn:  (step, context) -> result
-            approval_fn:  (step) -> bool（人工确认回调，None=自动通过）
-            cancel_check: () -> bool（取消检查）
+            plan:             app.core.tasks.task_planner.Plan
+            executor_fn:      (step, context) -> result
+            approval_fn:      (step) -> bool（人工确认回调，None=自动通过）
+            cancel_check:     () -> bool（取消检查）
+            llm_provider:     可选，提供后启用再规划能力
+            replan_model_id:  再规划使用的模型 ID
 
         Yields:
-            步骤事件字典 {"event": "step_done"|"step_failed"|"plan_done", ...}
+            步骤事件字典 {"event": "step_done"|"step_failed"|"replan"|"plan_done", ...}
         """
         from app.core.tasks.task_planner import TaskPlanner
 
@@ -207,6 +240,8 @@ class InteractivePlanner:
             executor_fn=executor_fn,
             approval_fn=approval_fn,
             cancel_check=cancel_check,
+            llm_provider=llm_provider,
+            replan_model_id=replan_model_id,
         )
 
     # ── 互转工具 ──────────────────────────────────────────────────────────────
