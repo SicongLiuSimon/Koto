@@ -6,10 +6,12 @@
 """
 
 import json
+import math
 import os
 import time
-from collections import defaultdict
-from datetime import datetime, timedelta
+import threading
+from typing import List, Dict, Optional, Tuple
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -188,9 +190,215 @@ class UserProfile:
         return f"{level}级别开发者" + (f"，熟悉{'/'.join(langs)}" if langs else "")
 
 
-# ── 记忆生命周期管理（GC）常量 ──────────────────────────────────────────────────
-_GC_STALE_DAYS: int = 90  # 未被访问的自动提取记忆超过此天数将被清理
-_GC_MAX_PER_CATEGORY: int = 150  # 单类别记忆条数上限（超出时保留最新 + 用户手动）
+# ─────────────────────────────────────────────────────────────────────────────
+# PersonalityMatrix — 持续更新的个人记忆矩阵
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PersonalityMatrix:
+    """
+    持续更新的个人记忆矩阵，比 UserProfile 更动态、更细粒度。
+
+    每轮对话后台异步更新，维护以下维度：
+      cognitive    : 认知风格权重向量（探索/执行/分析/创意）
+      expertise    : 领域专长图 {topic: 熟练度 0.0-5.0}
+      goals        : 当前显式目标列表（滑动保留最近20条）
+      frustrations : 已知痛点/厌烦点（最近15条）
+      values       : 价值偏好权重 {simple/detail/speed/rigor: 0.0-1.0}
+      recent_themes: 近30轮对话主题（滑动窗口）
+      update_count : 总更新次数
+    """
+
+    MATRIX_PATH = "config/personality_matrix.json"
+
+    # LLM 分析 Prompt — 每轮对话后提取个人特征信号
+    ANALYSIS_PROMPT = (
+        "分析以下对话，提取用户的个人特征信号。仅提取有充分证据的信号，无信号时对应字段用null或空。\n\n"
+        "对话：\n用户：{user_msg}\nAI：{ai_msg}\n\n"
+        "以JSON输出（只输出JSON，无其他文字）：\n"
+        '{{"cognitive_signal":null,"expertise_delta":{{}},"new_goals":[],"frustrations":[],"value_signals":{{}},"theme":null}}\n\n'
+        "字段说明：\n"
+        "- cognitive_signal: \"exploratory\"|\"executor\"|\"analytical\"|\"creative\"|null，此轮最突出的认知风格\n"
+        "- expertise_delta: {{主题: N}}，N为+1/+2（展现知识）或-1（困惑），整数\n"
+        "- new_goals: 用户新提到的目标/项目（无则[]）\n"
+        "- frustrations: 用户的抱怨/困难（无则[]）\n"
+        '- value_signals: {{"simple":N,"detail":N,"speed":N,"rigor":N}}，N为+0.1或-0.1，只填有信号的键\n'
+        "- theme: 此轮核心主题关键词，≤6字中文，无则null\n\n"
+        "只输出JSON。"
+    )
+
+    def __init__(self, path: Optional[str] = None):
+        self._path = path or self.MATRIX_PATH
+        # Validate path is within the allowed config directory
+        allowed_base = os.path.abspath("config")
+        resolved = os.path.abspath(self._path)
+        if not resolved.startswith(allowed_base + os.sep) and resolved != allowed_base:
+            self._path = self.MATRIX_PATH
+        self.data = self._load()
+
+    def _default(self) -> Dict:
+        return {
+            "cognitive": {"exploratory": 0.5, "executor": 0.5, "analytical": 0.5, "creative": 0.5},
+            "expertise": {},
+            "goals": [],
+            "frustrations": [],
+            "values": {"simple": 0.5, "detail": 0.5, "speed": 0.5, "rigor": 0.5},
+            "recent_themes": [],
+            "updated_at": datetime.now().isoformat(),
+            "update_count": 0,
+        }
+
+    def _load(self) -> Dict:
+        if os.path.exists(self._path):
+            try:
+                with open(self._path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                return UserProfile._deep_merge(self._default(), loaded)
+            except Exception:
+                pass
+        return self._default()
+
+    def _save(self):
+        try:
+            dir_ = os.path.dirname(self._path)
+            if dir_:
+                os.makedirs(dir_, exist_ok=True)
+            with open(self._path, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def update_from_signals(self, signals: Dict):
+        """Apply extracted LLM signals to the matrix (in-place + persist)."""
+        if not signals:
+            return
+
+        # Cognitive style — momentum update with gentle decay on all styles
+        cog = signals.get("cognitive_signal")
+        if cog and cog in self.data["cognitive"]:
+            for k in self.data["cognitive"]:
+                self.data["cognitive"][k] = max(0.1, self.data["cognitive"][k] * 0.97)
+            self.data["cognitive"][cog] = min(1.0, self.data["cognitive"][cog] + 0.06)
+
+        # Expertise delta
+        for topic, delta in (signals.get("expertise_delta") or {}).items():
+            topic = str(topic).strip()
+            if topic:
+                current = self.data["expertise"].get(topic, 2.0)
+                try:
+                    self.data["expertise"][topic] = max(0.0, min(5.0, current + float(delta)))
+                except (TypeError, ValueError):
+                    pass
+
+        # Goals — dedup, sliding window of 20
+        for goal in (signals.get("new_goals") or []):
+            goal = str(goal).strip()
+            if goal and goal not in self.data["goals"]:
+                self.data["goals"].append(goal)
+        self.data["goals"] = self.data["goals"][-20:]
+
+        # Frustrations — dedup, keep latest 15
+        for f in (signals.get("frustrations") or []):
+            f = str(f).strip()
+            if f and f not in self.data["frustrations"]:
+                self.data["frustrations"].append(f)
+        self.data["frustrations"] = self.data["frustrations"][-15:]
+
+        # Values weights
+        for k, v in (signals.get("value_signals") or {}).items():
+            if k in self.data["values"]:
+                try:
+                    self.data["values"][k] = max(0.0, min(1.0, self.data["values"][k] + float(v)))
+                except (TypeError, ValueError):
+                    pass
+
+        # Recent themes — sliding window of 30
+        theme = signals.get("theme")
+        if theme:
+            self.data["recent_themes"].append(str(theme))
+            self.data["recent_themes"] = self.data["recent_themes"][-30:]
+
+        self.data["updated_at"] = datetime.now().isoformat()
+        self.data["update_count"] = self.data.get("update_count", 0) + 1
+        self._save()
+
+    def to_context_string(self) -> str:
+        """Format as compact LLM system-instruction context block."""
+        lines = []
+
+        # Dominant cognitive style
+        cog = self.data.get("cognitive", {})
+        if cog:
+            dominant = max(cog, key=lambda k: cog[k])
+            if cog[dominant] > 0.55:
+                labels = {
+                    "exploratory": "探索型", "executor": "执行型",
+                    "analytical": "分析型", "creative": "创意型",
+                }
+                lines.append(f"• 认知倾向：{labels.get(dominant, dominant)}")
+
+        # Top expertise areas
+        expertise = self.data.get("expertise", {})
+        if expertise:
+            top = sorted(expertise.items(), key=lambda x: x[1], reverse=True)[:5]
+            lines.append(f"• 专长：{', '.join(f'{k}({v:.0f}/5)' for k, v in top)}")
+
+        # Current goals
+        goals = [g for g in self.data.get("goals", []) if g]
+        if goals:
+            lines.append(f"• 当前目标：{'; '.join(goals[:3])}")
+
+        # High-weight values
+        values = self.data.get("values", {})
+        high_vals = [k for k, v in values.items() if v > 0.65]
+        if high_vals:
+            v_labels = {
+                "simple": "简洁优先", "detail": "详细解释",
+                "speed": "速度优先", "rigor": "严谨准确",
+            }
+            lines.append(f"• 风格偏好：{', '.join(v_labels.get(v, v) for v in high_vals)}")
+
+        # Recent themes
+        themes = self.data.get("recent_themes", [])[-5:]
+        if themes:
+            lines.append(f"• 近期关注：{', '.join(themes)}")
+
+        # Top frustrations
+        frusts = self.data.get("frustrations", [])[-3:]
+        if frusts:
+            lines.append(f"• 已知痛点：{'; '.join(frusts)}")
+
+        if not lines:
+            return ""
+        return "[个人记忆矩阵]\n" + "\n".join(lines)
+
+    @classmethod
+    def update_async(cls, user_msg: str, ai_msg: str, llm_fn, instance: "PersonalityMatrix"):
+        """Non-blocking personality update triggered from _start_memory_extraction."""
+
+        def _run():
+            try:
+                prompt = cls.ANALYSIS_PROMPT.format(
+                    user_msg=user_msg[:600],
+                    ai_msg=ai_msg[:400],
+                )
+                raw = (llm_fn(prompt) or "").strip()
+                if not raw:
+                    return
+                # Strip markdown code fences
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1].split("```")[0]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                signals = json.loads(raw.strip())
+                instance.update_from_signals(signals)
+                print(
+                    f"[PersonalityMatrix] ✅ 矩阵已更新 "
+                    f"(第{instance.data.get('update_count', 0)}次)"
+                )
+            except Exception as e:
+                print(f"[PersonalityMatrix] ⚠️ 更新失败: {e}")
+
+        threading.Thread(target=_run, daemon=True).start()
 
 
 class EnhancedMemoryManager:
@@ -210,6 +418,7 @@ class EnhancedMemoryManager:
         self.summaries: Dict[str, Dict] = {}
         self.vector_memories: List[Dict] = []
         self.user_profile = UserProfile(profile_path)
+        self.personality_matrix = PersonalityMatrix()   # 动态个人记忆矩阵
         self._embedding_fn = None
         self._generate_fn = None
         self._memory_rag = None  # 专用 FAISS 记庆索引（懒加载）
@@ -224,9 +433,6 @@ class EnhancedMemoryManager:
         print(f"[EnhancedMemory] 👤 用户画像：{self.user_profile.get_brief_summary()}")
         # 首次启动时如果 FAISS 记庆索引为空，自动从 memories.json 迁移建索
         self._rebuild_memory_rag_if_needed()
-        # 异步执行记忆生命周期 GC（不阻塞启动）
-        self.run_gc()
-
     def _load(self):
         """加载记忆"""
         if os.path.exists(self.memory_path):
@@ -834,32 +1040,39 @@ class EnhancedMemoryManager:
         history: Optional[List] = None,
     ) -> str:
         """
-        三层记忆注入：
+        四层记忆注入：
+          L0 个人记忆矩阵（认知风格/专长/目标/价值观，持续更新）
           L1 用户画像（全量注入，稳定偏好）
-          L2 长期记忆（语义向量优先，关键词降级，去重）
+          L2 长期记忆（FAISS 语义优先，关键词降级，去重）
+             — FAISS 路径不依赖 _embedding_fn（已修复原有误判条件）
           L3 历史摘要（仅超出滑动窗口时注入）
         """
         lines = []
+
+        # ── L0: 个人记忆矩阵（最动态，每轮后台更新）──
+        matrix_ctx = self.personality_matrix.to_context_string()
+        if matrix_ctx:
+            lines.append(matrix_ctx)
 
         # ── L1: 用户画像（稳定偏好，每次全量注入）──
         profile_context = self.user_profile.to_context_string().strip()
         if profile_context:
             lines.append(profile_context)
 
-        # ── L2: 长期记忆（语义检索优先，关键词降级，严格去重）──
+        # ── L2: 长期记忆（FAISS 语义优先，关键词降级，去重）──
         seen_contents: set = set()
         memory_lines: list = []
 
-        if self._embedding_fn is not None:
-            # 语义向量搜索
-            vector_hits = self.search_vector_memories(user_input, limit=5)
-            for m in vector_hits:
-                content = m.get("content", "")
-                if content and len(content) < 300 and content not in seen_contents:
-                    seen_contents.add(content)
-                    memory_lines.append(f"• {content}")
-        else:
-            # 降级：关键词搜索
+        # FAISS 语义检索不需要 _embedding_fn；直接尝试，无结果再降级
+        vector_hits = self.search_vector_memories(user_input, limit=5)
+        for m in vector_hits:
+            content = m.get("content", "")
+            if content and len(content) < 300 and content not in seen_contents:
+                seen_contents.add(content)
+                memory_lines.append(f"• {content}")
+
+        if not memory_lines:
+            # FAISS 无结果 → 降级关键词检索
             kw_hits = self.search_memories(user_input, limit=4)
             for m in kw_hits:
                 content = m.get("content", "")
@@ -878,6 +1091,59 @@ class EnhancedMemoryManager:
                 lines.append(f"\n[历史对话摘要]\n{summary}")
 
         return "\n".join(lines) if lines else ""
+
+    def _recency_weight(self, iso_ts: str) -> float:
+        """指数衰减时效权重：24h内≈1.0，7天≈0.7，30天≈0.4"""
+        if not iso_ts:
+            return 0.5
+        try:
+            dt = datetime.fromisoformat(iso_ts)
+            age_hours = (datetime.now() - dt).total_seconds() / 3600
+            return max(0.2, math.exp(-age_hours / (7 * 24)))
+        except Exception:
+            return 0.5
+
+    def update_personality_async(self, user_msg: str, ai_msg: str, llm_fn):
+        """非阻塞触发 PersonalityMatrix 更新，在 _start_memory_extraction 中调用。"""
+        PersonalityMatrix.update_async(user_msg, ai_msg, llm_fn, self.personality_matrix)
+
+    def get_compact_memory_snapshot(self, max_chars: int = 200) -> str:
+        """返回适合注入本地模型（Ollama）上下文的精简记忆摘要（≤max_chars字符）。
+        从 PersonalityMatrix 提取最有价值的维度，避免撑爆本地模型的短上下文窗口。"""
+        mx = self.personality_matrix.data
+        parts = []
+
+        # 主导认知风格
+        cog = mx.get("cognitive", {})
+        if cog:
+            dominant = max(cog, key=lambda k: cog[k])
+            if cog[dominant] > 0.55:
+                labels = {
+                    "exploratory": "探索", "executor": "执行",
+                    "analytical": "分析", "creative": "创意",
+                }
+                parts.append(f"风格:{labels.get(dominant, dominant)}")
+
+        # 前2专长领域
+        expertise = mx.get("expertise", {})
+        if expertise:
+            top2 = sorted(expertise.items(), key=lambda x: x[1], reverse=True)[:2]
+            parts.append(f"擅长:{','.join(t[0] for t in top2)}")
+
+        # 最近目标
+        goals = [g for g in mx.get("goals", []) if g]
+        if goals:
+            parts.append(f"目标:{goals[-1][:20]}")
+
+        # 最近主题
+        themes = mx.get("recent_themes", [])
+        if themes:
+            parts.append(f"近期:{themes[-1][:10]}")
+
+        if not parts:
+            return ""
+        result = " | ".join(parts)
+        return result[:max_chars]
 
     def get_all_memories(self) -> List[Dict]:
         """获取所有记忆"""

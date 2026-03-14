@@ -156,10 +156,15 @@ class ContextWindowManager:
         try:
             mgr = get_memory_fn()
             if mgr is not None and query and len(query.strip()) > 4:
-                # 优先使用向量语义检索（FAISS），关键词搜索作为备用
-                hits = mgr.search_vector_memories(
-                    query, limit=4
-                ) or mgr.search_memories(query, limit=4)
+                # 优先 FAISS 语义向量检索（不依赖 _embedding_fn），无结果再降级关键词
+                hits: List[Dict] = []
+                if hasattr(mgr, 'search_vector_memories'):
+                    try:
+                        hits = mgr.search_vector_memories(query, limit=4) or []
+                    except Exception:
+                        hits = []
+                if not hits:
+                    hits = mgr.search_memories(query, limit=4) or []
                 if hits:
                     lines: List[str] = []
                     for h in hits:
