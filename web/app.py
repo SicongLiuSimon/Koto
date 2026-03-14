@@ -6641,12 +6641,6 @@ def app_main():
     return render_template("index.html")
 
 
-@app.route("/product")
-def product_page():
-    """Public marketing/product landing page — always accessible, no auth required."""
-    return render_template("product.html")
-
-
 @app.route("/file-network")
 def file_network():
     """文件网络界面"""

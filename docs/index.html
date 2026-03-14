@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Koto 言 — Your AI-Powered Workspace</title>
+  <meta name="description" content="Koto is an open-source AI assistant for chat, documents, presentations, voice, and knowledge graphs — runs privately on your machine or in the cloud." />
+  <meta property="og:title" content="Koto 言 — Your AI-Powered Workspace" />
+  <meta property="og:description" content="All-in-one AI assistant: chat, documents, PPT generation, voice, knowledge graphs and more. Local or cloud." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <style>
+    /* ─────────────────────────────────────────
+       DESIGN TOKENS
+    ───────────────────────────────────────── */
+    :root {
+      --bg-0:   #030710;
+      --bg-1:   #080f1e;
+      --bg-2:   #0d1728;
+      --bg-3:   #121f32;
+      --cyan:   #63c6ff;
+      --teal:   #76f7d4;
+      --purple: #a78bfa;
+      --pink:   #f472b6;
+      --amber:  #fbbf24;
+      --green:  #4ade80;
+      --grad:   linear-gradient(135deg, #63c6ff 0%, #76f7d4 100%);
+      --grad-alt: linear-gradient(135deg, #a78bfa 0%, #63c6ff 100%);
+      --t1: #eef2ff;
+      --t2: #8fa3c8;
+      --t3: #4a5a78;
+      --border: rgba(255,255,255,0.07);
+      --glow:   rgba(99,198,255,0.22);
+      --r1: 10px; --r2: 14px; --r3: 20px; --r4: 28px;
+      --ease: all .3s cubic-bezier(.4,0,.2,1);
+    }
+
+    /* ─────────────────────────────────────────
+       RESET
+    ───────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-0);
+      color: var(--t1);
+      overflow-x: hidden;
+      line-height: 1.65;
+    }
+    a { text-decoration: none; color: inherit; }
+
+    /* ─────────────────────────────────────────
+       BACKGROUND
+    ───────────────────────────────────────── */
+    .bg-wrap {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    }
+    .bg-radial {
+      position: absolute; border-radius: 50%;
+      filter: blur(120px); pointer-events: none;
+    }
+    .bg-radial-1 { width: 700px; height: 700px; top: -200px; left: -150px; background: rgba(99,198,255,0.07); animation: orb 30s ease-in-out infinite; }
+    .bg-radial-2 { width: 500px; height: 500px; bottom: 5%; right: -100px; background: rgba(118,247,212,0.05); animation: orb 24s ease-in-out infinite reverse; }
+    .bg-radial-3 { width: 300px; height: 300px; top: 50%; left: 55%; background: rgba(167,139,250,0.04); animation: orb 18s ease-in-out infinite; animation-delay: -8s; }
+    @keyframes orb {
+      0%,100% { transform: translate(0,0) scale(1); }
+      33%  { transform: translate(50px,-50px) scale(1.07); }
+      66%  { transform: translate(-30px,40px) scale(0.95); }
+    }
+    .grid-bg {
+      position: absolute; inset: 0; opacity: 0.02;
+      background-image: linear-gradient(var(--cyan) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--cyan) 1px, transparent 1px);
+      background-size: 70px 70px;
+    }
+
+    /* ─────────────────────────────────────────
+       LAYOUT HELPERS
+    ───────────────────────────────────────── */
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; position: relative; z-index: 1; }
+
+    /* gradient text */
+    .gt  { background: var(--grad);     -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .gta { background: var(--grad-alt); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+
+    /* section skeleton */
+    .sec { padding: 120px 0; position: relative; z-index: 1; }
+    .sec-eye { display: flex; justify-content: center; margin-bottom: 18px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 500;
+      border: 1px solid rgba(99,198,255,0.2); background: rgba(99,198,255,0.07); color: var(--cyan);
+    }
+    .pill-teal   { border-color: rgba(118,247,212,0.2); background: rgba(118,247,212,0.07); color: var(--teal); }
+    .pill-purple { border-color: rgba(167,139,250,0.2); background: rgba(167,139,250,0.07); color: var(--purple); }
+    .pill-pink   { border-color: rgba(244,114,182,0.2); background: rgba(244,114,182,0.07); color: var(--pink); }
+    .sec-h2 { font-size: clamp(28px,4vw,44px); font-weight: 900; text-align: center; line-height: 1.12; margin-bottom: 14px; }
+    .sec-p  { text-align: center; color: var(--t2); font-size: 17px; max-width: 560px; margin: 0 auto 64px; }
+
+    /* ─────────────────────────────────────────
+       BUTTONS
+    ───────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 9px;
+      padding: 13px 28px; border-radius: var(--r2); font-size: 15px; font-weight: 600;
+      cursor: pointer; border: none; white-space: nowrap; transition: var(--ease);
+    }
+    .btn-prime {
+      background: var(--grad); color: #03060d;
+      box-shadow: 0 4px 22px rgba(99,198,255,0.3);
+    }
+    .btn-prime:hover { transform: translateY(-2px); box-shadow: 0 8px 36px rgba(99,198,255,0.45); }
+    .btn-ghost {
+      background: transparent; color: var(--t1);
+      border: 1px solid var(--border); backdrop-filter: blur(8px);
+    }
+    .btn-ghost:hover { border-color: var(--glow); background: rgba(99,198,255,0.05); }
+    .btn-lg { padding: 15px 36px; font-size: 16px; border-radius: var(--r3); }
+
+    /* ─────────────────────────────────────────
+       NAV
+    ───────────────────────────────────────── */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+      height: 64px; display: flex; align-items: center;
+      padding: 0 40px;
+      background: rgba(3,7,16,0.72); backdrop-filter: blur(24px) saturate(180%);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; }
+    .brand-mark {
+      width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+      background: var(--grad); display: flex; align-items: center; justify-content: center;
+      font-size: 17px; font-weight: 900; color: #03060d;
+      box-shadow: 0 0 22px rgba(99,198,255,0.32);
+    }
+    .nav-links { display: flex; gap: 2px; margin: 0 auto 0 40px; }
+    .nav-links a {
+      padding: 7px 14px; color: var(--t2); font-size: 14px; font-weight: 500;
+      border-radius: var(--r1); transition: var(--ease);
+    }
+    .nav-links a:hover { color: var(--t1); background: rgba(255,255,255,0.05); }
+    .nav-links a.active { color: var(--cyan); }
+    .nav-cta { display: flex; gap: 10px; align-items: center; }
+    .nav-gh {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 14px; border-radius: var(--r1);
+      color: var(--t2); font-size: 14px; font-weight: 500;
+      border: 1px solid var(--border); transition: var(--ease);
+    }
+    .nav-gh:hover { color: var(--t1); border-color: var(--glow); }
+
+    /* GitHub SVG icon */
+    .ico-gh { width: 17px; height: 17px; fill: currentColor; flex-shrink: 0; }
+
+    /* ─────────────────────────────────────────
+       HERO
+    ───────────────────────────────────────── */
+    .hero {
+      padding: 160px 40px 100px;
+      display: flex; flex-direction: column; align-items: center;
+      position: relative; z-index: 1;
+    }
+    .hero-pill { margin-bottom: 28px; }
+    .hero-h1 {
+      font-size: clamp(46px,7.5vw,88px); font-weight: 900;
+      line-height: 1.04; letter-spacing: -0.03em;
+      text-align: center; max-width: 920px; margin-bottom: 26px;
+    }
+    .hero-sub {
+      font-size: 19px; color: var(--t2);
+      text-align: center; max-width: 600px; margin-bottom: 48px; line-height: 1.78;
+    }
+    .hero-btns { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin-bottom: 76px; }
+
+    /* cursor */
+    .cur { display: inline-block; width: 3px; height: .88em; background: var(--cyan); border-radius: 2px; vertical-align: middle; margin-left: 3px; animation: blink 1.1s step-end infinite; }
+    @keyframes blink { 0%,100%{opacity:1}50%{opacity:0} }
+
+    /* ── APP WINDOW MOCKUP ── */
+    .app-window {
+      width: 100%; max-width: 900px;
+      border-radius: var(--r4); overflow: hidden;
+      border: 1px solid rgba(99,198,255,0.18);
+      background: var(--bg-1);
+      box-shadow: 0 50px 120px rgba(0,0,0,.65), 0 0 100px rgba(99,198,255,.07);
+    }
+    .aw-bar {
+      display: flex; align-items: center; gap: 7px;
+      padding: 13px 18px; background: rgba(255,255,255,.025); border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot-r{background:#ff5f57} .dot-y{background:#febc2e} .dot-g{background:#28c840}
+    .aw-title { color: var(--t3); font-size: 13px; margin-left: 8px; }
+    .aw-body { display: flex; height: 380px; }
+
+    /* sidebar */
+    .aw-sidebar {
+      width: 210px; padding: 16px 10px; border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;
+    }
+    .aw-section-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--t3); padding: 4px 10px; margin: 8px 0 4px; }
+    .aw-item {
+      padding: 8px 12px; border-radius: var(--r1); font-size: 13px; color: var(--t2);
+      display: flex; align-items: center; gap: 9px; cursor: pointer; transition: var(--ease);
+    }
+    .aw-item:hover  { background: rgba(255,255,255,.04); color: var(--t1); }
+    .aw-item.on     { background: rgba(99,198,255,.08); color: var(--t1); border-left: 2px solid var(--cyan); }
+    .aw-item .ic    { width: 14px; text-align: center; font-size: 13px; }
+
+    /* chat area */
+    .aw-chat {
+      flex: 1; padding: 22px 20px; display: flex; flex-direction: column; gap: 14px; overflow: hidden;
+    }
+    .cm { display: flex; gap: 9px; max-width: 88%; }
+    .cm.u { align-self: flex-end; flex-direction: row-reverse; }
+    .av {
+      width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 800;
+    }
+    .av-ai   { background: var(--grad); color: #03060d; }
+    .av-user { background: rgba(167,139,250,.18); color: var(--purple); font-size: 11px; }
+    .cb {
+      padding: 10px 14px; border-radius: 13px; font-size: 13px; line-height: 1.55;
+    }
+    .cb-ai   { background: var(--bg-2); border-radius: 4px 13px 13px 13px; }
+    .cb-user { background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.18); border-radius: 13px 4px 13px 13px; }
+    .cb-code {
+      font-family: 'Consolas', 'Courier New', monospace; font-size: 11.5px;
+      background: rgba(0,0,0,.35); border-radius: 7px; padding: 8px 12px; margin-top: 7px; color: var(--teal);
+    }
+    .dots { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
+    .dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); animation: dotbounce 1.2s ease-in-out infinite; }
+    .dots span:nth-child(2){animation-delay:.15s} .dots span:nth-child(3){animation-delay:.3s}
+    @keyframes dotbounce { 0%,60%,100%{transform:translateY(0);opacity:.4} 30%{transform:translateY(-6px);opacity:1} }
+
+    /* floating badges */
+    .fbadge {
+      position: absolute;
+      padding: 9px 16px; border-radius: 13px;
+      background: rgba(8,15,30,.88); border: 1px solid rgba(99,198,255,.2);
+      backdrop-filter: blur(16px); font-size: 13px; font-weight: 500;
+      display: flex; align-items: center; gap: 9px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.4);
+      animation: fbfloat 6s ease-in-out infinite;
+    }
+    .fb1 { top: 14%; left: -68px; animation-delay: 0s; }
+    .fb2 { bottom: 18%; right: -62px; animation-delay: -3s; }
+    @keyframes fbfloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-9px)} }
+    .fb-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    /* ─────────────────────────────────────────
+       SOCIAL PROOF STRIP
+    ───────────────────────────────────────── */
+    .strip {
+      position: relative; z-index: 1;
+      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+      background: rgba(8,15,30,.5); padding: 20px 0;
+    }
+    .strip-inner {
+      display: flex; gap: 48px; flex-wrap: wrap; justify-content: center; align-items: center;
+      padding: 0 40px;
+    }
+    .strip-item {
+      display: flex; align-items: center; gap: 9px;
+      color: var(--t3); font-size: 14px; font-weight: 500; transition: var(--ease);
+    }
+    .strip-item:hover { color: var(--t2); }
+    .strip-ic { font-size: 18px; }
+
+    /* ─────────────────────────────────────────
+       FEATURES
+    ───────────────────────────────────────── */
+    .feat-grid { display: grid; gap: 18px; grid-template-columns: repeat(3,1fr); }
+    .fc {
+      padding: 30px; border-radius: var(--r3);
+      background: linear-gradient(145deg, var(--bg-1), var(--bg-2));
+      border: 1px solid var(--border); transition: var(--ease); position: relative; overflow: hidden;
+    }
+    .fc::after { content:''; position:absolute; inset:0; background:var(--grad); opacity:0; border-radius:inherit; transition:var(--ease); }
+    .fc:hover { transform:translateY(-5px); border-color:rgba(99,198,255,.28); box-shadow:0 0 40px rgba(99,198,255,.12), 0 20px 50px rgba(0,0,0,.4); }
+    .fc:hover::after { opacity:.025; }
+    .fi {
+      width: 50px; height: 50px; border-radius: 14px; margin-bottom: 18px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; position: relative; z-index: 1;
+    }
+    .fi-c  { background: rgba(99,198,255,.1); }
+    .fi-t  { background: rgba(118,247,212,.1); }
+    .fi-p  { background: rgba(167,139,250,.1); }
+    .fi-pk { background: rgba(244,114,182,.1); }
+    .fi-o  { background: rgba(251,146,60,.1);  }
+    .fi-g  { background: rgba(74,222,128,.1);  }
+    .fc h3 { font-size: 17px; font-weight: 700; margin-bottom: 9px; position:relative;z-index:1; }
+    .fc p  { color: var(--t2); font-size: 14px; line-height: 1.7; position:relative;z-index:1; }
+    .fc-tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:14px; position:relative;z-index:1; }
+    .tag { font-size:11px; padding:3px 10px; border-radius:20px; background:rgba(255,255,255,.05); color:var(--t3); border:1px solid var(--border); }
+
+    /* ─────────────────────────────────────────
+       HOW IT WORKS
+    ───────────────────────────────────────── */
+    .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:28px; }
+    .step {
+      padding:36px 28px; border-radius:var(--r3); border:1px solid var(--border);
+      background:var(--bg-1); text-align:center; transition:var(--ease);
+    }
+    .step:hover { border-color:var(--glow); box-shadow:0 0 40px rgba(99,198,255,.1); }
+    .step-n {
+      width:50px; height:50px; border-radius:14px; margin:0 auto 18px;
+      background:var(--grad); color:#03060d;
+      display:flex; align-items:center; justify-content:center;
+      font-size:20px; font-weight:900;
+    }
+    .step h3 { font-size:17px; font-weight:700; margin-bottom:9px; }
+    .step p  { color:var(--t2); font-size:14px; line-height:1.7; }
+    .step code { background:var(--bg-2); padding:2px 7px; border-radius:5px; font-size:12.5px; color:var(--teal); font-family:'Consolas','Courier New',monospace; }
+
+    /* ─────────────────────────────────────────
+       SPOTLIGHT (alternating)
+    ───────────────────────────────────────── */
+    .spot { padding: 60px 0; }
+    .spot-grid { display:grid; grid-template-columns:1fr 1fr; gap:80px; align-items:center; }
+    .spot-grid.rev { direction:rtl; }
+    .spot-grid.rev > * { direction:ltr; }
+    .spot h2 { font-size:clamp(26px,3.5vw,40px); font-weight:800; line-height:1.14; margin-bottom:14px; }
+    .spot-p { color:var(--t2); font-size:16px; line-height:1.78; margin-bottom:24px; }
+    .spot-list { display:flex; flex-direction:column; gap:11px; }
+    .sl-item { display:flex; align-items:flex-start; gap:11px; font-size:14px; color:var(--t2); }
+    .sl-check { color:var(--teal); flex-shrink:0; margin-top:2px; font-size:15px; }
+
+    /* visual panels */
+    .spot-vis {
+      border-radius:var(--r4); overflow:hidden; border:1px solid rgba(99,198,255,.15);
+      background:var(--bg-1); box-shadow:0 30px 80px rgba(0,0,0,.5);
+    }
+
+    /* mini chat */
+    .mc { padding:20px; }
+    .mc-head { display:flex; align-items:center; gap:10px; padding-bottom:14px; margin-bottom:14px; border-bottom:1px solid var(--border); }
+    .mc-av { width:32px;height:32px;border-radius:50%;background:var(--grad);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#03060d; }
+    .mc-name { font-size:14px;font-weight:600; }
+    .mc-status { font-size:11px;color:var(--teal); }
+    .mc-msgs { display:flex;flex-direction:column;gap:11px; }
+    .mm { display:flex; gap:8px; }
+    .mm.um { flex-direction:row-reverse; }
+    .ma { width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0; }
+    .ma-ai { background:var(--grad);color:#03060d; }
+    .ma-u  { background:rgba(167,139,250,.18);color:var(--purple); }
+    .mb { padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.55;max-width:240px; }
+    .mb-ai { background:var(--bg-2); }
+    .mb-u  { background:rgba(99,198,255,.1);border:1px solid rgba(99,198,255,.15); }
+    .hl { color:var(--cyan);font-weight:600; }
+
+    /* ppt preview */
+    .ppt { padding:20px; }
+    .ppt-slide {
+      border-radius:10px; overflow:hidden; margin-bottom:10px;
+      background:linear-gradient(135deg,#1a1060,#0d1a40);
+      padding:22px 26px; position:relative;
+    }
+    .ppt-slide::after { content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(99,198,255,.07),transparent); }
+    .ppt-slide-t { font-size:15px;font-weight:700;margin-bottom:7px; }
+    .ppt-slide-c { font-size:12px;color:var(--t2);line-height:1.6; }
+    .ppt-thumbs { display:flex;gap:8px;margin-bottom:12px; }
+    .ppt-thumb { flex:1;border-radius:8px;padding:14px 16px;background:linear-gradient(135deg,#160e50,#0b1535); }
+    .ppt-thumb-t { font-size:12px;font-weight:600;margin-bottom:5px; }
+    .ppt-thumb-c { font-size:10.5px;color:var(--t2); }
+    .ppt-progress { display:flex;gap:4px; }
+    .pd { height:4px;flex:1;border-radius:2px;background:var(--border); }
+    .pd.d { background:var(--cyan); }
+    .pd.a { background:var(--teal);animation:ppulse 1s ease-in-out infinite; }
+    @keyframes ppulse { 0%,100%{opacity:.7} 50%{opacity:1} }
+    .ppt-stat { display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t2);margin-top:10px; }
+    .ppt-stat .s-dot { width:7px;height:7px;border-radius:50%;background:var(--teal);animation:ppulse 1s infinite; }
+
+    /* ─────────────────────────────────────────
+       STATS
+    ───────────────────────────────────────── */
+    .stats-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:20px; }
+    .sc {
+      text-align:center;padding:40px 20px;border-radius:var(--r3);
+      border:1px solid var(--border);background:var(--bg-1);transition:var(--ease);
+    }
+    .sc:hover { border-color:var(--glow); }
+    .sn { font-size:52px;font-weight:900;line-height:1;margin-bottom:7px; }
+    .sl { color:var(--t2);font-size:14px; }
+
+    /* ─────────────────────────────────────────
+       MODELS
+    ───────────────────────────────────────── */
+    .models-wrap { display:flex;flex-wrap:wrap;gap:12px;justify-content:center; }
+    .model-chip {
+      padding:10px 20px;border-radius:30px;
+      border:1px solid var(--border);background:var(--bg-1);
+      display:flex;align-items:center;gap:9px;
+      font-size:14px;font-weight:500;transition:var(--ease);
+    }
+    .model-chip:hover { border-color:var(--glow);background:rgba(99,198,255,.04); }
+    .m-dot { width:8px;height:8px;border-radius:50%; }
+    .md-g { background:#4285f4; }
+    .md-o { background:#10a37f; }
+    .md-a { background:#cc785c; }
+    .md-l { background:var(--teal); }
+
+    /* ─────────────────────────────────────────
+       DEPLOY
+    ───────────────────────────────────────── */
+    .deploy-grid { display:grid;grid-template-columns:repeat(2,1fr);gap:22px; }
+    .dc {
+      padding:38px;border-radius:var(--r4);
+      border:1px solid var(--border);background:var(--bg-1);
+      transition:var(--ease);position:relative;overflow:hidden;
+    }
+    .dc:hover { border-color:var(--glow);box-shadow:0 0 40px rgba(99,198,255,.1); }
+    .dc.feat { border-color:rgba(99,198,255,.22);background:linear-gradient(145deg,var(--bg-1),var(--bg-2)); }
+    .dc.feat::before {
+      content:'RECOMMENDED';position:absolute;top:20px;right:-30px;
+      background:var(--grad);color:#03060d;font-size:10px;font-weight:800;
+      padding:4px 44px;transform:rotate(45deg);letter-spacing:.1em;
+    }
+    .dc-icon { font-size:34px;margin-bottom:18px; }
+    .dc h3 { font-size:21px;font-weight:800;margin-bottom:8px; }
+    .dc-desc { color:var(--t2);font-size:14px;line-height:1.7;margin-bottom:22px; }
+    .dc-feats { display:flex;flex-direction:column;gap:10px; }
+    .dfi { display:flex;align-items:center;gap:10px;font-size:14px; }
+    .dfi .check { color:var(--teal);font-size:13px;flex-shrink:0; }
+
+    /* ─────────────────────────────────────────
+       CTA BANNER
+    ───────────────────────────────────────── */
+    .cta-box {
+      border-radius:var(--r4);padding:80px 60px;text-align:center;position:relative;overflow:hidden;
+      background:linear-gradient(135deg,rgba(99,198,255,.07),rgba(118,247,212,.04));
+      border:1px solid rgba(99,198,255,.18);
+    }
+    .cta-box::before { content:'';position:absolute;inset:0;background:radial-gradient(ellipse 700px 350px at 50% 50%,rgba(99,198,255,.055),transparent); }
+    .cta-box h2 { font-size:clamp(28px,4.5vw,52px);font-weight:900;margin-bottom:14px;position:relative; }
+    .cta-box p  { color:var(--t2);font-size:17px;max-width:520px;margin:0 auto 38px;position:relative; }
+    .cta-btns   { display:flex;gap:14px;justify-content:center;flex-wrap:wrap;position:relative; }
+
+    /* ─────────────────────────────────────────
+       FOOTER
+    ───────────────────────────────────────── */
+    .footer { position:relative;z-index:1;border-top:1px solid var(--border);padding:60px 0 36px; }
+    .footer-grid { display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px; }
+    .fg-brand p { color:var(--t3);font-size:13px;line-height:1.7;max-width:260px;margin-top:12px; }
+    .fg-col h4 { font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--t3);margin-bottom:14px; }
+    .fg-col a { display:block;color:var(--t2);font-size:14px;margin-bottom:9px;transition:var(--ease); }
+    .fg-col a:hover { color:var(--t1); }
+    .footer-bot {
+      border-top:1px solid var(--border);padding-top:22px;margin-top:40px;
+      display:flex;justify-content:space-between;align-items:center;
+    }
+    .footer-bot p { color:var(--t3);font-size:13px; }
+    .f-gh-btn {
+      display:flex;align-items:center;gap:7px;
+      padding:7px 14px;border-radius:var(--r1);border:1px solid var(--border);
+      color:var(--t2);font-size:13px;transition:var(--ease);
+    }
+    .f-gh-btn:hover { color:var(--t1);border-color:var(--glow); }
+
+    /* ─────────────────────────────────────────
+       REVEAL ANIMATION
+    ───────────────────────────────────────── */
+    .rv { opacity:0;transform:translateY(30px);transition:opacity .7s ease,transform .7s ease; }
+    .rv.d1{transition-delay:.1s} .rv.d2{transition-delay:.2s} .rv.d3{transition-delay:.3s} .rv.d4{transition-delay:.4s}
+    .rv.in { opacity:1;transform:translateY(0); }
+
+    /* ─────────────────────────────────────────
+       RESPONSIVE
+    ───────────────────────────────────────── */
+    @media(max-width:1024px) {
+      .feat-grid    { grid-template-columns:repeat(2,1fr); }
+      .spot-grid    { grid-template-columns:1fr; gap:44px; }
+      .spot-grid.rev{ direction:ltr; }
+      .stats-grid   { grid-template-columns:repeat(2,1fr); }
+      .footer-grid  { grid-template-columns:1fr 1fr; }
+    }
+    @media(max-width:768px) {
+      .wrap { padding:0 20px; }
+      .nav  { padding:0 20px; }
+      .hero { padding:110px 20px 70px; }
+      .nav-links { display:none; }
+      .feat-grid  { grid-template-columns:1fr; }
+      .steps      { grid-template-columns:1fr; }
+      .deploy-grid{ grid-template-columns:1fr; }
+      .footer-grid{ grid-template-columns:1fr; }
+      .footer-bot { flex-direction:column;gap:14px;text-align:center; }
+      .aw-sidebar  { display:none; }
+      .fb1,.fb2   { display:none; }
+      .cta-box     { padding:48px 24px; }
+      .sec { padding:80px 0; }
+    }
+    @media(max-width:480px) {
+      .hero-h1 { font-size:38px; }
+      .hero-sub{ font-size:16px; }
+      .stats-grid { grid-template-columns:repeat(2,1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- BG -->
+<div class="bg-wrap" aria-hidden="true">
+  <div class="grid-bg"></div>
+  <div class="bg-radial bg-radial-1"></div>
+  <div class="bg-radial bg-radial-2"></div>
+  <div class="bg-radial bg-radial-3"></div>
+</div>
+
+<!-- ══════════════ NAV ══════════════ -->
+<nav class="nav" aria-label="Main navigation">
+  <a href="#" class="nav-brand">
+    <div class="brand-mark" aria-hidden="true">言</div>
+    Koto
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#how-it-works">Quick Start</a>
+    <a href="#models">Models</a>
+    <a href="#deploy">Deploy</a>
+  </div>
+  <div class="nav-cta">
+    <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="nav-gh">
+      <svg class="ico-gh" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+      GitHub
+    </a>
+    <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-prime">
+      Get Started ↗
+    </a>
+  </div>
+</nav>
+
+<!-- ══════════════ HERO ══════════════ -->
+<section class="hero" aria-labelledby="hero-heading">
+  <div class="hero-pill">
+    <span class="pill">✨ &nbsp;Open source · Local + Cloud · 100% free</span>
+  </div>
+
+  <h1 class="hero-h1" id="hero-heading">
+    The AI workspace<br>
+    that <span class="gt" id="typed"></span><span class="cur" aria-hidden="true"></span>
+  </h1>
+  <p class="hero-sub">
+    Koto combines intelligent chat, document understanding, presentation generation, voice interaction, and knowledge graphs — all in one beautiful interface that works on your machine or in the cloud.
+  </p>
+  <div class="hero-btns">
+    <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-prime btn-lg">
+      <svg class="ico-gh" style="width:18px;height:18px" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+      View on GitHub
+    </a>
+    <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-ghost btn-lg">
+      ⬇&nbsp; Download
+    </a>
+  </div>
+
+  <!-- App window -->
+  <div class="app-window rv" style="position:relative">
+    <!-- floating badges -->
+    <div class="fbadge fb1" aria-hidden="true">
+      <div class="fb-dot" style="background:var(--teal)"></div>
+      Local model active
+    </div>
+    <div class="fbadge fb2" aria-hidden="true">
+      ⚡ Streaming response
+    </div>
+
+    <div class="aw-bar">
+      <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+      <span class="aw-title">Koto — AI Workspace</span>
+    </div>
+    <div class="aw-body">
+      <div class="aw-sidebar" aria-hidden="true">
+        <span class="aw-section-label">Sessions</span>
+        <div class="aw-item on"><span class="ic">💬</span> Market Analysis</div>
+        <div class="aw-item"><span class="ic">📄</span> Q4 Report</div>
+        <div class="aw-item"><span class="ic">💻</span> Code Review</div>
+        <div class="aw-item"><span class="ic">📊</span> Data Deep-Dive</div>
+        <span class="aw-section-label" style="margin-top:14px">Tools</span>
+        <div class="aw-item"><span class="ic">📎</span> Upload Doc</div>
+        <div class="aw-item"><span class="ic">🎯</span> Generate PPT</div>
+        <div class="aw-item"><span class="ic">🗺️</span> Knowledge Map</div>
+      </div>
+      <div class="aw-chat" aria-label="Chat demo">
+        <div class="cm">
+          <div class="av av-ai">K</div>
+          <div class="cb cb-ai">
+            I've analysed your uploaded report. Key findings:
+            <div class="cb-code">• Revenue +23 % YoY (Q3 2024)<br>• Enterprise segment: +41 %<br>• Churn dropped 3.4 % → 2.1 %</div>
+          </div>
+        </div>
+        <div class="cm u">
+          <div class="av av-user">U</div>
+          <div class="cb cb-user">Generate a board-ready PPT from this</div>
+        </div>
+        <div class="cm">
+          <div class="av av-ai">K</div>
+          <div class="cb cb-ai">
+            Building your presentation…
+            <div class="cb-code" style="color:var(--teal)">✓ 8 slides · exec layout · 3 data charts</div>
+          </div>
+        </div>
+        <div class="cm">
+          <div class="av av-ai">K</div>
+          <div class="cb cb-ai"><div class="dots"><span></span><span></span><span></span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ SOCIAL PROOF STRIP ══════════════ -->
+<div class="strip">
+  <div class="strip-inner">
+    <span class="strip-item"><span class="strip-ic">🔵</span> Gemini 2.0</span>
+    <span class="strip-item"><span class="strip-ic">🟢</span> GPT-4o</span>
+    <span class="strip-item"><span class="strip-ic">🟠</span> Claude 3.5</span>
+    <span class="strip-item"><span class="strip-ic">🖥️</span> Ollama Local</span>
+    <span class="strip-item"><span class="strip-ic">🐳</span> Docker Ready</span>
+    <span class="strip-item"><span class="strip-ic">🔒</span> Privacy-first</span>
+    <span class="strip-item"><span class="strip-ic">⚡</span> Real-time Streaming</span>
+    <span class="strip-item"><span class="strip-ic">🌐</span> EN / ZH / JA</span>
+  </div>
+</div>
+
+<!-- ══════════════ FEATURES ══════════════ -->
+<section class="sec" id="features" aria-labelledby="feat-heading">
+  <div class="wrap">
+    <div class="sec-eye"><span class="pill">Everything you need</span></div>
+    <h2 class="sec-h2 rv" id="feat-heading">Powerful capabilities,<br><span class="gt">beautifully integrated</span></h2>
+    <p class="sec-p rv d1">From quick questions to complex document workflows — Koto handles it all in one elegant interface.</p>
+
+    <div class="feat-grid">
+      <div class="fc rv d1">
+        <div class="fi fi-c">💬</div>
+        <h3>Intelligent Chat</h3>
+        <p>Multi-turn conversations with long-term memory. Koto remembers context across sessions and injects relevant history automatically.</p>
+        <div class="fc-tags"><span class="tag">8 Themes</span><span class="tag">Streaming SSE</span><span class="tag">Memory</span></div>
+      </div>
+      <div class="fc rv d2">
+        <div class="fi fi-t">📄</div>
+        <h3>Document Intelligence</h3>
+        <p>Upload Word, PDF, Excel, or PowerPoint files. Koto reads, annotates, summarises and answers detailed questions from your content.</p>
+        <div class="fc-tags"><span class="tag">PDF · DOCX · XLSX</span><span class="tag">Q&amp;A</span><span class="tag">Batch</span></div>
+      </div>
+      <div class="fc rv d3">
+        <div class="fi fi-p">📊</div>
+        <h3>PPT Generation</h3>
+        <p>Type a topic or paste your data — Koto generates a complete, professionally designed PowerPoint presentation in seconds.</p>
+        <div class="fc-tags"><span class="tag">Auto Layout</span><span class="tag">Charts</span><span class="tag">Templates</span></div>
+      </div>
+      <div class="fc rv d1">
+        <div class="fi fi-pk">🎙️</div>
+        <h3>Voice Interaction</h3>
+        <p>Speak naturally in English, Chinese, or Japanese. Real-time speech recognition and TTS playback for hands-free AI.</p>
+        <div class="fc-tags"><span class="tag">EN / ZH / JA</span><span class="tag">TTS</span><span class="tag">Wake Word</span></div>
+      </div>
+      <div class="fc rv d2">
+        <div class="fi fi-o">🗺️</div>
+        <h3>Knowledge Graph</h3>
+        <p>Automatically extract concepts and relationships from your documents and visualise them as an interactive graph.</p>
+        <div class="fc-tags"><span class="tag">D3.js Graph</span><span class="tag">Semantic RAG</span><span class="tag">Search</span></div>
+      </div>
+      <div class="fc rv d3">
+        <div class="fi fi-g">🧩</div>
+        <h3>Skills &amp; Automation</h3>
+        <p>Enable, customise, and auto-build AI skills — specialised prompt templates that turn Koto into a domain expert for any task.</p>
+        <div class="fc-tags"><span class="tag">Auto-builder</span><span class="tag">Intent Match</span><span class="tag">Workflows</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ SPOTLIGHT 1 — Chat ══════════════ -->
+<section class="spot" aria-labelledby="spot1-heading">
+  <div class="wrap">
+    <div class="spot-grid">
+      <div class="rv">
+        <div style="margin-bottom:14px"><span class="pill pill-teal">Context-Aware AI</span></div>
+        <h2 id="spot1-heading">Conversations that <span class="gt">actually remember</span> you</h2>
+        <p class="spot-p">Koto builds a persistent memory of your preferences, past work and important facts — automatically injecting relevant context into every response without you lifting a finger.</p>
+        <div class="spot-list">
+          <div class="sl-item"><span class="sl-check">✓</span> Cross-session long-term memory with FAISS vector index</div>
+          <div class="sl-item"><span class="sl-check">✓</span> Smart history trimming — keeps context fresh, not bloated</div>
+          <div class="sl-item"><span class="sl-check">✓</span> 8 beautiful themes including dark, ocean, forest, and auto</div>
+          <div class="sl-item"><span class="sl-check">✓</span> Real-time streaming with interrupt support</div>
+        </div>
+      </div>
+      <div class="spot-vis rv d2">
+        <div class="mc">
+          <div class="mc-head">
+            <div class="mc-av">K</div>
+            <div><div class="mc-name">Koto AI</div><div class="mc-status">● Gemini 2.0 Flash</div></div>
+          </div>
+          <div class="mc-msgs">
+            <div class="mm">
+              <div class="ma ma-ai">K</div>
+              <div class="mb mb-ai">Based on our <span class="hl">previous discussion about your Q3 report</span>, the new data shows continued enterprise growth. Want me to update the summary?</div>
+            </div>
+            <div class="mm um">
+              <div class="ma ma-u">U</div>
+              <div class="mb mb-u">Yes, and include the competitor analysis from last week</div>
+            </div>
+            <div class="mm">
+              <div class="ma ma-ai">K</div>
+              <div class="mb mb-ai">Found it — <span class="hl">competitor_analysis_nov.pdf</span> from your workspace. Integrating now…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ SPOTLIGHT 2 — PPT ══════════════ -->
+<section class="spot" style="padding-top:0" aria-labelledby="spot2-heading">
+  <div class="wrap">
+    <div class="spot-grid rev">
+      <div class="rv">
+        <div style="margin-bottom:14px"><span class="pill pill-purple">Presentation AI</span></div>
+        <h2 id="spot2-heading">From idea to <span class="gta">polished slides</span> in seconds</h2>
+        <p class="spot-p">Describe your topic or paste your data. Koto's AI pipeline designs the structure, writes the content, and formats a complete presentation ready to present.</p>
+        <div class="spot-list">
+          <div class="sl-item"><span class="sl-check">✓</span> Automatic slide structure and content generation</div>
+          <div class="sl-item"><span class="sl-check">✓</span> Professional layouts with charts and visual elements</div>
+          <div class="sl-item"><span class="sl-check">✓</span> Edit and customise in the built-in slide editor</div>
+          <div class="sl-item"><span class="sl-check">✓</span> Download as .pptx instantly</div>
+        </div>
+      </div>
+      <div class="spot-vis rv d2">
+        <div class="ppt">
+          <div class="ppt-slide">
+            <div class="ppt-slide-t">Q4 2024 Business Review</div>
+            <div class="ppt-slide-c">• Revenue: $4.2 M (+23% YoY)<br>• Enterprise: +41% growth<br>• Churn: 2.1% ↓ from 3.4%</div>
+          </div>
+          <div class="ppt-thumbs">
+            <div class="ppt-thumb"><div class="ppt-thumb-t">Market Share</div><div class="ppt-thumb-c">Growing 3% MoM…</div></div>
+            <div class="ppt-thumb"><div class="ppt-thumb-t">Roadmap 2025</div><div class="ppt-thumb-c">API · Mobile…</div></div>
+          </div>
+          <div class="ppt-progress">
+            <div class="pd d"></div><div class="pd d"></div><div class="pd d"></div>
+            <div class="pd a"></div><div class="pd"></div><div class="pd"></div><div class="pd"></div><div class="pd"></div>
+          </div>
+          <div class="ppt-stat"><div class="s-dot"></div> Generating slide 4 of 8…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ HOW IT WORKS ══════════════ -->
+<section class="sec" id="how-it-works" aria-labelledby="how-heading">
+  <div class="wrap">
+    <div class="sec-eye"><span class="pill">Simple setup</span></div>
+    <h2 class="sec-h2 rv" id="how-heading">Up and running in <span class="gt">3 steps</span></h2>
+    <p class="sec-p rv d1">No complex configuration. Start locally in under 2 minutes.</p>
+    <div class="steps">
+      <div class="step rv d1">
+        <div class="step-n">1</div>
+        <h3>Clone &amp; Install</h3>
+        <p>Clone the repo and run <code>pip install -r config/requirements.txt</code>. Python 3.11+ is all you need.</p>
+      </div>
+      <div class="step rv d2">
+        <div class="step-n">2</div>
+        <h3>Add Your API Key</h3>
+        <p>Copy <code>config/gemini_config.env.example</code> and add your Gemini API key. Free tier works great.</p>
+      </div>
+      <div class="step rv d3">
+        <div class="step-n">3</div>
+        <h3>Run &amp; Chat</h3>
+        <p>Run <code>python src/server.py</code> and open <code>localhost:5000</code>. Your AI workspace is ready.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ STATS ══════════════ -->
+<section class="sec" style="padding:80px 0" aria-label="Project stats">
+  <div class="wrap">
+    <div class="stats-grid">
+      <div class="sc rv d1"><div class="sn gt" data-count="487" data-suffix="+">487+</div><div class="sl">Automated tests</div></div>
+      <div class="sc rv d2"><div class="sn gt" data-count="15"  data-suffix="+">15+</div><div class="sl">Core AI capabilities</div></div>
+      <div class="sc rv d3"><div class="sn gt" data-count="8"   data-suffix="">8</div><div class="sl">Beautiful UI themes</div></div>
+      <div class="sc rv d4"><div class="sn gt" data-count="100" data-suffix="%">100%</div><div class="sl">Open source</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ MODELS ══════════════ -->
+<section class="sec" id="models" style="padding:80px 0" aria-labelledby="models-heading">
+  <div class="wrap">
+    <div class="sec-eye"><span class="pill">Multi-model</span></div>
+    <h2 class="sec-h2 rv" id="models-heading">Works with the models<br><span class="gt">you already use</span></h2>
+    <p class="sec-p rv d1">Switch providers in one click. Koto auto-routes tasks to the best model for the job.</p>
+    <div class="models-wrap rv d2">
+      <div class="model-chip"><div class="m-dot md-g"></div> Gemini 2.0 Flash</div>
+      <div class="model-chip"><div class="m-dot md-g"></div> Gemini 1.5 Pro</div>
+      <div class="model-chip"><div class="m-dot md-o"></div> GPT-4o</div>
+      <div class="model-chip"><div class="m-dot md-o"></div> GPT-4 Turbo</div>
+      <div class="model-chip"><div class="m-dot md-a"></div> Claude 3.5 Sonnet</div>
+      <div class="model-chip"><div class="m-dot md-a"></div> Claude 3 Haiku</div>
+      <div class="model-chip"><div class="m-dot md-l"></div> Llama 3 (Ollama)</div>
+      <div class="model-chip"><div class="m-dot md-l"></div> Mistral (Local)</div>
+      <div class="model-chip"><div class="m-dot md-l"></div> Qwen 2.5 (Local)</div>
+      <div class="model-chip"><div class="m-dot md-l"></div> Any Ollama model</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ DEPLOY ══════════════ -->
+<section class="sec" id="deploy" aria-labelledby="deploy-heading">
+  <div class="wrap">
+    <div class="sec-eye"><span class="pill">Flexible deployment</span></div>
+    <h2 class="sec-h2 rv" id="deploy-heading">Run it your way —<br><span class="gt">local or cloud</span></h2>
+    <p class="sec-p rv d1">Designed to work perfectly on your laptop and scale to a multi-user cloud service.</p>
+    <div class="deploy-grid">
+      <div class="dc rv d1">
+        <div class="dc-icon">🖥️</div>
+        <h3>Local / Desktop</h3>
+        <p class="dc-desc">Run entirely on your machine. Full privacy — your data never leaves your computer. No account required.</p>
+        <div class="dc-feats">
+          <div class="dfi"><span class="check">✓</span> Zero-config startup</div>
+          <div class="dfi"><span class="check">✓</span> Works offline with Ollama</div>
+          <div class="dfi"><span class="check">✓</span> No account needed</div>
+          <div class="dfi"><span class="check">✓</span> Windows installer (.exe) available</div>
+        </div>
+      </div>
+      <div class="dc feat rv d2">
+        <div class="dc-icon">☁️</div>
+        <h3>Cloud / SaaS</h3>
+        <p class="dc-desc">Deploy to Railway, Render, Fly.io or Docker Compose. Multi-user with JWT auth and rate limiting.</p>
+        <div class="dc-feats">
+          <div class="dfi"><span class="check">✓</span> Docker-ready with one command</div>
+          <div class="dfi"><span class="check">✓</span> JWT auth &amp; user management</div>
+          <div class="dfi"><span class="check">✓</span> Prometheus metrics + Sentry</div>
+          <div class="dfi"><span class="check">✓</span> Swagger API docs included</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ CTA ══════════════ -->
+<section class="sec" aria-labelledby="cta-heading">
+  <div class="wrap">
+    <div class="cta-box rv">
+      <h2 id="cta-heading">Ready to supercharge<br>your workflow?</h2>
+      <p>Koto is free, open source, and takes less than 2 minutes to set up. Start building smarter today.</p>
+      <div class="cta-btns">
+        <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-prime btn-lg">
+          <svg class="ico-gh" style="width:18px;height:18px" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+          View on GitHub
+        </a>
+        <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-ghost btn-lg">
+          ⬇&nbsp; Download Release
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ FOOTER ══════════════ -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div class="fg-brand">
+        <div class="nav-brand">
+          <div class="brand-mark" aria-hidden="true">言</div>
+          Koto
+        </div>
+        <p>An AI-powered workspace combining chat, documents, presentations, voice and knowledge graphs — built for privacy and productivity.</p>
+      </div>
+      <div class="fg-col">
+        <h4>Product</h4>
+        <a href="#features">Features</a>
+        <a href="#how-it-works">Quick Start</a>
+        <a href="#models">Models</a>
+        <a href="#deploy">Deployment</a>
+      </div>
+      <div class="fg-col">
+        <h4>Resources</h4>
+        <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Loganwon/Koto/blob/main/README.md" target="_blank" rel="noopener">Documentation</a>
+        <a href="https://github.com/Loganwon/Koto/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+        <a href="https://github.com/Loganwon/Koto/issues" target="_blank" rel="noopener">Bug Reports</a>
+      </div>
+      <div class="fg-col">
+        <h4>Releases</h4>
+        <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener">All Releases</a>
+        <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">Latest Release</a>
+        <a href="https://github.com/Loganwon/Koto/blob/main/CHANGELOG.md" target="_blank" rel="noopener">What's New</a>
+      </div>
+    </div>
+    <div class="footer-bot">
+      <p>© 2025 Koto. Open source under the MIT License.</p>
+      <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="f-gh-btn">
+        <svg class="ico-gh" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+        Star on GitHub
+      </a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  /* ── Typing animation ─────────────────────────────────── */
+  const WORDS = [
+    'remembers everything',
+    'reads your documents',
+    'builds your slides',
+    'speaks your language',
+    'runs on your machine',
+    'supercharges your work'
+  ];
+  let wi=0, ci=0, del=false;
+  const el = document.getElementById('typed');
+  function type(){
+    const w = WORDS[wi];
+    if(!del){ ci++; el.textContent=w.slice(0,ci); if(ci===w.length){ del=true; setTimeout(type,2200); return; } setTimeout(type,55); }
+    else    { ci--; el.textContent=w.slice(0,ci); if(ci===0){ del=false; wi=(wi+1)%WORDS.length; setTimeout(type,300); return; } setTimeout(type,28); }
+  }
+  setTimeout(type,900);
+
+  /* ── Scroll reveal ────────────────────────────────────── */
+  const io = new IntersectionObserver(entries=>{
+    entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+  },{threshold:0.12});
+  document.querySelectorAll('.rv').forEach(el=>io.observe(el));
+
+  /* ── Nav active link ──────────────────────────────────── */
+  const secs = document.querySelectorAll('section[id]');
+  const links = document.querySelectorAll('.nav-links a');
+  window.addEventListener('scroll',()=>{
+    let cur='';
+    secs.forEach(s=>{ if(window.scrollY >= s.offsetTop - 80) cur=s.id; });
+    links.forEach(a=>{ a.classList.toggle('active', a.getAttribute('href')==='#'+cur); });
+  },{passive:true});
+
+  /* ── Stat counters ────────────────────────────────────── */
+  const ctrIO = new IntersectionObserver(entries=>{
+    entries.forEach(e=>{
+      if(!e.isIntersecting) return;
+      e.target.querySelectorAll('[data-count]').forEach(n=>{
+        const target = +n.dataset.count, suf = n.dataset.suffix||'';
+        const t0 = performance.now(), dur=1100;
+        const tick = now=>{
+          const p = Math.min((now-t0)/dur,1);
+          const ease = 1-(1-p)**3;
+          n.textContent = Math.round(ease*target)+suf;
+          if(p<1) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+      ctrIO.unobserve(e.target);
+    });
+  },{threshold:0.3});
+  const sg = document.querySelector('.stats-grid');
+  if(sg) ctrIO.observe(sg);
+</script>
+
+</body>
+</html>
