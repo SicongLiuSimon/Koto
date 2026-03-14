@@ -15,7 +15,7 @@ from datetime import datetime
 class DocumentFeedbackSystem:
     """文档智能反馈系统"""
     
-    def __init__(self, gemini_client=None, default_model_id: str = "gemini-2.5-pro"):
+    def __init__(self, gemini_client=None, default_model_id: str = "gemini-3.1-pro-preview"):
         """
         Args:
             gemini_client: Gemini API客户端实例
@@ -1510,7 +1510,7 @@ class DocumentFeedbackSystem:
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-2.5-pro"
+        model_id: str = "gemini-3.1-pro-preview"
     ) -> Dict[str, Any]:
         """
         分析文档，生成标注格式的建议
