@@ -214,6 +214,13 @@ async function closeWindow() {
 // 这样可以支持多个对话并行，也能正确处理话题切换
 const sessionStates = new Map();  // sessionName -> { isGenerating, abortController }
 
+// DOM 缓存：当切换到另一个 session 时，将正在生成的 session 的 DOM 节点保存到 Fragment
+// 这样切换回来时能恢复实时流式内容，而不是从服务端加载已保存的历史
+const sessionDomCache = new Map(); // sessionName -> DocumentFragment
+
+// 智能滚动锁：用户上划时暂停自动滚动到底部，避免打断阅读
+let isScrollLocked = false;
+
 function getSessionState(sessionName) {
     if (!sessionStates.has(sessionName)) {
         sessionStates.set(sessionName, {
@@ -258,57 +265,35 @@ function getSessionTaskId(sessionName) {
 // 任务类型到模型的映射
 const TASK_MODELS = {
     'CHAT': 'gemini-3-flash-preview',
-    'CODER': 'gemini-3-pro-preview', 
+    'CODER': 'gemini-3.1-pro-preview',
     'VISION': 'gemini-3-flash-preview',
-    'PAINTER': 'gemini-3.1-flash-image-preview',
+    'PAINTER': 'nano-banana-pro-preview',
     'VOICE': 'gemini-3-flash-preview',  // 语音模式使用快速模型
-    'RESEARCH': 'gemini-2.5-pro-preview',
-    'FILE_GEN': 'gemini-3-pro-preview'
+    'RESEARCH': 'deep-research-pro-preview-12-2025',
+    'FILE_GEN': 'gemini-3.1-pro-preview'
 };
 
 // ================= Notification =================
 function showNotification(message, type = 'info', duration = 3000) {
-    // 创建通知元素
+    // 获取或懒创建通知堆叠容器（垂直排列，避免重叠）
+    let stack = document.getElementById('notificationStack');
+    if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'notificationStack';
+        document.body.appendChild(stack);
+    }
+
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
-    notification.innerHTML = `<span>${message}</span>`;
-    
-    // 根据类型设置颜色
-    let bgColor;
-    switch (type) {
-        case 'success':
-            bgColor = '#22c55e';
-            break;
-        case 'error':
-            bgColor = '#ef4444';
-            break;
-        case 'warning':
-            bgColor = '#f59e0b';
-            break;
-        default:
-            bgColor = '#3b82f6';
-    }
-    
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 12px 20px;
-        border-radius: 8px;
-        background: ${bgColor};
-        color: white;
-        font-size: 14px;
-        z-index: 10000;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        animation: slideIn 0.3s ease;
-    `;
-    
-    document.body.appendChild(notification);
-    
-    // 指定时间后自动消失
+    notification.innerHTML = `<span>${message}</span><button class="notif-dismiss" onclick="this.parentElement.remove()" title="关闭">×</button>`;
+    stack.appendChild(notification);
+
+    // 自动消失
     setTimeout(() => {
-        notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
+        if (notification.parentElement) {
+            notification.classList.add('notif-hiding');
+            setTimeout(() => notification.remove(), 300);
+        }
     }, duration);
 }
 
@@ -361,6 +346,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(initVoice, 500);
     initVoicePanel();
     initProactiveUI();
+
+    // 9. 智能滚动 + 全局快捷键
+    initScrollBehavior();
+    window.addEventListener('keydown', handleGlobalKeyDown);
+
+    // 10. 全局外部链接拦截：防止 webview 导航离开 Koto
+    //     在系统浏览器中打开，而不是在 webview 内跳转
+    document.addEventListener('click', (e) => {
+        const a = e.target.closest('a[data-ext="1"], a[href^="http://"], a[href^="https://"]');
+        if (!a) return;
+        // 忽略已设置 target="_blank" 以外页面打开的链接（保持原行为）
+        if (a.target === '_blank' && !window.pywebview) return;
+        e.preventDefault();
+        const url = a.href;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
+            window.pywebview.api.open_url(url);
+        } else {
+            // 普通浏览器环境：新标签打开
+            window.open(url, '_blank', 'noopener,noreferrer');
+        }
+    });
 
     // 8. 影子追踪：启动时拉取一次待消息，之后每 5 分钟轮询
     setTimeout(() => {
@@ -544,13 +550,25 @@ function renderSessions(sessions) {
     
     container.innerHTML = sessions.map(session => `
         <div class="session-item ${currentSession === session ? 'active' : ''}" 
-             onclick="selectSession('${session}')">
+             data-session="${escapeHtml(session)}">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
             <span class="session-name">${escapeHtml(session)}</span>
+            <button class="session-del-btn" title="删除对话" tabindex="-1">×</button>
         </div>
     `).join('');
+
+    // 用 addEventListener 替代内联 onclick，避免 session 名含单引号/特殊字符时 JS 注入
+    container.querySelectorAll('.session-item').forEach(el => {
+        el.addEventListener('click', function() {
+            selectSession(this.dataset.session);
+        });
+        el.querySelector('.session-del-btn').addEventListener('click', function(e) {
+            e.stopPropagation();
+            deleteCurrentSession(el.dataset.session);
+        });
+    });
 }
 
 // ================= 返回欢迎页 =================
@@ -563,9 +581,19 @@ function goToWelcome() {
             controller.abort();
         }
         setSessionGenerating(currentSession, false);
+        sessionDomCache.delete(currentSession);
+    }
+
+    // 重置发送按钮状态
+    const _sendBtn = document.getElementById('sendBtn');
+    if (_sendBtn) {
+        _sendBtn.classList.remove('generating');
+        _sendBtn.disabled = false;
+        _sendBtn.title = '发送';
     }
     
     currentSession = null;
+    isScrollLocked = false;
     document.getElementById('chatTitle').textContent = '选择或创建对话';
     
     // 取消所有会话的选中状态
@@ -588,8 +616,16 @@ function goToWelcome() {
 }
 
 async function selectSession(sessionName) {
-    // ⭐ 改进：允许多个会话并行运行，不中止前一个会话的任务
-    // 只切换 currentSession 用于 UI 显示和新消息输入，但不中止前一个会话的生成
+    // 离开时：如果当前 session 正在生成，将其 DOM 节点移入 Fragment 缓存
+    // 这样后台流继续写入 bodyEl（引用仍有效），切回来时直接恢复，不会丢失流内容
+    if (currentSession && currentSession !== sessionName && isSessionGenerating(currentSession)) {
+        const _chatContainer = document.getElementById('chatMessages');
+        const _frag = document.createDocumentFragment();
+        while (_chatContainer.firstChild) _frag.appendChild(_chatContainer.firstChild);
+        sessionDomCache.set(currentSession, _frag);
+        console.log(`[SWITCH] DOM 已缓存 session: ${currentSession}`);
+    }
+
     console.log(`[SWITCH] 从 ${currentSession} 切换到 ${sessionName}（保持后台任务运行）`);
     
     currentSession = sessionName;
@@ -598,18 +634,44 @@ async function selectSession(sessionName) {
     // Update active state
     document.querySelectorAll('.session-item').forEach(item => {
         item.classList.remove('active');
-        if (item.querySelector('.session-name').textContent === sessionName) {
+        if (item.dataset.session === sessionName) {
             item.classList.add('active');
         }
     });
+
+    // 同步发送按钮状态：切换后立即反映新 session 的生成状态
+    const _sb = document.getElementById('sendBtn');
+    if (_sb) {
+        if (isSessionGenerating(sessionName)) {
+            _sb.classList.add('generating');
+            _sb.disabled = false;
+            _sb.title = '停止生成';
+        } else {
+            _sb.classList.remove('generating');
+            _sb.disabled = false;
+            _sb.title = '发送';
+        }
+    }
     
-    // Load chat history
-    try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}`);
-        const data = await response.json();
-        renderChatHistory(data.history);
-    } catch (error) {
-        console.error('Failed to load session:', error);
+    // 恢复或加载聊天内容
+    const _chatContainer = document.getElementById('chatMessages');
+    if (isSessionGenerating(sessionName) && sessionDomCache.has(sessionName)) {
+        // 从缓存恢复 DOM（stream 仍在向 bodyEl 写入，节点引用未变）
+        const _frag = sessionDomCache.get(sessionName);
+        sessionDomCache.delete(sessionName);
+        _chatContainer.innerHTML = '';
+        _chatContainer.appendChild(_frag);
+        scrollToBottomForce();
+        console.log(`[SWITCH] DOM 从缓存恢复 session: ${sessionName}`);
+    } else {
+        // Load chat history
+        try {
+            const response = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}`);
+            const data = await response.json();
+            renderChatHistory(data.history);
+        } catch (error) {
+            console.error('Failed to load session:', error);
+        }
     }
 }
 
@@ -755,12 +817,11 @@ async function confirmNewSession() {
     }
 }
 
-async function deleteCurrentSession() {
-    if (!currentSession) return;
+async function deleteCurrentSession(targetSession = null) {
+    const deletingSession = targetSession || currentSession;
+    if (!deletingSession) return;
     
-    if (!confirm(`Delete chat "${currentSession}"?`)) return;
-    
-    const deletingSession = currentSession;
+    if (!confirm(`Delete chat "${deletingSession}"?`)) return;
     
     // ⭐ 改进：在删除前，如果有生成，先中止它
     if (isSessionGenerating(deletingSession)) {
@@ -781,17 +842,18 @@ async function deleteCurrentSession() {
         if (data.success) {
             // ⭐ 改进：实时移除该话题的 DOM 元素
             document.querySelectorAll('.session-item').forEach(item => {
-                if (item.querySelector('.session-name').textContent === deletingSession) {
+                if (item.dataset.session === deletingSession) {
                     item.remove();
                 }
             });
             
-            currentSession = null;
-            document.getElementById('chatTitle').textContent = '选择或创建对话';
-            
-            // 清除聊天消息
-            const container = document.getElementById('chatMessages');
-            container.innerHTML = document.getElementById('welcomeScreen').outerHTML;
+            if (currentSession === deletingSession) {
+                currentSession = null;
+                document.getElementById('chatTitle').textContent = '选择或创建对话';
+                // 清除聊天消息
+                const container = document.getElementById('chatMessages');
+                container.innerHTML = document.getElementById('welcomeScreen').outerHTML;
+            }
             
             // ⭐ 不重新加载列表，而是使用上面的 DOM 移除方式
             console.log(`[DELETE] 已删除话题 ${deletingSession}，UI 实时更新`);
@@ -863,7 +925,7 @@ function renderChatHistory(history) {
         }
     }
     
-    scrollToBottom();
+    scrollToBottomForce();
     highlightCode();
     // 渲染 Mermaid 图表（历史消息中可能包含）
     setTimeout(() => renderMermaidBlocks(), 100);
@@ -1053,6 +1115,18 @@ function renderMessage(role, content, meta = {}) {
         `;
     }
     
+    const actionBar = `
+        <div class="message-actions">
+            ${role === 'assistant' ? `<button class="msg-action-btn" onclick="copyMessageText(this)" title="复制回复">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                复制
+            </button>` : ''}
+            ${role === 'user' ? `<button class="msg-action-btn" onclick="resendMessage(this)" title="重新发送">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>
+                重发
+            </button>` : ''}
+        </div>
+    `;
     return `
         <div class="message ${role}">
             <div class="message-avatar">${avatar}</div>
@@ -1066,6 +1140,7 @@ function renderMessage(role, content, meta = {}) {
                 ${pptHtml}
                 ${imagesHtml}
                 ${filesHtml}
+                ${actionBar}
             </div>
         </div>
     `;
@@ -1076,6 +1151,29 @@ function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// 复制助手消息文本内容
+function copyMessageText(btn) {
+    const msgBody = btn.closest('.message').querySelector('.message-body');
+    const text = msgBody ? msgBody.innerText : '';
+    navigator.clipboard.writeText(text).then(() => {
+        showNotification('已复制到剪贴板', 'success', 1500);
+    }).catch(() => {
+        showNotification('复制失败，请手动选择', 'error', 2000);
+    });
+}
+
+// 将用户消息内容填回输入框（重发）
+function resendMessage(btn) {
+    const msgBody = btn.closest('.message').querySelector('.message-body');
+    if (!msgBody) return;
+    const text = msgBody.innerText.trim();
+    if (!text) return;
+    const input = document.getElementById('messageInput');
+    input.value = text;
+    autoResize(input);
+    input.focus();
 }
 
 async function sendMessage(event) {
@@ -1157,7 +1255,7 @@ async function sendMessage(event) {
     }
     
     container.innerHTML += renderMessage('user', message || '(附件)', { attachment: attachmentInfo, attachments: attachmentList });
-    scrollToBottom();
+    scrollToBottomForce();
     
     // === 确定任务类型和模型 ===
     let taskType = lockedTaskType;  // 用户锁定的任务类型
@@ -1192,8 +1290,10 @@ async function sendMessage(event) {
     }
     
     // === 第二步：发送请求获取流式响应 ===
+    // ⭐ 捕获此刻的 session，防止 async 过程中 currentSession 被切换导致 finally 清理错误 session
+    const thisSession = currentSession;
     try {
-        setSessionGenerating(currentSession, true);
+        setSessionGenerating(thisSession, true);
         
         // 切换发送按钮为停止状态
         const sendBtn = document.getElementById('sendBtn');
@@ -1234,7 +1334,7 @@ async function sendMessage(event) {
         if (selectedFiles.length > 0) {
             // Send with file
             const formData = new FormData();
-            formData.append('session', currentSession);
+            formData.append('session', thisSession);
             formData.append('message', message);
             selectedFiles.forEach(file => formData.append('file', file));
             formData.append('file_count', String(selectedFiles.length));
@@ -1242,7 +1342,7 @@ async function sendMessage(event) {
             formData.append('locked_model', modelToUse || 'auto');
 
             const abortController = new AbortController();
-            setSessionAbortController(currentSession, abortController);
+            setSessionAbortController(thisSession, abortController);
             
             response = await fetch('/api/chat/file', {
                 method: 'POST',
@@ -1400,7 +1500,7 @@ async function sendMessage(event) {
                                     } else if (data.type === 'classification') {
                                         console.log('[FILE STREAM] 任务分类:', data.task_type);
                                         if (data.task_id) {
-                                            setSessionTaskId(currentSession, data.task_id);
+                                            setSessionTaskId(thisSession, data.task_id);
                                         }
                                         // 更新任务徽章（初始占位是 CHAT，收到分类后替换为真实任务名）
                                         const _msgContainer = document.getElementById(msgId);
@@ -1546,7 +1646,7 @@ async function sendMessage(event) {
             // === 流式输出 ===
             // ⭐ 创建 AbortController 来支持取消请求
             const abortController = new AbortController();
-            setSessionAbortController(currentSession, abortController);
+            setSessionAbortController(thisSession, abortController);
 
             const effectiveTaskType = String(taskType || '').toUpperCase();
             const useUnifiedAgentStream = (effectiveTaskType === 'AGENT');
@@ -1555,11 +1655,11 @@ async function sendMessage(event) {
                 ? {
                     request: message,
                     context: { history: [] },
-                    session_id: currentSession,
+                    session_id: thisSession,
                     model: modelToUse || 'gemini-3-flash-preview'
                 }
                 : {
-                    session: currentSession,
+                    session: thisSession,
                     message: message,
                     locked_task: taskType,
                     locked_model: modelToUse
@@ -1754,48 +1854,17 @@ async function sendMessage(event) {
                     const stepType = String(step.step_type).toUpperCase();
 
                     if (stepType === 'THOUGHT') {
-                        // THOUGHT：仅显示前 120 字的简短摘要，避免长文本污染步骤面板
-                        const thought = step.content || '';
-                        const shortThought = thought.length > 120 ? thought.slice(0, 120) + '…' : thought;
-                        return { type: 'agent_thought', thought: shortThought };
+                        return { type: 'agent_thought', thought: step.content || '' };
                     }
 
                     if (stepType === 'ACTION') {
-                        // UnifiedAgent ACTION：带中文状态描述的步骤
                         agentStepCounter += 1;
                         return {
                             type: 'agent_step',
-                            step_number: step.step_number || agentStepCounter,
+                            step_number: agentStepCounter,
                             total_steps: '?',
-                            tool_name: step.action?.tool_name || step.tool || 'tool',
-                            tool_args: step.action?.tool_args || step.args || {},
-                            label: step.content || '',   // 人类可读中文描述
-                        };
-                    }
-
-                    if (stepType === 'STEP_DONE') {
-                        // LangGraphAgent 工具完成通知（新增）
-                        return {
-                            type: 'agent_step_done',
-                            step_number: step.step_number || agentStepCounter,
-                            label: step.content || '✅ 完成',
-                            tool: step.tool || '',
-                        };
-                    }
-
-                    if (stepType === 'THINKING') {
-                        // LangGraph token：不进入步骤面板，直接显示为思考文本
-                        const thought = step.content || '';
-                        const shortThought = thought.length > 120 ? thought.slice(0, 120) + '…' : thought;
-                        return { type: 'agent_thought', thought: shortThought };
-                    }
-
-                    if (stepType === 'TOOL_RESULT') {
-                        // 工具返回结果：对应 UnifiedAgent OBSERVATION
-                        return {
-                            type: 'observation',
-                            message: step.content || '',
-                            observation: step.content || ''
+                            tool_name: step.action?.tool_name || 'tool',
+                            tool_args: step.action?.tool_args || {}
                         };
                     }
 
@@ -1803,8 +1872,7 @@ async function sendMessage(event) {
                         return {
                             type: 'observation',
                             message: step.content || '',
-                            observation: step.observation || step.content || '',
-                            done_label: step.metadata?.done_label || '',
+                            observation: step.observation || step.content || ''
                         };
                     }
 
@@ -2002,23 +2070,23 @@ async function sendMessage(event) {
                                         scrollToBottom();
                                     }
                                 } else if (data.type === 'agent_step') {
-                                    // Agent步骤信息 - 在步骤面板中显示（Copilot 风格）
-                                    lastStreamEventTime = Date.now();
+                                    // Agent步骤信息 - 在步骤面板中显示
+                                    console.log('[AGENT] Step:', data.step_number, '/', data.total_steps, '-', data.tool_name);
                                     
-                                    // 初始化 agent 状态栏（首次）
+                                    // 初始化 agent 状态栏和步骤面板（首次）
                                     if (!bodyEl.querySelector('.agent-status-bar')) {
                                         const statusBar = document.createElement('div');
                                         statusBar.className = 'agent-status-bar';
                                         statusBar.innerHTML = '<div class="agent-spinner"></div><span class="agent-status-text">🤖 Agent 执行中…</span>';
                                         bodyEl.insertBefore(statusBar, bodyEl.firstChild);
                                     }
-                                    // 初始化步骤面板（首次）
                                     let stepsPanel = bodyEl.querySelector('.agent-steps-panel');
                                     if (!stepsPanel) {
                                         stepsPanel = document.createElement('details');
                                         stepsPanel.className = 'agent-steps-panel';
                                         stepsPanel.open = true;
                                         stepsPanel.innerHTML = '<summary>📋 执行步骤</summary><div class="agent-steps-list"></div>';
+                                        // 在状态栏之后、正文之前插入
                                         const statusBar = bodyEl.querySelector('.agent-status-bar');
                                         if (statusBar && statusBar.nextSibling) {
                                             bodyEl.insertBefore(stepsPanel, statusBar.nextSibling);
@@ -2027,57 +2095,34 @@ async function sendMessage(event) {
                                         }
                                     }
                                     
-                                    // 更新状态栏：显示当前操作的中文描述（Copilot 风格）
+                                    // 更新状态栏
                                     const statusText = bodyEl.querySelector('.agent-status-text');
-                                    const displayLabel = data.label || data.tool_name || 'tool';
-                                    if (statusText) statusText.textContent = displayLabel;
+                                    if (statusText) statusText.textContent = `🤖 步骤 ${data.step_number}/${data.total_steps} — ${data.tool_name}`;
                                     
-                                    // 添加步骤卡片（使用中文描述，不是原始工具名）
+                                    // 添加步骤卡片
                                     const stepsList = stepsPanel.querySelector('.agent-steps-list');
                                     const stepCard = document.createElement('div');
                                     stepCard.className = 'agent-step-card step-pending';
                                     stepCard.id = `agent-step-${data.step_number}`;
-                                    // 优先使用中文描述标签
-                                    const labelText = data.label || data.tool_name || 'tool';
+                                    const argsStr = data.tool_args ? Object.entries(data.tool_args).map(([k,v]) => `${k}=${JSON.stringify(v)}`).join(', ') : '';
                                     stepCard.innerHTML = `
                                         <div class="agent-step-number">${data.step_number}</div>
                                         <div class="agent-step-info">
-                                            <div class="agent-step-tool">${escapeHtml(labelText)}</div>
-                                            <div class="agent-step-status agent-step-running">
-                                                <span class="agent-step-spinner"></span> 执行中…
-                                            </div>
+                                            <div class="agent-step-tool">${escapeHtml(data.tool_name)}</div>
+                                            <div class="agent-step-status">⏳ 执行中...${argsStr ? ' (' + escapeHtml(argsStr).substring(0, 60) + ')' : ''}</div>
                                         </div>`;
                                     stepsList.appendChild(stepCard);
                                     scrollToBottom();
 
-                                } else if (data.type === 'agent_step_done') {
-                                    // LangGraph 工具完成通知：更新对应步骤卡片状态
-                                    lastStreamEventTime = Date.now();
-                                    const targetCard = bodyEl.querySelector(`#agent-step-${data.step_number}`) ||
-                                                       bodyEl.querySelector('.agent-step-card.step-pending:last-of-type');
-                                    if (targetCard) {
-                                        const isSuccess = data.success !== false;
-                                        targetCard.className = `agent-step-card ${isSuccess ? 'step-success' : 'step-fail'}`;
-                                        const statusEl = targetCard.querySelector('.agent-step-status');
-                                        if (statusEl) {
-                                            statusEl.className = 'agent-step-status';
-                                            statusEl.textContent = data.label || (isSuccess ? '✅ 完成' : '❌ 失败');
-                                        }
-                                    }
-                                    scrollToBottom();
-
                                 } else if (data.type === 'observation' && bodyEl.querySelector('.agent-steps-panel')) {
-                                    // Agent OBSERVATION: 结构化展示工具结果，更新步骤状态
-                                    lastStreamEventTime = Date.now();
+                                    // Agent OBSERVATION: 结构化展示工具结果
                                     const cards = bodyEl.querySelectorAll('.agent-step-card');
                                     const lastCard = cards.length > 0 ? cards[cards.length - 1] : null;
                                     if (lastCard) {
                                         lastCard.className = 'agent-step-card step-success';
                                         const statusEl = lastCard.querySelector('.agent-step-status');
                                         if (statusEl) {
-                                            statusEl.className = 'agent-step-status';
-                                            // 优先显示 done_label（中文），否则显示 ✅ 已完成
-                                            statusEl.textContent = data.done_label || '✅ 已完成';
+                                            statusEl.textContent = '✅ 已完成';
                                         }
 
                                         const rawObs = data.observation || data.message || '';
@@ -2112,31 +2157,20 @@ async function sendMessage(event) {
                                     scrollToBottom();
                                     
                                 } else if (data.type === 'agent_thought') {
-                                    // Agent思考过程 - 显示在步骤面板中（不污染最终回答）
-                                    lastStreamEventTime = Date.now();
+                                    // Agent思考过程 - 仅在工具调用中间步骤显示
+                                    // 最终回复(token)会替代思考内容，避免重复
                                     console.log('[AGENT] Thinking:', data.thought);
-                                    agentThoughtText = data.thought; // 记录用于去重
-                                    
-                                    // 如果存在步骤面板，把思考文本作为一个"思考中"条目
-                                    const thoughtPanel = bodyEl.querySelector('.agent-steps-panel');
-                                    if (thoughtPanel) {
-                                        const thoughtsList = thoughtPanel.querySelector('.agent-steps-list');
-                                        if (thoughtsList) {
-                                            // 避免重复追加同一思考内容
-                                            const lastThought = thoughtsList.querySelector('.agent-thought-item:last-of-type');
-                                            if (!lastThought || lastThought.dataset.thought !== data.thought) {
-                                                const thoughtItem = document.createElement('div');
-                                                thoughtItem.className = 'agent-thought-item';
-                                                thoughtItem.dataset.thought = data.thought;
-                                                thoughtItem.innerHTML = `<span class="agent-thought-icon">💭</span><span class="agent-thought-text">${escapeHtml(data.thought)}</span>`;
-                                                thoughtsList.appendChild(thoughtItem);
-                                                scrollToBottom();
-                                            }
-                                        }
-                                    } else {
-                                        // 无面板时降级：在正文作短暂提示（会被最终回答替换掉）
-                                        agentThoughtText = data.thought;
+                                    agentThoughtText = data.thought; // 记录思考文本，用于去重
+                                    fullText += `*💭 ${data.thought}*\n\n`;
+                                    // 更新正文区（跳过面板部分）
+                                    const textContainer = bodyEl.querySelector('.agent-answer') || bodyEl;
+                                    if (!bodyEl.querySelector('.agent-answer')) {
+                                        const answerDiv = document.createElement('div');
+                                        answerDiv.className = 'agent-answer';
+                                        bodyEl.appendChild(answerDiv);
                                     }
+                                    bodyEl.querySelector('.agent-answer').innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
+                                    scrollToBottom();
                                     
                                 } else if (data.type === 'user_confirm') {
                                     // 需要用户确认 - 显示带倒计时的确认对话框
@@ -2148,7 +2182,7 @@ async function sendMessage(event) {
                                             await fetch('/api/agent/confirm', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ session: currentSession, confirmed: confirmResult.confirmed })
+                                                body: JSON.stringify({ session: thisSession, confirmed: confirmResult.confirmed })
                                             });
                                         } catch(e) { console.error('[AGENT] Confirm callback failed:', e); }
                                     }
@@ -2168,7 +2202,7 @@ async function sendMessage(event) {
                                             await fetch('/api/agent/choice', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ session: currentSession, selected: choiceResult.selected })
+                                                body: JSON.stringify({ session: thisSession, selected: choiceResult.selected })
                                             });
                                         } catch(e) { console.error('[AGENT] Choice callback failed:', e); }
                                     }
@@ -2515,24 +2549,27 @@ async function sendMessage(event) {
         }
         scrollToBottom();
     } finally {
-        setSessionGenerating(currentSession, false);
+        setSessionGenerating(thisSession, false);
+        sessionDomCache.delete(thisSession); // 任务结束，清除 DOM 缓存
         hideLoading();
         
-        // 恢复发送按钮状态
-        const sendBtn = document.getElementById('sendBtn');
-        sendBtn.classList.remove('generating');
-        sendBtn.disabled = false;
-        sendBtn.title = '发送';
+        // 仅当用户仍在查看本 session 时才重置发送按钮（避免覆盖其他 session 的生成状态）
+        if (currentSession === thisSession) {
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.classList.remove('generating');
+            sendBtn.disabled = false;
+            sendBtn.title = '发送';
+        }
         
         // 清理 AbortController
-        setSessionAbortController(currentSession, null);
-        setSessionTaskId(currentSession, null);
+        setSessionAbortController(thisSession, null);
+        setSessionTaskId(thisSession, null);
         
         // 重置中断标志
         await fetch('/api/chat/reset-interrupt', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: currentSession })
+            body: JSON.stringify({ session: thisSession })
         }).catch(e => console.error('Reset interrupt failed:', e));
     }
 }
@@ -2883,6 +2920,51 @@ async function checkStatus() {
                     if (pending > 0) parts.push(`🕐 ${pending} 等待`);
                     pill.textContent = parts.join('  ');
                     pill.style.display = 'block';
+
+                    // 构建 tooltip 内容（挂在 body 上，避免 overflow:hidden 的 sidebar 裁剪）
+                    const runList = (m.jobs && m.jobs.running_list) || [];
+                    const pendList = (m.jobs && m.jobs.pending_list) || [];
+                    let tipHtml = '';
+                    if (runList.length) {
+                        tipHtml += '<div class="jrp-tip-section">⏳ 运行中</div>';
+                        runList.forEach(t => {
+                            tipHtml += `<div class="jrp-tip-row"><span class="jrp-tip-type">${escapeHtml(t.type)}</span><span class="jrp-tip-input">${escapeHtml(t.input || '(无标题)')}</span></div>`;
+                        });
+                    }
+                    if (pendList.length) {
+                        tipHtml += '<div class="jrp-tip-section">🕐 等待中</div>';
+                        pendList.forEach(t => {
+                            tipHtml += `<div class="jrp-tip-row"><span class="jrp-tip-type">${escapeHtml(t.type)}</span><span class="jrp-tip-input">${escapeHtml(t.input || '(无标题)')}</span></div>`;
+                        });
+                    }
+                    if (!tipHtml) tipHtml = '<div style="color:#7a8a9a;font-size:11px;">暂无详情</div>';
+
+                    // 获取或创建 body 级浮层
+                    let floatTip = document.getElementById('jrpFloatTip');
+                    if (!floatTip) {
+                        floatTip = document.createElement('div');
+                        floatTip.id = 'jrpFloatTip';
+                        document.body.appendChild(floatTip);
+                    }
+                    floatTip.innerHTML = tipHtml;
+
+                    pill._jrpContent = tipHtml;
+                    if (!pill._jrpBound) {
+                        pill._jrpBound = true;
+                        pill.addEventListener('mouseenter', () => {
+                            const tip = document.getElementById('jrpFloatTip');
+                            if (!tip) return;
+                            tip.innerHTML = pill._jrpContent || '';
+                            const r = pill.getBoundingClientRect();
+                            tip.style.display = 'block';
+                            tip.style.left = Math.max(4, r.left + r.width / 2 - tip.offsetWidth / 2) + 'px';
+                            tip.style.top = (r.top - tip.offsetHeight - 8) + 'px';
+                        });
+                        pill.addEventListener('mouseleave', () => {
+                            const tip = document.getElementById('jrpFloatTip');
+                            if (tip) tip.style.display = 'none';
+                        });
+                    }
                 } else {
                     pill.style.display = 'none';
                 }
@@ -2910,15 +2992,67 @@ function handleKeyDown(event) {
     }
 }
 
+// 全局快捷键：Esc 停止生成，Ctrl+K 新建对话
+function handleGlobalKeyDown(e) {
+    // 有模态框开着时不拦截
+    if (document.querySelector('.modal-overlay.active')) return;
+
+    if (e.key === 'Escape' && currentSession && isSessionGenerating(currentSession)) {
+        e.preventDefault();
+        document.getElementById('sendBtn')?.click();
+        return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        showNewSessionModal();
+        return;
+    }
+}
+
 function autoResize(textarea) {
     textarea.style.height = 'auto';
     const maxH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--input-max-height') || '220');
     textarea.style.height = Math.min(textarea.scrollHeight, maxH || 220) + 'px';
 }
 
+// 智能滚动：只在用户未上划时才滚到底部（流式输出时使用）
 function scrollToBottom() {
+    if (isScrollLocked) return;
     const container = document.getElementById('chatMessages');
-    container.scrollTop = container.scrollHeight;
+    if (container) container.scrollTop = container.scrollHeight;
+}
+
+// 强制滚到底部并重置锁（切换会话、加载历史、用户发消息时使用）
+function scrollToBottomForce() {
+    isScrollLocked = false;
+    const container = document.getElementById('chatMessages');
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+        updateBackToBottomBtn();
+    }
+}
+
+// 初始化智能滚动：监听用户手动滚动，决定是否锁定自动滚动
+function initScrollBehavior() {
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    container.addEventListener('scroll', () => {
+        const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        isScrollLocked = distFromBottom > 80;
+        updateBackToBottomBtn();
+    });
+}
+
+// 更新「回到底部」浮动按钮的显示状态
+function updateBackToBottomBtn() {
+    const btn = document.getElementById('backToBottomBtn');
+    if (!btn) return;
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const isGenerating = currentSession && isSessionGenerating(currentSession);
+    btn.style.display = (distFromBottom > 80 && isGenerating) ? 'flex' : 'none';
 }
 
 function showLoading(text, model) {
@@ -3183,6 +3317,16 @@ function parseMarkdown(text) {
             }
         };
         
+        // 外部链接：加 data-ext 属性，由全局拦截器在系统浏览器打开
+        renderer.link = function(href, title, text) {
+            if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+                const t = title ? ` title="${title}"` : '';
+                return `<a href="${href}" data-ext="1"${t} class="ext-link">${text}</a>`;
+            }
+            // 内部链接（锚点等）正常渲染
+            return `<a href="${href || '#'}">${text}</a>`;
+        };
+
         // Configure marked
         marked.setOptions({
             renderer: renderer,
@@ -3407,10 +3551,7 @@ function applySettingsToUI() {
     // AI settings
     const modelSelect = document.getElementById('settingModel');
     if (modelSelect) {
-        const savedModel = currentSettings.ai?.default_model || 'auto';
-        modelSelect.value = savedModel;
-        // 如果 savedModel 不在下拉列表里（历史遗留值），回退到 auto
-        if (!modelSelect.value) modelSelect.value = 'auto';
+        modelSelect.value = currentSettings.ai?.default_model || 'gemini-3-flash-preview';
         selectedModel = modelSelect.value; // 同步全局变量
     }
     
@@ -3445,12 +3586,11 @@ function applySettingsToUI() {
         applyLocalOnlyMode(localOnly);
     }
 
-    // 本地模型列表（异步查询）
-    loadLocalModels();
-
     // Restore UI zoom from server settings (server is the source of truth)
     const savedZoom = parseFloat(currentSettings.appearance?.ui_zoom || '1');
-    setUIZoom(savedZoom, true);  // always sync slider display, suppress server re-save
+    if (savedZoom && savedZoom !== 1) {
+        setUIZoom(savedZoom, true);  // true = suppress server re-save on load
+    }
 
     // Proxy settings
     const proxyEnabledEl = document.getElementById('settingProxyEnabled');
@@ -3476,23 +3616,17 @@ function selectTheme(theme) {
 }
 
 function openSettings() {
-    // 立即打开面板并加载核心设置
+    loadSettings();
+    loadMemories(); // Load memories when opening settings
+    loadSkills();   // Load skills when opening settings
+    loadSkillBindings();    // Load intent bindings
+    loadTriggers();         // Load scheduled triggers
+    fileHubLoadStats();     // Load file registry stats
+    loadShadowStatus();     // Load shadow watcher status
     document.getElementById('settingsPanel').classList.add('active');
+    // Sync zoom slider to current state (suppress save - just restoring display)
     const savedZ = parseFloat(localStorage.getItem('koto.uiZoom') || '1');
     setUIZoom(savedZ, true);
-
-    // 加载设置和记忆（必要）
-    loadSettings();
-    loadMemories();
-
-    // 延迟加载次要区域，避免同时触发大量请求卡住面板动画
-    setTimeout(() => {
-        loadSkills();
-        loadSkillBindings();
-        loadTriggers();
-        fileHubLoadStats();
-        loadShadowStatus();
-    }, 200);
 }
 
 function closeSettings() {
@@ -3506,20 +3640,14 @@ let _currentSkillFilter = 'all';
 let _editingSkillId = null; // skill being edited
 
 const SKILL_CATEGORY_LABELS = {
-    agent:    '🤖 Agent 能力',
     behavior: '⚙️ 行为',
     style:    '🎨 风格',
     domain:   '🔬 领域',
-    workflow: '⚡ 工作流',
-    memory:   '🧠 记忆',
 };
 const SKILL_CAT_COLORS = {
-    agent:    '#70b8ff',
     behavior: '#4a9eff',
     style:    '#e06c75',
-    domain:   '#e3b341',
-    workflow: '#f0883e',
-    memory:   '#76f7d4',
+    domain:   '#98c379',
 };
 
 async function loadSkills() {
@@ -4299,77 +4427,6 @@ function onModelChange(value) {
 function onLocalOnlyChange(enabled) {
     applyLocalOnlyMode(enabled);
     updateSetting('ai', 'use_local_only', enabled);
-    // 同步写入 model_mode，确保后端路由实际切换
-    const select = document.getElementById('settingLocalModel');
-    const tag = (select && select.value) || '';
-    fetch('/api/local/model', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ mode: enabled ? 'local' : 'cloud', tag })
-    }).catch(e => console.warn('set local model mode failed:', e));
-}
-
-// ================= 本地模型选择 =================
-
-async function loadLocalModels() {
-    const select = document.getElementById('settingLocalModel');
-    const status = document.getElementById('localModelStatus');
-    if (!select || !status) return;
-
-    try {
-        const resp = await fetch('/api/local/models');
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
-
-        select.innerHTML = '';
-        if (!data.ollama_running || data.models.length === 0) {
-            select.innerHTML = '<option value="">-- Ollama 未运行或无已安装模型 --</option>';
-            select.disabled = true;
-            status.textContent = data.ollama_running ? '未检测到已安装的模型，请先下载模型。' : 'Ollama 未运行。启动 Ollama 后点击刷新。';
-            return;
-        }
-
-        select.disabled = false;
-        data.models.forEach(tag => {
-            const opt = document.createElement('option');
-            opt.value = tag;
-            const isRec = tag === data.recommended;
-            opt.textContent = isRec ? `${tag}  ★ 推荐` : tag;
-            select.appendChild(opt);
-        });
-
-        // 恢复已保存的选择，否则用推荐模型
-        const saved = data.current || data.recommended;
-        if (saved) select.value = saved;
-
-        status.textContent = `已检测到 ${data.models.length} 个本地模型` +
-            (data.recommended ? `，推荐: ${data.recommended}` : '');
-    } catch (e) {
-        select.innerHTML = '<option value="">-- 查询失败，请检查 Ollama --</option>';
-        select.disabled = true;
-        status.textContent = '无法连接 Ollama，请确保 Ollama 正在运行。';
-        console.warn('loadLocalModels error:', e);
-    }
-}
-
-function onLocalModelSelect(tag) {
-    if (!tag) return;
-    const localOnly = document.getElementById('settingLocalOnly');
-    const mode = (localOnly && localOnly.checked) ? 'local' : 'cloud';
-    fetch('/api/local/model', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ tag, mode })
-    }).catch(e => console.warn('onLocalModelSelect failed:', e));
-}
-
-async function refreshOllamaModels() {
-    const btn = document.querySelector('#localModelPickerSection .browse-btn');
-    const status = document.getElementById('localModelStatus');
-    if (btn) { btn.disabled = true; btn.textContent = '查询中…'; }
-    if (status) status.textContent = '正在查询 Ollama…';
-    await loadLocalModels();
-    if (btn) { btn.disabled = false; btn.textContent = '刷新'; }
 }
 
 function applyLocalOnlyMode(enabled) {
@@ -6567,120 +6624,11 @@ function openCreateSkillModal() {
     document.getElementById('csCategory').value = 'custom';
     document.getElementById('csDesc').value = '';
     document.getElementById('csPrompt').value = '';
-    document.getElementById('csAiDesc').value = '';
-    document.getElementById('csAiPreview').style.display = 'none';
-    document.getElementById('csAiApplyBtn').style.display = 'none';
-    document.getElementById('csExtractStatus').textContent = '';
-    _csSelectedSession = null;
-    csSwitchTab('manual');
     document.getElementById('createSkillModal').style.display = 'flex';
 }
 
 function closeCreateSkillModal() {
     document.getElementById('createSkillModal').style.display = 'none';
-}
-
-let _csSelectedSession = null;
-
-function csSwitchTab(tab) {
-    ['manual', 'extract', 'ai'].forEach(t => {
-        const id = 'csTab' + t.charAt(0).toUpperCase() + t.slice(1);
-        const btn = document.getElementById(id);
-        const body = document.getElementById('csTabBody' + t.charAt(0).toUpperCase() + t.slice(1));
-        if (btn)  btn.classList.toggle('active', t === tab);
-        if (body) body.style.display = t === tab ? 'block' : 'none';
-    });
-    if (tab === 'extract') csLoadSessions();
-}
-
-async function csLoadSessions() {
-    const list = document.getElementById('csExtractSessionList');
-    if (!list) return;
-    list.innerHTML = '<div style="color:var(--text-muted);padding:6px;font-size:12px;">正在加载…</div>';
-    try {
-        const resp = await fetch('/api/skillmarket/sessions');
-        const data = await resp.json();
-        const sessions = data.sessions || [];
-        if (!sessions.length) {
-            list.innerHTML = '<div style="color:var(--text-muted);padding:6px;font-size:12px;">暂无对话记录。</div>';
-            return;
-        }
-        list.innerHTML = sessions.map(s => `
-            <div class="ske-session-item" data-sid="${escapeHtml(s.id)}" onclick="csSelectSession('${escapeHtml(s.id)}', this)">
-                💬 ${escapeHtml(s.title || s.id)}
-                <span style="float:right;color:var(--text-muted);font-size:10px;">${s.message_count || 0} 条</span>
-            </div>`).join('');
-    } catch(e) {
-        list.innerHTML = `<div style="color:var(--accent-danger);font-size:12px;padding:6px;">⚠️ ${escapeHtml(e.message)}</div>`;
-    }
-}
-
-function csSelectSession(sessionId, el) {
-    _csSelectedSession = sessionId;
-    document.querySelectorAll('#csExtractSessionList .ske-session-item').forEach(i => i.classList.remove('selected'));
-    el.classList.add('selected');
-    document.getElementById('csExtractStatus').textContent = '';
-}
-
-async function csExtractFromSession() {
-    if (!_csSelectedSession) { alert('请先选择一个对话会话'); return; }
-    const name = (document.getElementById('csExtractName').value || '').trim() || '从对话提炼';
-    const statusEl = document.getElementById('csExtractStatus');
-    statusEl.style.color = 'var(--text-muted)';
-    statusEl.textContent = '⏳ 正在分析对话风格…';
-    try {
-        const resp = await fetch('/api/skillmarket/from-session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session_id: _csSelectedSession, name, save: false }),
-        });
-        const data = await resp.json();
-        if (!data.success) throw new Error(data.error || '提取失败');
-        const skill = data.skill || {};
-        // 填入手动模式表单
-        if (skill.name)        document.getElementById('csName').value    = skill.name;
-        if (skill.icon)        document.getElementById('csIcon').value    = skill.icon;
-        if (skill.category)    document.getElementById('csCategory').value = skill.category;
-        if (skill.description) document.getElementById('csDesc').value    = skill.description;
-        const prompt = skill.system_prompt_template || skill.system_prompt || skill.prompt || '';
-        if (prompt)            document.getElementById('csPrompt').value  = prompt;
-        statusEl.style.color = 'var(--accent-success, #4caf50)';
-        statusEl.textContent = '✅ 风格提炼完成，已填入表单';
-        csSwitchTab('manual');
-    } catch(e) {
-        statusEl.style.color = 'var(--accent-danger, #e06c75)';
-        statusEl.textContent = '⚠️ ' + e.message;
-    }
-}
-
-async function csPreviewPrompt() {
-    const desc = (document.getElementById('csAiDesc').value || '').trim();
-    if (!desc) { alert('请输入 Skill 描述'); return; }
-    const previewEl = document.getElementById('csAiPreview');
-    const applyBtn  = document.getElementById('csAiApplyBtn');
-    previewEl.style.display = 'block';
-    applyBtn.style.display = 'none';
-    previewEl.textContent = '⏳ AI 正在生成…';
-    try {
-        const resp = await fetch('/api/skillmarket/preview-prompt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ description: desc }),
-        });
-        const data = await resp.json();
-        if (!data.success) throw new Error(data.error || '生成失败');
-        previewEl.textContent = data.prompt || data.system_prompt || '（空）';
-        applyBtn.style.display = 'block';
-    } catch(e) {
-        previewEl.textContent = '⚠️ ' + e.message;
-    }
-}
-
-function csApplyGeneratedPrompt() {
-    const text = document.getElementById('csAiPreview').textContent || '';
-    if (!text || text.startsWith('⏳') || text.startsWith('⚠️')) return;
-    document.getElementById('csPrompt').value = text;
-    csSwitchTab('manual');
 }
 
 async function saveCreateSkill() {
@@ -7144,10 +7092,9 @@ function setUIZoom(v, suppressSave = false) {
     // Compensate --viewport-h so 100vh-based containers don't overflow after zoom
     document.documentElement.style.setProperty('--viewport-h', (window.innerHeight / v) + 'px');
     localStorage.setItem('koto.uiZoom', v);
-    // Persist to server with debounce (avoid flooding during slider drag)
+    // Persist to server so the setting survives across sessions/ports/browsers
     if (!suppressSave && typeof updateSetting === 'function') {
-        clearTimeout(window._zoomSaveTimer);
-        window._zoomSaveTimer = setTimeout(() => updateSetting('appearance', 'ui_zoom', v), 400);
+        updateSetting('appearance', 'ui_zoom', v);
     }
     const pct = Math.round(v * 100);
     const display = document.getElementById('uiZoomDisplay');
@@ -7282,28 +7229,6 @@ async function loadShadowStatus() {
         if (cardsEl) {
             cardsEl.style.display = '';
             const topics = (s.top_topics || []).map(t => `<span style="background:var(--bg-hover);border-radius:4px;padding:2px 6px;font-size:11px;">${escapeHtml(t.topic)} ×${t.count}</span>`).join(' ');
-            // 对话风格摘要
-            let styleHtml = '';
-            if (s.style_summary && s.style_summary.samples > 2) {
-                const cs = s.style_summary;
-                const styleItems = [];
-                if (cs.polite_ratio > 0.6) styleItems.push('礼貌型');
-                else if (cs.polite_ratio < 0.3) styleItems.push('直接型');
-                if (cs.context_ratio > 0.4) styleItems.push('爱给背景');
-                if (cs.explicit_pref_ratio > 0.3) styleItems.push('有格式偏好');
-                if (cs.multistep_ratio > 0.25) styleItems.push('多步任务');
-                if (cs.avg_query_len > 80) styleItems.push('长消息');
-                else if (cs.avg_query_len > 0 && cs.avg_query_len < 25) styleItems.push('简洁提问');
-                if (styleItems.length) {
-                    styleHtml = `<div style="margin-top:5px;font-size:11px;color:var(--text-muted);">🎭 对话风格: ${styleItems.map(i => `<span style="background:var(--bg-hover);border-radius:3px;padding:1px 5px;">${i}</span>`).join(' ')}</div>`;
-                }
-            }
-            // 任务风格摘要
-            let taskHtml = '';
-            if (s.task_summary && s.task_summary.samples > 2) {
-                const topTypes = (s.task_summary.top_task_types || []).slice(0, 3).map(t => `${t.type}×${t.count}`).join('  ');
-                if (topTypes) taskHtml = `<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">🎯 常用任务: <span style="opacity:.8">${topTypes}</span></div>`;
-            }
             cardsEl.innerHTML = `
                 <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--text-muted);">
                     <span>📊 已观察 <strong>${s.total_observations || 0}</strong> 次对话</span>
@@ -7312,7 +7237,6 @@ async function loadShadowStatus() {
                     <span>💬 待推送 <strong>${s.pending_messages || 0}</strong> 条</span>
                 </div>
                 ${topics ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${topics}</div>` : ''}
-                ${styleHtml}${taskHtml}
             `;
         }
 
@@ -7407,164 +7331,4 @@ async function shadowMarkTaskDone(taskId) {
         await loadShadowOpenTasks();
         await loadShadowStatus();
     } catch(e) { /* ignore */ }
-}
-// ================= 模型路由管理 =================
-
-let _modelRoutingOpen = false;
-
-function toggleModelRoutingPanel() {
-    _modelRoutingOpen = !_modelRoutingOpen;
-    document.getElementById('modelRoutingBody').style.display = _modelRoutingOpen ? 'block' : 'none';
-    document.getElementById('modelRoutingToggleIcon').textContent  = _modelRoutingOpen ? '▲' : '▼';
-    if (_modelRoutingOpen) loadModelRouting();
-}
-
-async function loadModelRouting() {
-    const statusEl = document.getElementById('modelRoutingStatus');
-    const tableEl  = document.getElementById('modelRoutingTable');
-    if (!statusEl || !tableEl) return;
-    statusEl.textContent = '载入中…';
-    try {
-        const [routeRes, overrideRes] = await Promise.all([
-            fetch('/api/v1/models'),
-            fetch('/api/v1/models/overrides')
-        ]);
-        const routeData    = await routeRes.json();
-        const overrideData = await overrideRes.json();
-
-        const available = (routeData.available || []).map(m => m.id || m).filter(Boolean);
-        const overrides = overrideData.overrides || {};
-        const modelMapRaw = overrideData.model_map || {};
-
-        statusEl.innerHTML = routeData.ready
-            ? `<span style="color:#4ade80;">● 动态发现已就绪</span> · ${available.length} 个可用模型`
-            : `<span style="color:#facc15;">● 静态默认值</span>（模型管理器未就绪）`;
-
-        // Task display labels
-        const TASK_LABELS = {
-            CHAT: '💬 对话',
-            CODER: '💻 编程',
-            WEB_SEARCH: '🌐 网络搜索',
-            VISION: '👁️ 图像理解',
-            RESEARCH: '🔬 深度研究',
-            FILE_GEN: '📄 文档生成',
-            FILE_GEN_COMPLEX: '📄 文档生成 (复杂)',
-            DOC_ANNOTATE: '📝 文档批注',
-            DOC_ANNOTATE_COMPLEX: '📝 文档批注 (复杂)',
-            CODER_COMPLEX: '💻 编程 (复杂)',
-            MULTI_STEP: '🧭 多步任务',
-            PAINTER: '🎨 图像生成',
-            AGENT: '🤖 Agent',
-            FILE_SEARCH: '🗂️ 文件搜索',
-            COMPLEX: '⚡ 复杂度升级兜底',
-            SYSTEM: '🖥️ 系统操作',
-            FILE_OP: '📁 文件操作',
-        };
-
-        // Build option list from available models + current MODEL_MAP values
-        const allModelIds = Array.from(new Set([
-            ...available,
-            ...Object.values(modelMapRaw).map(v => v.model_id || v),
-            'gemini-3-pro-preview', 'gemini-3-flash-preview',
-            'gemini-2.5-flash', 'gemini-2.5-pro-preview',
-            'deep-research-pro-preview-12-2025',
-            'gemini-3.1-flash-image-preview', 'local-executor'
-        ])).filter(Boolean);
-
-        let rows = '';
-        for (const [task, info] of Object.entries(modelMapRaw)) {
-            const mid = info.model_id || info;
-            const isOverridden = !!overrides[task];
-            const label = TASK_LABELS[task] || task;
-            const opts = allModelIds.map(m =>
-                `<option value="${m}" ${m === mid ? 'selected' : ''}>${m}</option>`
-            ).join('');
-            rows += `<tr style="${isOverridden ? 'background:rgba(250,204,21,.08);' : ''}">
-                <td style="padding:4px 6px;font-size:12px;white-space:nowrap;">${label}</td>
-                <td style="padding:4px 6px;">
-                    <select style="width:100%;font-size:11px;background:var(--bg-secondary,#1e1e2e);color:inherit;border:1px solid rgba(255,255,255,.15);border-radius:4px;padding:2px 4px;"
-                            onchange="applyModelOverride('${task}', this.value, this)">
-                        ${opts}
-                    </select>
-                </td>
-                <td style="padding:4px 6px;font-size:11px;opacity:.6;">
-                    ${isOverridden ? `<span style="color:#facc15;">✏️ 覆盖</span>` : (info.score != null ? `${Math.round(info.score*100)}分` : '默认')}
-                </td>
-            </tr>`;
-        }
-
-        tableEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <thead><tr style="opacity:.5;font-size:11px;">
-                <th style="text-align:left;padding:4px 6px;">任务</th>
-                <th style="text-align:left;padding:4px 6px;">模型</th>
-                <th style="text-align:left;padding:4px 6px;">状态</th>
-            </tr></thead>
-            <tbody>${rows}</tbody>
-        </table>`;
-
-    } catch(e) {
-        statusEl.textContent = '加载失败: ' + e.message;
-        tableEl.innerHTML = '';
-    }
-}
-
-async function applyModelOverride(task, modelId, selectEl) {
-    try {
-        const res = await fetch('/api/v1/models/override', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task, model_id: modelId })
-        });
-        const data = await res.json();
-        if (data.status === 'ok') {
-            _showToast(`✅ ${task} → ${modelId}`);
-            // 高亮行标记
-            const row = selectEl.closest('tr');
-            if (row) row.style.background = 'rgba(250,204,21,.08)';
-            // 更新状态单元格
-            const cells = row ? row.querySelectorAll('td') : [];
-            if (cells[2]) cells[2].innerHTML = `<span style="color:#facc15;">✏️ 覆盖</span>`;
-        } else {
-            _showToast('覆盖失败: ' + (data.error || '未知错误'), 'error');
-        }
-    } catch(e) {
-        _showToast('请求失败: ' + e.message, 'error');
-    }
-}
-
-async function clearAllModelOverrides() {
-    if (!confirm('确认清除所有手动覆盖，恢复动态/默认路由？')) return;
-    try {
-        const res = await fetch('/api/v1/models/overrides');
-        const data = await res.json();
-        const tasks = Object.keys(data.overrides || {});
-        for (const task of tasks) {
-            await fetch('/api/v1/models/override', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ task, model_id: '' })
-            });
-        }
-        _showToast('✅ 所有覆盖已清除');
-        await loadModelRouting();
-    } catch(e) {
-        _showToast('操作失败: ' + e.message, 'error');
-    }
-}
-
-async function refreshModelRegistry() {
-    const statusEl = document.getElementById('modelRoutingStatus');
-    if (statusEl) statusEl.textContent = '正在重新发现模型…';
-    try {
-        const res = await fetch('/api/v1/models/refresh', { method: 'POST' });
-        const data = await res.json();
-        if (data.status === 'ok' || data.status === 'initializing') {
-            _showToast('🔄 模型列表已刷新');
-            await loadModelRouting();
-        } else {
-            _showToast('刷新失败: ' + (data.error || ''), 'error');
-        }
-    } catch(e) {
-        _showToast('请求失败: ' + e.message, 'error');
-    }
 }
