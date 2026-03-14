@@ -5369,7 +5369,7 @@ class TaskOrchestrator:
                     max_output_tokens=8,
                     temperature=0.0,
                 )
-            )
+            ))
             text = (resp.text or "").strip()
             m = re.search(r"\d+", text)
             if m:

@@ -147,6 +147,20 @@ def convert(
     # 计算输出路径
     if not output_path:
         out_dir = output_dir or str(Path(source_path).parent)
+        # Security: prevent path traversal — output must stay under workspace/uploads/dist
+        _allowed_roots = [
+            os.path.abspath("workspace"),
+            os.path.abspath("uploads"),
+            os.path.abspath("dist"),
+        ]
+        abs_out = os.path.abspath(out_dir)
+        if not any(abs_out.startswith(root) for root in _allowed_roots):
+            # Allow same-directory output (source file's parent)
+            src_parent = os.path.abspath(str(Path(source_path).parent))
+            if abs_out != src_parent:
+                return _err(
+                    f"输出目录不在允许的范围内: {out_dir}"
+                )
         os.makedirs(out_dir, exist_ok=True)
         output_path = os.path.join(out_dir, Path(source_path).stem + tgt_ext)
 
@@ -505,7 +519,9 @@ def _md_to_html(src: str, out: str) -> Tuple[str, str]:
         import markdown as md_lib
         html_body = md_lib.markdown(text, extensions=["tables", "fenced_code"])
     except ImportError:
-        html_body = re.sub(r'^# (.+)$', r'<h1>\1</h1>', text, flags=re.M)
+        import html as html_mod
+        escaped = html_mod.escape(text)
+        html_body = re.sub(r'^# (.+)$', r'<h1>\1</h1>', escaped, flags=re.M)
         html_body = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html_body, flags=re.M)
         html_body = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html_body, flags=re.M)
         html_body = html_body.replace("\n", "<br>\n")
