@@ -1,0 +1,58 @@
+# CODEOWNERS for the Koto repository
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo
+* @Loganwon
+
+# ---------- Core subsystems ----------
+
+# LLM provider integrations (OpenAI, Anthropic, local models, etc.)
+app/core/llm/ @Loganwon
+
+# Routing and dispatch logic
+app/core/routing/ @Loganwon
+
+# Agent core framework
+app/core/agent/ @Loganwon
+
+# Skills framework
+app/core/skills/ @Loganwon
+
+# Learning and training pipelines
+app/core/learning/ @Loganwon
+
+# Monitoring and alerting
+app/core/monitoring/ @Loganwon
+
+# Security (PII filtering, input sanitization, etc.)
+app/core/security/ @Loganwon
+
+# ---------- Web backend ----------
+
+# Flask web application (app.py, auth.py, routes, etc.)
+web/ @Loganwon
+
+# ---------- Entry points ----------
+
+# Server entry points and configuration validation (server.py, koto_app.py, config_validator.py)
+src/ @Loganwon
+
+# ---------- Tests ----------
+
+# Test suite
+tests/ @Loganwon
+
+# ---------- CI/CD ----------
+
+# GitHub Actions workflows
+.github/workflows/ @Loganwon
+
+# ---------- Configuration ----------
+
+# Configuration files
+config/ @Loganwon
+
+# ---------- Documentation ----------
+
+# Project documentation
+docs/ @Loganwon
