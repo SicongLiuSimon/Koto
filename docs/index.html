@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koto (言) — AI 桌面助手</title>
+  <meta name="description" content="Koto 是运行在你自己电脑上的 AI 桌面助手，支持多模型对话、文档分析、技能系统与工作流自动化。">
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #05080f;
+      --bg2:     #0b111d;
+      --bg3:     #111a2a;
+      --border:  rgba(255,255,255,.08);
+      --t1:      #e8eefc;
+      --t2:      #8896b3;
+      --t3:      #556076;
+      --cyan:    #63c6ff;
+      --teal:    #76f7d4;
+      --grad:    linear-gradient(135deg, #63c6ff, #76f7d4);
+      --r1: 10px; --r2: 16px;
+      --ease: all .25s ease;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Segoe UI', -apple-system, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg); color: var(--t1);
+      min-height: 100vh; overflow-x: hidden;
+      font-size: 15px; line-height: 1.6;
+    }
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Background grid ── */
+    .bg-wrap {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    }
+    .grid-bg {
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(99,198,255,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,198,255,.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+    .bg-radial {
+      position: absolute; border-radius: 50%;
+      filter: blur(100px); opacity: .45;
+    }
+    .bg-r1 { width: 600px; height: 600px; top: -180px; left: -100px; background: rgba(99,198,255,.08); }
+    .bg-r2 { width: 500px; height: 500px; bottom: -100px; right: -80px; background: rgba(118,247,212,.06); }
+
+    /* ── Utilities ── */
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 36px; position: relative; z-index: 1; }
+    .gt  { background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px solid rgba(99,198,255,.2); background: rgba(99,198,255,.07); color: var(--cyan);
+    }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 22px; border-radius: var(--r1); font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: var(--ease); border: none;
+    }
+    .btn-prime {
+      background: var(--grad); color: #05080f;
+      box-shadow: 0 0 24px rgba(99,198,255,.25);
+    }
+    .btn-prime:hover { transform: translateY(-2px); box-shadow: 0 4px 32px rgba(99,198,255,.38); }
+    .btn-ghost {
+      background: transparent; color: var(--t1);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { border-color: rgba(99,198,255,.35); color: var(--cyan); }
+
+    /* ── Nav ── */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      height: 60px;
+      display: flex; align-items: center;
+      background: rgba(5,8,15,.75); backdrop-filter: blur(18px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav .wrap { display: flex; align-items: center; width: 100%; }
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 17px; font-weight: 700;
+    }
+    .brand-mark {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: var(--grad);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 800; color: #05080f;
+    }
+    .nav-links {
+      display: flex; align-items: center; gap: 28px;
+      margin-left: auto; margin-right: 20px;
+    }
+    .nav-links a {
+      font-size: 14px; color: var(--t2); transition: var(--ease);
+    }
+    .nav-links a:hover { color: var(--t1); }
+    .lang-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: 6px; color: var(--t2); cursor: pointer;
+      padding: 4px 10px; font-size: 12px; font-family: inherit;
+      transition: var(--ease);
+    }
+    .lang-btn:hover { color: var(--t1); border-color: rgba(99,198,255,.3); }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 148px 0 88px;
+      display: flex; flex-direction: column; align-items: center;
+      text-align: center;
+    }
+    .hero-pill { margin-bottom: 24px; }
+    .hero-h1 {
+      font-size: clamp(40px, 6.5vw, 80px); font-weight: 900;
+      line-height: 1.05; letter-spacing: -.03em;
+      max-width: 860px; margin-bottom: 22px;
+    }
+    .hero-sub {
+      font-size: 17px; color: var(--t2);
+      max-width: 560px; margin-bottom: 40px; line-height: 1.75;
+    }
+    .hero-btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 64px; }
+
+    /* App window mockup */
+    .aw {
+      width: min(820px, 92vw); border-radius: var(--r2);
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      overflow: hidden;
+      box-shadow: 0 32px 80px rgba(0,0,0,.55), 0 0 0 1px var(--border);
+    }
+    .aw-bar {
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 16px; background: var(--bg3);
+      border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #ffbd2e; }
+    .dot-g { background: #27c93f; }
+    .aw-title { font-size: 12px; color: var(--t3); margin-left: 8px; }
+    .aw-body {
+      display: grid; grid-template-columns: 200px 1fr;
+      height: 280px;
+    }
+    .aw-sidebar {
+      border-right: 1px solid var(--border);
+      padding: 14px 0;
+    }
+    .aw-s-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--t3);
+      padding: 0 14px; margin-bottom: 8px;
+    }
+    .aw-s-item {
+      padding: 7px 14px; font-size: 12px; color: var(--t2);
+      cursor: default; border-radius: 0;
+    }
+    .aw-s-item.active { background: rgba(99,198,255,.1); color: var(--cyan); }
+    .aw-s-item .dot-sm {
+      display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--teal); margin-right: 6px;
+    }
+    .aw-chat {
+      display: flex; flex-direction: column;
+      padding: 16px; gap: 12px; overflow: hidden;
+    }
+    .aw-msg {
+      display: flex; gap: 9px; align-items: flex-start;
+    }
+    .aw-av {
+      width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700;
+    }
+    .aw-av.ai  { background: var(--grad); color: #05080f; }
+    .aw-av.usr { background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; }
+    .aw-bubble {
+      padding: 8px 12px; border-radius: 12px; font-size: 12px; line-height: 1.5;
+      max-width: 360px;
+    }
+    .aw-bubble.ai  { background: var(--bg3); color: var(--t1); border: 1px solid var(--border); }
+    .aw-bubble.usr { background: linear-gradient(135deg,rgba(99,198,255,.18),rgba(118,247,212,.12)); color: var(--t1); }
+    .aw-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 6px; font-size: 10px;
+      background: rgba(118,247,212,.12); color: var(--teal);
+      border: 1px solid rgba(118,247,212,.2); margin-top: 4px;
+    }
+    .aw-cursor {
+      display: inline-block; width: 2px; height: 12px;
+      background: var(--cyan); margin-left: 2px; vertical-align: middle;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── Features ── */
+    .sec { padding: 96px 0; }
+    .sec-eye { display: flex; justify-content: center; margin-bottom: 16px; }
+    .sec-h2 {
+      font-size: clamp(28px,4vw,44px); font-weight: 800;
+      text-align: center; letter-spacing: -.02em; margin-bottom: 14px;
+    }
+    .sec-sub { text-align: center; color: var(--t2); font-size: 15px; max-width: 480px; margin: 0 auto 56px; }
+
+    .feat-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(300px,1fr)); gap: 20px;
+    }
+    .feat-card {
+      padding: 26px 24px; border-radius: var(--r2);
+      background: var(--bg2); border: 1px solid var(--border);
+      transition: var(--ease);
+    }
+    .feat-card:hover {
+      border-color: rgba(99,198,255,.25);
+      transform: translateY(-3px);
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    .feat-icon {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.15);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; margin-bottom: 16px;
+    }
+    .feat-card h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+    .feat-card p  { font-size: 13px; color: var(--t2); line-height: 1.65; }
+    .feat-tags {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px;
+    }
+    .tag {
+      padding: 2px 9px; border-radius: 5px; font-size: 11px;
+      background: rgba(99,198,255,.07); color: var(--cyan);
+      border: 1px solid rgba(99,198,255,.15);
+    }
+
+    /* ── Setup ── */
+    .setup-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 16px;
+    }
+    .step {
+      display: flex; gap: 16px; align-items: flex-start;
+      padding: 22px; border-radius: var(--r2);
+      background: var(--bg2); border: 1px solid var(--border);
+    }
+    .step-num {
+      width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+      background: var(--grad); color: #05080f;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 800;
+    }
+    .step h4 { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
+    .step p  { font-size: 12.5px; color: var(--t2); line-height: 1.6; }
+    .step code {
+      display: inline-block; padding: 2px 7px; border-radius: 5px;
+      background: rgba(99,198,255,.08); color: var(--cyan);
+      font-family: 'Consolas', monospace; font-size: 11.5px;
+    }
+
+    /* ── Requirement note ── */
+    .req-box {
+      margin: 48px 0 0;
+      padding: 18px 22px; border-radius: var(--r2);
+      background: rgba(99,198,255,.05); border: 1px solid rgba(99,198,255,.18);
+    }
+    .req-box h4 { font-size: 13px; font-weight: 700; color: var(--cyan); margin-bottom: 10px; }
+    .req-list {
+      display: flex; flex-wrap: wrap; gap: 20px;
+    }
+    .req-item { font-size: 13px; color: var(--t2); }
+    .req-item strong { color: var(--t1); }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border); padding: 36px 0;
+    }
+    .fg { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    .fg-brand { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; }
+    .fg p { font-size: 13px; color: var(--t3); }
+    .fg-links { display: flex; gap: 18px; }
+    .fg-links a { font-size: 13px; color: var(--t3); transition: var(--ease); }
+    .fg-links a:hover { color: var(--t1); }
+
+    /* ── Scroll reveal ── */
+    .rv { opacity: 0; transform: translateY(22px); transition: opacity .55s ease, transform .55s ease; }
+    .rv.vis { opacity: 1; transform: none; }
+
+    /* ── Responsive ── */
+    @media (max-width: 700px) {
+      .aw-body { grid-template-columns: 1fr; }
+      .aw-sidebar { display: none; }
+      .nav-links { display: none; }
+      .wrap { padding: 0 20px; }
+      .hero { padding: 120px 0 64px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Background -->
+<div class="bg-wrap" aria-hidden="true">
+  <div class="grid-bg"></div>
+  <div class="bg-radial bg-r1"></div>
+  <div class="bg-radial bg-r2"></div>
+</div>
+
+<!-- ══ NAV ══ -->
+<nav class="nav" aria-label="Main navigation">
+  <div class="wrap">
+    <a href="#" class="nav-brand">
+      <div class="brand-mark" aria-hidden="true">言</div>
+      Koto
+    </a>
+    <div class="nav-links">
+      <a href="#features"  data-en="Features"  data-zh="功能特性">功能特性</a>
+      <a href="#setup"     data-en="Setup"      data-zh="快速开始">快速开始</a>
+      <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <button class="lang-btn" onclick="toggleLang()" aria-label="Switch language">EN</button>
+  </div>
+</nav>
+
+<!-- ══ HERO ══ -->
+<section class="hero" aria-labelledby="hero-heading">
+  <div class="wrap">
+    <div class="hero-pill">
+      <span class="pill">✦ &nbsp;<span data-en="Open source · Python · Runs locally" data-zh="开源 · Python · 本地运行">开源 · Python · 本地运行</span></span>
+    </div>
+
+    <h1 class="hero-h1 rv" id="hero-heading">
+      <span data-en="Your personal" data-zh="属于你的">属于你的</span><br>
+      <span class="gt" data-en="AI Desktop Workspace" data-zh="AI 桌面工作台">AI 桌面工作台</span>
+    </h1>
+
+    <p class="hero-sub rv" data-en="Koto runs on your own machine — multi-model chat, document analysis, Skills automation and long-term memory. Your data stays local." data-zh="Koto 运行在你自己的电脑上——多模型对话、文档分析、技能自动化与长期记忆。数据不离本地。">
+      Koto 运行在你自己的电脑上——多模型对话、文档分析、技能自动化与长期记忆。数据不离本地。
+    </p>
+
+    <div class="hero-btns rv">
+      <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-prime">
+        ⬇&nbsp;<span data-en="Download" data-zh="下载">下载</span>
+      </a>
+      <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-ghost">
+        <span data-en="View on GitHub" data-zh="查看 GitHub">查看 GitHub</span>
+      </a>
+    </div>
+
+    <!-- App window preview -->
+    <div class="aw rv" role="img" aria-label="Koto app window preview">
+      <div class="aw-bar">
+        <div class="dot dot-r"></div>
+        <div class="dot dot-y"></div>
+        <div class="dot dot-g"></div>
+        <span class="aw-title">Koto (言) — AI Workspace</span>
+      </div>
+      <div class="aw-body">
+        <div class="aw-sidebar">
+          <div class="aw-s-label" data-en="Sessions" data-zh="会话">会话</div>
+          <div class="aw-s-item active"><span class="dot-sm"></span><span data-en="New chat" data-zh="新对话">新对话</span></div>
+          <div class="aw-s-item"><span data-en="Document review" data-zh="合同审阅">合同审阅</span></div>
+          <div class="aw-s-item"><span data-en="Weekly report" data-zh="周报生成">周报生成</span></div>
+          <div class="aw-s-label" style="margin-top:16px;" data-en="Skills" data-zh="技能">技能</div>
+          <div class="aw-s-item"><span data-en="Summarizer" data-zh="摘要助手">摘要助手</span></div>
+          <div class="aw-s-item"><span data-en="Code reviewer" data-zh="代码审查">代码审查</span></div>
+        </div>
+        <div class="aw-chat">
+          <div class="aw-msg">
+            <div class="aw-av usr">U</div>
+            <div class="aw-bubble usr" data-en="Summarize this PDF for me" data-zh="帮我总结一下这份 PDF">帮我总结一下这份 PDF</div>
+          </div>
+          <div class="aw-msg">
+            <div class="aw-av ai">言</div>
+            <div>
+              <div class="aw-bubble ai">
+                <span data-en="The document covers 3 key points: ①…②…③…" data-zh="这份文档涵盖 3 个核心要点：①…②…③…">这份文档涵盖 3 个核心要点：①…②…③…</span><span class="aw-cursor"></span>
+              </div>
+              <div class="aw-badge" data-en="⚡ Streaming · Gemini Flash" data-zh="⚡ 流式输出 · Gemini Flash">⚡ 流式输出 · Gemini Flash</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ FEATURES ══ -->
+<section class="sec" id="features" aria-labelledby="feat-heading">
+  <div class="wrap">
+    <div class="sec-eye">
+      <span class="pill" data-en="What Koto can do" data-zh="Koto 能做什么">Koto 能做什么</span>
+    </div>
+    <h2 class="sec-h2 rv" id="feat-heading" data-en="Real capabilities" data-zh="真实功能">真实功能</h2>
+    <p class="sec-sub rv" data-en="Everything below works out of the box after setup." data-zh="以下所有功能配置完成后开箱即用。">以下所有功能配置完成后开箱即用。</p>
+
+    <div class="feat-grid">
+
+      <div class="feat-card rv">
+        <div class="feat-icon">💬</div>
+        <h3 data-en="Multi-model Chat" data-zh="多模型对话">多模型对话</h3>
+        <p data-en="Stream responses from Gemini Flash / Pro / Ultra or locally-running Ollama models. Switch models per session." data-zh="流式调用 Gemini Flash / Pro / Ultra，或本机运行的 Ollama 模型。每个会话可独立切换模型。">流式调用 Gemini Flash / Pro / Ultra，或本机运行的 Ollama 模型。每个会话可独立切换模型。</p>
+        <div class="feat-tags">
+          <span class="tag">Gemini</span>
+          <span class="tag">Ollama</span>
+          <span class="tag" data-en="Streaming" data-zh="流式输出">流式输出</span>
+        </div>
+      </div>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">📄</div>
+        <h3 data-en="Document Analysis" data-zh="文档分析">文档分析</h3>
+        <p data-en="Upload Word / PDF / Excel / PPT and ask questions, generate summaries, add annotations, or convert formats directly in chat." data-zh="上传 Word / PDF / Excel / PPT，在对话中提问、生成摘要、添加批注或转换格式。">上传 Word / PDF / Excel / PPT，在对话中提问、生成摘要、添加批注或转换格式。</p>
+        <div class="feat-tags">
+          <span class="tag">Word</span><span class="tag">PDF</span>
+          <span class="tag">Excel</span><span class="tag">PPT</span>
+        </div>
+      </div>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">🧩</div>
+        <h3 data-en="Skills System" data-zh="技能系统">技能系统</h3>
+        <p data-en="Define custom AI behaviors with a system prompt, bind them to shortcuts, and switch context instantly. Includes a built-in Skill marketplace." data-zh="用 System Prompt 定义 AI 行为，绑定快捷方式，即时切换上下文。内置 Skill 市场可浏览和安装社区技能。">用 System Prompt 定义 AI 行为，绑定快捷方式，即时切换上下文。内置 Skill 市场。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="Custom prompts" data-zh="自定义提示词">自定义提示词</span>
+          <span class="tag" data-en="Marketplace" data-zh="技能市场">技能市场</span>
+        </div>
+      </div>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">🧠</div>
+        <h3 data-en="Long-term Memory" data-zh="长期记忆">长期记忆</h3>
+        <p data-en="Koto builds a user profile and stores preferences, facts, and recurring context across sessions — no need to repeat yourself." data-zh="Koto 构建用户画像，跨会话存储偏好、事实与常用上下文，无需重复解释背景。">Koto 构建用户画像，跨会话存储偏好、事实与常用上下文，无需重复解释背景。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="User profile" data-zh="用户画像">用户画像</span>
+          <span class="tag" data-en="Persistent context" data-zh="持久上下文">持久上下文</span>
+        </div>
+      </div>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">🔁</div>
+        <h3 data-en="Automation &amp; Triggers" data-zh="自动化与触发器">自动化与触发器</h3>
+        <p data-en="Schedule recurring tasks — daily summaries, file watchers, timed reminders. Background jobs run silently without interrupting your work." data-zh="设置定时任务——每日摘要、文件监控、定时提醒。后台作业静默运行，不打断你的工作。">设置定时任务——每日摘要、文件监控、定时提醒。后台作业静默运行。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="Scheduler" data-zh="定时器">定时器</span>
+          <span class="tag" data-en="Background jobs" data-zh="后台任务">后台任务</span>
+        </div>
+      </div>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">🎙️</div>
+        <h3 data-en="Voice I/O" data-zh="语音交互">语音交互</h3>
+        <p data-en="Speak your message with the microphone button or use TTS to have responses read aloud. Optional; requires voice dependencies." data-zh="点击麦克风说话，或开启 TTS 语音朗读回复。可选功能，需额外安装语音依赖。">点击麦克风说话，或开启 TTS 语音朗读回复。可选功能，需额外安装语音依赖。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="Speech-to-text" data-zh="语音输入">语音输入</span>
+          <span class="tag">TTS</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ══ SETUP ══ -->
+<section class="sec" id="setup" style="padding-top:0;" aria-labelledby="setup-heading">
+  <div class="wrap">
+    <div class="sec-eye">
+      <span class="pill" data-en="Getting started" data-zh="快速开始">快速开始</span>
+    </div>
+    <h2 class="sec-h2 rv" id="setup-heading" data-en="Up and running in minutes" data-zh="几分钟内跑起来">几分钟内跑起来</h2>
+    <p class="sec-sub rv" data-en="Koto is a Python app. Clone, install, configure your API key, run." data-zh="Koto 是 Python 应用。克隆、安装、填 API Key、启动。">Koto 是 Python 应用。克隆、安装、填 API Key、启动。</p>
+
+    <div class="setup-grid">
+      <div class="step rv">
+        <div class="step-num">1</div>
+        <div>
+          <h4 data-en="Clone &amp; install" data-zh="克隆并安装">克隆并安装</h4>
+          <p><code>git clone</code> <span data-en="the repo, create a venv, then" data-zh="仓库，创建虚拟环境，然后">仓库，创建虚拟环境，然后</span> <code>pip install -r config/requirements.txt</code></p>
+        </div>
+      </div>
+      <div class="step rv">
+        <div class="step-num">2</div>
+        <div>
+          <h4 data-en="Set your API key" data-zh="填入 API Key">填入 API Key</h4>
+          <p data-en="Copy " data-zh="复制 "><span data-en="Copy " data-zh="复制 ">复制 </span><code>config/gemini_config.env.example</code><span data-en=" to " data-zh=" 为 "> 为 </span><code>gemini_config.env</code><span data-en=" and fill in your Gemini API key." data-zh="，填入 Gemini API Key。">，填入 Gemini API Key。</span></p>
+        </div>
+      </div>
+      <div class="step rv">
+        <div class="step-num">3</div>
+        <div>
+          <h4 data-en="Launch Koto" data-zh="启动 Koto">启动 Koto</h4>
+          <p><span data-en="Run " data-zh="运行 ">运行 </span><code>Koto_Start.bat</code><span data-en=" (Windows) or " data-zh="（Windows）或 ">（Windows）或 </span><code>python src/koto_app.py</code><span data-en=" directly." data-zh="。">。</span></p>
+        </div>
+      </div>
+      <div class="step rv">
+        <div class="step-num">4</div>
+        <div>
+          <h4 data-en="(Optional) Local model" data-zh="（可选）本地模型">（可选）本地模型</h4>
+          <p data-en="Install Ollama and pull any model. Koto detects it automatically." data-zh="安装 Ollama 并 pull 任意模型，Koto 自动识别。">安装 Ollama 并 pull 任意模型，Koto 自动识别。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Requirements note -->
+    <div class="req-box rv">
+      <h4 data-en="Requirements" data-zh="环境要求">环境要求</h4>
+      <div class="req-list">
+        <div class="req-item"><strong>Python</strong> 3.11+</div>
+        <div class="req-item"><strong data-en="Gemini API Key" data-zh="Gemini API Key">Gemini API Key</strong> <span data-en="(required for cloud models)" data-zh="（云端模型必需）">（云端模型必需）</span></div>
+        <div class="req-item"><strong>Ollama</strong> <span data-en="(optional, local models)" data-zh="（可选，本地模型）">（可选，本地模型）</span></div>
+        <div class="req-item"><strong>Windows 10+</strong> / macOS / Linux</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ FOOTER ══ -->
+<footer>
+  <div class="wrap">
+    <div class="fg">
+      <div class="fg-brand">
+        <div class="brand-mark" aria-hidden="true">言</div>
+        Koto
+      </div>
+      <p>© 2026 Koto · <span data-en="Open source on" data-zh="开源于">开源于</span> GitHub</p>
+      <div class="fg-links">
+        <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" data-en="Releases" data-zh="发布">发布</a>
+        <a href="https://github.com/Loganwon/Koto/issues" target="_blank" rel="noopener" data-en="Issues" data-zh="问题反馈">问题反馈</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  /* ── Language toggle ──────────────────────────────── */
+  let lang = localStorage.getItem('koto-lang') || 'zh';
+
+  function applyLang() {
+    document.querySelectorAll('[data-en][data-zh]').forEach(el => {
+      el.textContent = el.getAttribute('data-' + lang);
+    });
+    document.querySelector('.lang-btn').textContent = lang === 'zh' ? 'EN' : '中';
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  }
+
+  function toggleLang() {
+    lang = lang === 'zh' ? 'en' : 'zh';
+    localStorage.setItem('koto-lang', lang);
+    applyLang();
+  }
+
+  applyLang();
+
+  /* ── Scroll reveal ───────────────────────────────── */
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('vis'); observer.unobserve(e.target); } });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.rv').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>
