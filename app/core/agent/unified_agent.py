@@ -352,11 +352,6 @@ class UnifiedAgent(Agent):
             _skill_part = ("，技能: " + " · ".join(_skill_display)) if _skill_display else ""
             _tool_part = (f"，{_tool_count} 个工具可用") if _tool_count else ""
             _planning_msg = "正在分析请求" + _skill_part + _tool_part
-            yield AgentStep(
-                step_type=AgentStepType.THOUGHT,
-                content=_planning_msg,
-                metadata={"phase": "planning", "skill_ids": _auto_skill_ids, "skill_labels": _skill_display}
-            )
             _pub("THOUGHT", _planning_msg)
         except Exception:
             pass

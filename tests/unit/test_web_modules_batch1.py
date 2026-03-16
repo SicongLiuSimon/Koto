@@ -319,11 +319,12 @@ class TestTokenTracker:
 
     @pytest.fixture(autouse=True)
     def _reset_module_state(self):
-        """Reset module-level globals before each test."""
+        """Reset module-level globals before each test and prevent disk I/O."""
         import web.token_tracker as tt
         tt._data = {}
         tt._dirty = False
-        yield
+        with patch.object(tt, "_load"), patch.object(tt, "_save_if_dirty"):
+            yield
         tt._data = {}
         tt._dirty = False
 

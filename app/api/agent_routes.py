@@ -228,7 +228,7 @@ def _get_chats_dir() -> str:
     return _CHATS_DIR
 
 
-def _load_history(session_id: str, max_turns: int = 30):
+def _load_history(session_id: str, max_turns: int = 30, token_budget: int = 4096):
     """Load recent history from chats/<session_id>.json, compatible with
     SessionManager format {role, parts}. Converts to agent-compatible
     {role, content} dicts."""

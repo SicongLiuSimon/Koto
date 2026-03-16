@@ -1861,6 +1861,17 @@ def _register_blueprints_deferred():
     except Exception as e:
         _app_logger.error(f"[MacroAPI] ❌ 宏录制 API 注册失败: {e}")
 
+    # 注册健康检查 API（/api/health + /api/ping）
+    try:
+        from web.routes.health import health_bp as _health_bp
+
+        app.register_blueprint(_health_bp)
+        _app_logger.info("[HealthAPI] ✅ 健康检查 API 已注册: /api/health")
+    except ImportError as e:
+        _app_logger.warning(f"[HealthAPI] ⚠️ 未能导入健康检查蓝图: {e}")
+    except Exception as e:
+        _app_logger.error(f"[HealthAPI] ❌ 健康检查 API 注册失败: {e}")
+
     _app_logger.info("[INIT] ✅ 所有蓝图注册完成")
 
 

@@ -20,6 +20,7 @@ Agent tool 入口:   FileConverterPlugin → convert_file()
 
 from __future__ import annotations
 
+import html as _html_mod
 import os
 import re
 import shutil
@@ -68,18 +69,18 @@ FORMAT_ALIASES: Dict[str, str] = {
 }
 
 # 中文格式关键词
-CN_FORMAT_PATTERNS: List[Tuple[str, str]] = [
-    (r"word文档|docx?文件", ".docx"),
-    (r"pdf文件?|PDF", ".pdf"),
-    (r"纯文本|txt文件", ".txt"),
-    (r"markdown|md文件", ".md"),
-    (r"ppt(?:x)?|幻灯片|演示文稿", ".pptx"),
-    (r"excel|xlsx?|电子表格", ".xlsx"),
-    (r"csv|逗号", ".csv"),
-    (r"html?网页", ".html"),
-    (r"png图片?", ".png"),
-    (r"jpe?g图片?", ".jpg"),
-    (r"webp", ".webp"),
+CN_FORMAT_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    (re.compile(r"word文档|docx?文件", re.IGNORECASE), ".docx"),
+    (re.compile(r"pdf文件?|PDF", re.IGNORECASE), ".pdf"),
+    (re.compile(r"纯文本|txt文件", re.IGNORECASE), ".txt"),
+    (re.compile(r"markdown|md文件", re.IGNORECASE), ".md"),
+    (re.compile(r"ppt(?:x)?|幻灯片|演示文稿", re.IGNORECASE), ".pptx"),
+    (re.compile(r"excel|xlsx?|电子表格", re.IGNORECASE), ".xlsx"),
+    (re.compile(r"csv|逗号", re.IGNORECASE), ".csv"),
+    (re.compile(r"html?网页", re.IGNORECASE), ".html"),
+    (re.compile(r"png图片?", re.IGNORECASE), ".png"),
+    (re.compile(r"jpe?g图片?", re.IGNORECASE), ".jpg"),
+    (re.compile(r"webp", re.IGNORECASE), ".webp"),
 ]
 
 
@@ -146,7 +147,18 @@ def convert(
 
     # 计算输出路径
     if not output_path:
-        out_dir = output_dir or str(Path(source_path).parent)
+        out_dir = os.path.abspath(output_dir) if output_dir else str(Path(source_path).parent)
+        # sandbox: output_dir must be inside workspace, uploads, or dist
+        if output_dir:
+            _cwd = os.path.abspath(os.getcwd())
+            _allowed = [
+                os.path.join(_cwd, "workspace"),
+                os.path.join(_cwd, "uploads"),
+                os.path.join(_cwd, "dist"),
+                str(Path(source_path).parent),
+            ]
+            if not any(os.path.abspath(out_dir).startswith(a) for a in _allowed):
+                return _err(f"output_dir 不在允许的范围内: {out_dir}")
         os.makedirs(out_dir, exist_ok=True)
         output_path = os.path.join(out_dir, Path(source_path).stem + tgt_ext)
 
@@ -505,7 +517,8 @@ def _md_to_html(src: str, out: str) -> Tuple[str, str]:
         import markdown as md_lib
         html_body = md_lib.markdown(text, extensions=["tables", "fenced_code"])
     except ImportError:
-        html_body = re.sub(r'^# (.+)$', r'<h1>\1</h1>', text, flags=re.M)
+        escaped = _html_mod.escape(text, quote=True)
+        html_body = re.sub(r'^# (.+)$', r'<h1>\1</h1>', escaped, flags=re.M)
         html_body = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html_body, flags=re.M)
         html_body = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html_body, flags=re.M)
         html_body = html_body.replace("\n", "<br>\n")
@@ -748,7 +761,7 @@ def _extract_target_format(text: str) -> Optional[str]:
 
     # 先尝试中文关键词模式
     for pat, ext in CN_FORMAT_PATTERNS:
-        if re.search(pat, tl, re.IGNORECASE):
+        if pat.search(tl):
             # 找到对应的 alias key
             for k, v in FORMAT_ALIASES.items():
                 if v == ext:

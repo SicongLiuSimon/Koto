@@ -934,6 +934,11 @@ class SkillAutoMatcher:
 
         candidate_ids = {c["id"] for c in candidates}
 
+        # ── 如果已有活跃领域 Skill，跳过自动匹配（避免重复注入） ─────────────
+        if not force and cls._has_active_skills_for_task(task_type):
+            logger.debug(f"[AutoMatcher] 用户已启用域 Skill，跳过自动匹配")
+            return []
+
         # ── 优先尝试本地模型匹配 ────────────────────────────────────────────
         model_result = cls._match_with_local_model(
             user_input, task_type, catalog_text, candidate_ids
@@ -956,18 +961,6 @@ class SkillAutoMatcher:
                 f"[AutoMatcher] 📋 规则匹配: {task_type} → {pattern_result}"
             )
             return pattern_result
-
-        # ── 如果已有活跃领域 Skill，跳过 LLM 调用（只节省 LLM 开销） ───────────
-        if not force and cls._has_active_skills_for_task(task_type):
-            logger.debug(f"[AutoMatcher] 用户已启用域 Skill，跳过 LLM 自动匹配")
-            return []
-
-        # ── 规则未命中，尝试本地模型语义匹配 ──────────────────────────────────
-        model_result = cls._match_with_local_model(
-            user_input, task_type, catalog_text, candidate_ids
-        )
-        if model_result:
-            return model_result
 
         return []
 

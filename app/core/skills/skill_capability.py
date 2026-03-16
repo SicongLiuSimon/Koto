@@ -205,6 +205,12 @@ class SkillCapabilityRegistry:
 
         module_path, attr_path = entry_point.split(":", 1)
 
+        _ALLOWED_MODULE_PREFIXES = ("app.", "web.", "src.")
+        if not any(module_path.startswith(p) for p in _ALLOWED_MODULE_PREFIXES):
+            raise ImportError(
+                f"模块 '{module_path}' 不在允许的模块前缀列表中"
+            )
+
         try:
             mod = importlib.import_module(module_path)
         except ImportError as e:

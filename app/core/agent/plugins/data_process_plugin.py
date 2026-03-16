@@ -147,8 +147,6 @@ class DataProcessPlugin(AgentPlugin):
                     "required": ["filepath", "date_col", "value_col"],
                 },
             },
-                }
-            },
         ]
 
     # ------------------------------------------------------------------

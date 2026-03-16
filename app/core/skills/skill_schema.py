@@ -610,7 +610,6 @@ class SkillDefinition:
             output_spec=output_spec,
             bound_tools=data.get("bound_tools", []),
             executor_tools=data.get("executor_tools", []),
-            plan_template=data.get("plan_template", []),
             trigger_keywords=data.get("trigger_keywords", []),
             task_types=data.get("task_types", []),
             enabled=data.get("enabled", False),
@@ -630,7 +629,6 @@ class SkillDefinition:
             publisher=data.get("publisher", data.get("author", "user")),
             default_triggers=data.get("default_triggers", []),
             plan_template=data.get("plan_template", []),
-            executor_tools=data.get("executor_tools", []),
             entry_point=data.get("entry_point"),
         )
 
@@ -667,8 +665,6 @@ class SkillDefinition:
             priority=legacy.get("priority", 50),
             conflict_with=legacy.get("conflict_with", []),
             examples=legacy.get("examples", []),
-            plan_template=legacy.get("plan_template", []),
-            executor_tools=legacy.get("executor_tools", []),
             entry_point=legacy.get("entry_point"),
         )
 

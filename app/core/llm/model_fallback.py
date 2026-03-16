@@ -169,6 +169,10 @@ class ModelFallbackExecutor:
     """
 
     _UNAVAILABLE_TTL: int = 300  # 5 分钟内不重试失败模型
+    _cascade_failures: Dict[str, int] = {}        # task_type → consecutive full-cascade failure count
+    _cascade_failure_times: Dict[str, float] = {}  # task_type → timestamp of last cascade failure
+    _CIRCUIT_BREAKER_BASE: float = 5.0             # initial backoff in seconds
+    _CIRCUIT_BREAKER_CAP: float = 120.0            # max backoff in seconds
 
     def __init__(self) -> None:
         self._unavailable: Dict[str, float] = {}   # model_id → 过期 unix 时间戳
@@ -247,6 +251,20 @@ class ModelFallbackExecutor:
         tried: set = set()
         last_exc: Exception = None
 
+        # ── Circuit-breaker check ──────────────────────────────────────────
+        n = self._cascade_failures.get(task_type, 0)
+        if n > 0:
+            backoff = min(
+                self._CIRCUIT_BREAKER_BASE * (2.0 ** (n - 1)),
+                self._CIRCUIT_BREAKER_CAP,
+            )
+            elapsed = time.time() - self._cascade_failure_times.get(task_type, 0.0)
+            if elapsed < backoff:
+                raise RuntimeError(
+                    f"Circuit breaker open. task={task_type}, backing off {backoff:.0f}s"
+                )
+        # ─────────────────────────────────────────────────────────────────
+
         candidates = self._build_candidate_list(preferred_model, task_type)
 
         for model_id in candidates:
@@ -267,6 +285,8 @@ class ModelFallbackExecutor:
                         f"[ModelFallback] ✅ 降级成功: {preferred_model} → {model_id} "
                         f"(task={task_type})"
                     )
+                # Reset circuit breaker on success
+                self._cascade_failures[task_type] = 0
                 return result
 
             except Exception as exc:
@@ -281,7 +301,9 @@ class ModelFallbackExecutor:
                     # 非"模型不存在"错误（如 prompt 格式错误、鉴权失败等）直接上抛，不降级
                     raise
 
-        # 所有候选均失败
+        # 所有候选均失败 — record cascade failure for circuit breaker
+        self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
+        self._cascade_failure_times[task_type] = time.time()
         if last_exc:
             raise last_exc
         raise RuntimeError(

@@ -1023,80 +1023,6 @@ class SmartDispatcher:
         elif isinstance(local_confidence, (int, float)):
             local_conf_value = float(local_confidence)
 
-                # ── 共用 override 检查（与旧版 Ollama 路由一致）────────────────
-                if ai_task == "CHAT" and WebSearcher and WebSearcher.needs_web_search(user_input):
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores, boosts={"WEB_SEARCH": 0.95},
-                        reasons={"WEB_SEARCH": ["override:chat_to_web_search"]}
-                    )
-                    return "WEB_SEARCH", "🌐 Override-Detected", context_info
-
-                if LocalExecutor and LocalExecutor.is_system_command(user_input) and ai_task != "SYSTEM":
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores, boosts={"SYSTEM": 0.95},
-                        reasons={"SYSTEM": ["ai_override:system"]}
-                    )
-                    return "SYSTEM", "🖥️ AI-Override", context_info
-
-                _agent_overrides = [
-                    r"发微信", r"回微信", r"微信发", r"微信回",
-                    r"给.{1,6}发消息", r"给.{1,6}发微信",
-                    r"浏览器打开", r"点击.{1,6}按钮",
-                ]
-                if any(re.search(p, user_lower) for p in _agent_overrides):
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores, boosts={"AGENT": 0.95},
-                        reasons={"AGENT": ["ai_override:agent"]}
-                    )
-                    return "AGENT", "🤖 AI-Override", context_info
-
-                ticket_keywords = ["12306", "火车票", "高铁票", "动车票"]
-                if any(k in user_lower for k in ticket_keywords):
-                    _buy_kw = ["12306", "订票", "买票", "购票", "帮我买", "帮我订"]
-                    context_info = context_info or {}
-                    if any(k in user_lower for k in _buy_kw):
-                        context_info["routing_list"] = cls._build_routing_list(
-                            similarity_scores, boosts={"AGENT": 0.95},
-                            reasons={"AGENT": ["ai_override:ticket_buy"]}
-                        )
-                        return "AGENT", "🤖 Ticket-Buy", context_info
-                    else:
-                        context_info["routing_list"] = cls._build_routing_list(
-                            similarity_scores, boosts={"WEB_SEARCH": 0.95},
-                            reasons={"WEB_SEARCH": ["ai_override:ticket_query"]}
-                        )
-                        return "WEB_SEARCH", "🌐 Ticket-Query", context_info
-
-                # DOC_ANNOTATE 需要文件附件；FILE_GEN 只需有生成意图
-                if ai_task == "DOC_ANNOTATE":
-                    has_file = file_context and file_context.get("has_file")
-                    if not has_file:
-                        print(f"[SmartDispatcher] ⚠️ AI路由返回 DOC_ANNOTATE，但无文件附件，降级 CHAT")
-                        ai_task = "CHAT"
-                elif ai_task == "FILE_GEN":
-                    _ai_has_output_intent = any(w in user_lower for w in [
-                        "生成", "创建", "导出", "制作", "输出", "保存为", "做成", "转成",
-                        "写份", "写一份", "写一个", "做一个", "做一份", "做个",
-                        "word", "docx", ".doc", "pdf", "excel", "ppt", "幻灯片",
-                        "帮我做", "帮我写", "帮我生成", "报告", "文档", "介绍文档",
-                    ])
-                    if not (file_context and file_context.get("has_file")) and not _ai_has_output_intent:
-                        print(f"[SmartDispatcher] ⚠️ AI路由返回 FILE_GEN，但无文件且无生成意图，降级 CHAT")
-                        ai_task = "CHAT"
-
-                context_info = context_info or {}
-                context_info["routing_list"] = cls._build_routing_list(
-                    similarity_scores, boosts={ai_task: 0.85},
-                    reasons={ai_task: ["ai_router"]}
-                )
-                if ai_hint:
-                    context_info["skill_prompt"] = ai_hint
-                print(f"[SmartDispatcher] ✅ AI路由决策: {ai_task} ({ai_confidence}) hint={'yes' if ai_hint else 'no'} ({latency:.0f}ms)")
-                return ai_task, f"{ai_confidence} ({latency:.0f}ms)", context_info
-
         # === 离线兜底：本地 Ollama 路由（云端不可用时的后备）===
         # 仅在没有 API 密钥或网络不通时触发
         if not client:
@@ -1353,14 +1279,13 @@ class SmartDispatcher:
             return preferred
 
         if task_type == "FILE_GEN":
-            base = MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
             if complexity == "complex":
-                return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                return MODEL_MAP.get("COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
             return MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
         
         if task_type == "DOC_ANNOTATE":
             if complexity == "complex":
-                return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                return MODEL_MAP.get("COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
             return MODEL_MAP.get("DOC_ANNOTATE", "gemini-3-flash-preview")
             
         if task_type == "RESEARCH":
