@@ -82,6 +82,13 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     registry.register_plugin(DataProcessPlugin())
     registry.register_plugin(NetworkPlugin())
     registry.register_plugin(ImageProcessPlugin())
+
+    # ── 多模态视觉工具（图表/截图分析）──────────────────────────────────
+    try:
+        from app.core.agent.plugins.chart_vision_plugin import ChartVisionPlugin
+        registry.register_plugin(ChartVisionPlugin())
+    except Exception as _e:
+        logger.debug(f"[_build_registry] ChartVisionPlugin 跳过: {_e}")
     registry.register_plugin(PerformanceAnalysisPlugin())
     registry.register_plugin(SystemEventMonitoringPlugin())
     registry.register_plugin(ScriptGenerationPlugin())
@@ -133,6 +140,17 @@ def create_agent(api_key: Optional[str] = None, model_id: str = "gemini-2.5-flas
     llm_provider = GeminiProvider(api_key=usage_api_key)
     registry = _build_registry(api_key=usage_api_key, full=True)
 
+    # 配置 OutputValidator 的 LLM 质量判断器（复用同一个 provider，避免重复建连接）
+    try:
+        from app.core.security.output_validator import OutputValidator
+        OutputValidator.configure_llm_judge(
+            client=llm_provider,
+            model_id="gemini-2.5-flash",
+            timeout=15.0,
+        )
+    except Exception as _oj_err:
+        logger.debug("[create_agent] OutputValidator LLM judge 配置失败（跳过）: %s", _oj_err)
+
     return UnifiedAgent(
         llm_provider=llm_provider,
         tool_registry=registry,
@@ -182,7 +200,7 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
 
 def create_langgraph_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-2.5-flash",
+    model_id: str = "gemini-3-flash-preview",
     enable_pii_filter: bool = True,
     enable_output_validation: bool = True,
 ) -> "LangGraphAgent":
@@ -220,7 +238,7 @@ def create_langgraph_agent(
 
 def create_multi_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-2.5-flash",
+    model_id: str = "gemini-3-flash-preview",
     max_revisions: int = 1,
 ) -> "MultiAgentOrchestrator":
     """

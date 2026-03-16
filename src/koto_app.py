@@ -278,17 +278,12 @@ def check_config():
 
 
 def ensure_dependencies():
-    """检查桌面依赖，避免每次启动都执行安装"""
+    """检查桌面依赖是否已安装（用 find_spec 快速探测，不实际导入）"""
+    import importlib.util
     missing = []
-    try:
-        import webview  # noqa: F401
-    except ImportError:
+    if importlib.util.find_spec('webview') is None:
         missing.append("pywebview")
-
-    try:
-        from PIL import Image  # noqa: F401
-        from pystray import Icon  # noqa: F401
-    except ImportError:
+    if importlib.util.find_spec('pystray') is None or importlib.util.find_spec('PIL') is None:
         missing.append("pystray/pillow")
 
     if missing:
@@ -636,9 +631,6 @@ def start_flask_server():
 
     server_thread = threading.Thread(target=run_server, daemon=True)
     server_thread.start()
-
-    # 快速等待服务器启动（最多2秒）
-    _wait_for_port(KOTO_HOST, KOTO_PORT, 2)
     _write_log("✔ Flask 后台线程已启动")
     return {
         "started": True,
@@ -978,50 +970,52 @@ def main():
         return
     _write_log("🚀 启动 Koto 桌面程序")
 
-    # 生成默认图标（如缺失）
-    try:
-        from PIL import Image, ImageDraw
-
-        icon_dir = ASSETS_DIR
-        icon_dir.mkdir(exist_ok=True, parents=True)
-        ico_path = icon_dir / "koto_icon.ico"
-        png_path = icon_dir / "koto_icon.png"
-
-        if not png_path.exists():
-            width, height = 256, 256
-            image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            draw = ImageDraw.Draw(image)
-            draw.rounded_rectangle(
-                [0, 0, 256, 256], radius=56, fill=(79, 140, 255, 255)
-            )
-            draw.ellipse([48, 48, 208, 208], fill=(255, 255, 255, 255))
-            draw.rectangle([72, 88, 184, 104], fill=(47, 107, 255, 255))
-            draw.rectangle([72, 120, 184, 136], fill=(47, 107, 255, 255))
-            draw.rectangle([72, 152, 184, 168], fill=(47, 107, 255, 255))
-            image.save(str(png_path))
-
-        if not ico_path.exists():
-            image = Image.open(str(png_path))
-            image.save(
-                str(ico_path),
-                sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)],
-            )
-    except Exception as e:
-        _write_log(f"⚠️ 生成默认图标失败: {e}")
-
     # 设置 WebView2 持久化用户数据目录，使麦克风等权限在重启后保留
     _webview_data_dir = APP_ROOT / ".webview2_profile"
     _webview_data_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("WEBVIEW2_USER_DATA_FOLDER", str(_webview_data_dir))
     _write_log(f"✔ WebView2 用户数据目录: {_webview_data_dir}")
 
-    # 导入 webview
+    # 先启动后端线程，再导入 webview ——
+    # 图标生成 + Flask 启动 + webview 导入 三者并行，大幅缩短启动时间
+    server_info = start_flask_server() or {}
+
+    # 图标生成（仅首次运行需要；与 Flask 启动并行完成）
+    _icon_ready = threading.Event()
+    ico_path = ASSETS_DIR / "koto_icon.ico"
+    png_path = ASSETS_DIR / "koto_icon.png"
+
+    def _generate_icons():
+        try:
+            from PIL import Image, ImageDraw
+            icon_dir = ASSETS_DIR
+            icon_dir.mkdir(exist_ok=True, parents=True)
+            if not png_path.exists():
+                width, height = 256, 256
+                image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+                draw = ImageDraw.Draw(image)
+                draw.rounded_rectangle([0, 0, 256, 256], radius=56, fill=(79, 140, 255, 255))
+                draw.ellipse([48, 48, 208, 208], fill=(255, 255, 255, 255))
+                draw.rectangle([72, 88, 184, 104], fill=(47, 107, 255, 255))
+                draw.rectangle([72, 120, 184, 136], fill=(47, 107, 255, 255))
+                draw.rectangle([72, 152, 184, 168], fill=(47, 107, 255, 255))
+                image.save(str(png_path))
+            if not ico_path.exists():
+                image = Image.open(str(png_path))
+                image.save(str(ico_path), sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
+        except Exception as e:
+            _write_log(f"⚠️ 生成默认图标失败: {e}")
+        finally:
+            _icon_ready.set()
+
+    _icon_thread = threading.Thread(target=_generate_icons, daemon=True)
+    _icon_thread.start()
+
+    # 在 Flask 后台启动的同时导入 webview（重叠 I/O 开销）
     import webview
 
     _write_log("✔ 已导入 webview")
 
-    # 启动后端
-    server_info = start_flask_server() or {}
     app_url = f"http://{KOTO_HOST}:{KOTO_PORT}"
     health_url = f"{app_url}/api/health"
     if server_info.get("error"):
@@ -1049,11 +1043,11 @@ def main():
             and server_info["thread"].is_alive()
         ):
             _write_log("⚠️ 后端启动较慢，延长等待健康检查（最多 15 秒）")
-            for _ in range(15):
+            for _ in range(30):
                 if _check_http_ok(health_url):
                     backend_ready = True
                     break
-                time.sleep(1)
+                time.sleep(0.5)
 
         if not backend_ready:
             err_msg = "后端服务启动超时，请检查依赖或端口占用情况。"
@@ -1119,9 +1113,11 @@ def main():
 
     threading.Thread(target=_init_local_router_async, daemon=True).start()
 
+    # 等待图标生成完成（通常此时已完成，因为与 Flask 等待并行进行）
+    _icon_ready.wait(timeout=5)
+
     # 选择窗口图标（如存在）
     icon_path = None
-    ico_path = ASSETS_DIR / "koto_icon.ico"
     if ico_path.exists():
         icon_path = str(ico_path)
 

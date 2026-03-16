@@ -274,7 +274,7 @@ def _route_after_validate(state: "AgentState") -> Literal["reason", "__end__"]:
 
 def build_graph(
     registry,
-    model_id: str = "gemini-2.5-flash",
+    model_id: str = "gemini-3-flash-preview",
     system_instruction: Optional[str] = None,
     enable_pii: bool = True,
     enable_validation: bool = True,
@@ -383,7 +383,7 @@ class LangGraphAgent:
     def __init__(
         self,
         registry=None,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "gemini-3-flash-preview",
         system_instruction: Optional[str] = None,
         skill_id: Optional[str] = None,
         task_type: Optional[str] = None,

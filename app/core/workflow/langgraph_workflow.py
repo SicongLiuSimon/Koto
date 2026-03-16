@@ -108,7 +108,7 @@ if _LG_AVAILABLE:
 # Shared node factory
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_llm(model_id: str = "gemini-2.5-flash"):
+def _get_llm(model_id: str = "gemini-3-flash-preview"):
     from app.core.llm.langchain_adapter import KotoLangChainLLM
 
     return KotoLangChainLLM(model_id=model_id)
@@ -427,7 +427,7 @@ class WorkflowEngine:
         "multi_agent_ppt": _build_multi_agent_ppt_graph,
     }
 
-    def __init__(self, model_id: str = "gemini-2.5-flash",
+    def __init__(self, model_id: str = "gemini-3-flash-preview",
                  checkpointer=None):
         _assert_langgraph()
         self.model_id = model_id
@@ -580,11 +580,19 @@ class WorkflowEngine:
             return f"# Error: {exc}"
 
     @classmethod
-    def detect_workflow(cls, task_type: str, user_input: str) -> str:
+    def detect_workflow(cls, task_type: str, user_input: str, has_file: bool = False) -> str:
         """
         根据 SmartDispatcher 返回的 task_type 推断最佳工作流。
         与现有 TaskDecomposer.TASK_PATTERNS 映射兼容。
+
+        Args:
+            has_file: 当前请求是否附带了已上传文件。为 True 时直接返回 "legacy"，
+                      因为文件分析不应触发 LangGraph 工作流（工作流没有文件字节上下文）。
         """
+        # 有文件附件时，强制走 legacy（文件内容由文件分析流处理，LangGraph 无法访问文件字节）
+        if has_file:
+            return "legacy"
+
         text = user_input.lower()
 
         # PPT 专用多 Agent 工作流
@@ -593,10 +601,15 @@ class WorkflowEngine:
         ):
             return "multi_agent_ppt"
 
-        # 研究 + 文档
-        if task_type in ("RESEARCH", "FILE_GEN") and any(
-            k in text
-            for k in ["研究", "分析", "报告", "调研", "深入", "word", "pdf", "文档"]
+        # 研究 + 文档 — 需要同时满足：
+        #   1) 主动获取信息的意图（非"分析已有文件"，而是"去研究/调研某主题"）
+        #   2) 明确要生成文档/报告的输出意图
+        # 这样可避免"分析下这个BP"之类的文件分析请求误触发 research_and_document 工作流
+        _ACTIVE_RESEARCH_KW = ["研究", "调研", "深入研究", "综合研究", "全面研究", "调查", "查阅"]
+        _DOC_OUTPUT_KW = ["报告", "word", "pdf", "文档", "生成文档", "整理成", "写报告", "做报告"]
+        if task_type in ("RESEARCH", "FILE_GEN") and (
+            any(k in text for k in _ACTIVE_RESEARCH_KW)
+            and any(k in text for k in _DOC_OUTPUT_KW)
         ):
             return "research_and_document"
 
