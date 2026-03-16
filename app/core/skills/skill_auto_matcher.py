@@ -939,6 +939,11 @@ class SkillAutoMatcher:
 
         candidate_ids = {c["id"] for c in candidates}
 
+        # ── 如果已有活跃领域 Skill，跳过自动匹配（避免重复注入） ─────────────
+        if not force and cls._has_active_skills_for_task(task_type):
+            logger.debug(f"[AutoMatcher] 用户已启用域 Skill，跳过自动匹配")
+            return []
+
         # ── 优先尝试本地模型匹配 ────────────────────────────────────────────
         model_result = cls._match_with_local_model(
             user_input, task_type, catalog_text, candidate_ids
@@ -960,7 +965,9 @@ class SkillAutoMatcher:
             logger.info(
                 f"[AutoMatcher] 📋 规则兜底匹配: {task_type} → {pattern_result}"
             )
-        return pattern_result
+            return pattern_result
+
+        return []
 
     @classmethod
     def describe_matched(cls, skill_ids: List[str]) -> str:

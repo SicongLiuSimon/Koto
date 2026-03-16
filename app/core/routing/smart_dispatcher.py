@@ -1023,161 +1023,36 @@ class SmartDispatcher:
         elif isinstance(local_confidence, (int, float)):
             local_conf_value = float(local_confidence)
 
-        local_confident = local_conf_value >= 0.70
-        if local_task:
-            if local_task == "CHAT" and WebSearcher and WebSearcher.needs_web_search(user_input):
+        # === 离线兜底：本地 Ollama 路由（云端不可用时的后备）===
+        # 仅在没有 API 密钥或网络不通时触发
+        if not client:
+            print(f"[SmartDispatcher] 🔌 云端不可用，尝试本地 Ollama 路由...")
+            local_task, local_confidence, local_source, local_hint, local_complexity = _get_local_model_router().classify_with_hint(user_input, timeout=4.5)
+            local_conf_value = 0.0
+            if isinstance(local_confidence, str):
+                m = re.search(r"(\d+\.\d+)", local_confidence)
+                if m:
+                    try:
+                        local_conf_value = float(m.group(1))
+                    except Exception:
+                        local_conf_value = 0.0
+            elif isinstance(local_confidence, (int, float)):
+                local_conf_value = float(local_confidence)
+
+            local_confident = local_conf_value >= 0.70
+            if local_task and local_confident:
                 context_info = context_info or {}
                 context_info["routing_list"] = cls._build_routing_list(
-                    similarity_scores,
-                    boosts={"WEB_SEARCH": 0.95},
-                    reasons={"WEB_SEARCH": ["override:chat_to_web_search"]}
+                    similarity_scores, boosts={local_task: 0.9},
+                    reasons={local_task: ["local_model_offline"]}
                 )
-                return "WEB_SEARCH", "🌐 Override-Detected", context_info
+                if local_hint:
+                    context_info["skill_prompt"] = local_hint
+                if local_complexity == "complex" and local_task != "CHAT":
+                    context_info["complexity"] = "complex"
+                return local_task, f"{local_confidence}", context_info
 
-            if LocalExecutor and LocalExecutor.is_system_command(user_input) and local_task != "SYSTEM":
-                context_info = context_info or {}
-                context_info["routing_list"] = cls._build_routing_list(
-                    similarity_scores,
-                    boosts={"SYSTEM": 0.95},
-                    reasons={"SYSTEM": ["local_override:system"]}
-                )
-                return "SYSTEM", "🖥️ Local-Override", context_info
-
-            agent_overrides = [
-                r"发微信", r"回微信", r"微信发", r"微信回",
-                r"给.{1,6}发消息", r"给.{1,6}发微信",
-                r"浏览器打开", r"点击.{1,6}按钮",
-            ]
-            if any(re.search(p, user_lower) for p in agent_overrides):
-                context_info = context_info or {}
-                context_info["routing_list"] = cls._build_routing_list(
-                    similarity_scores,
-                    boosts={"AGENT": 0.95},
-                    reasons={"AGENT": ["local_override:agent"]}
-                )
-                return "AGENT", "🤖 Local-Override", context_info
-
-            ticket_keywords = ["12306", "火车票", "高铁票", "动车票"]
-            if any(k in user_lower for k in ticket_keywords):
-                # 区分「查票」→ WEB_SEARCH 和「买/订票」→ AGENT
-                _buy_kw = ["12306", "订票", "买票", "购票", "帮我买", "帮我订"]
-                context_info = context_info or {}
-                if any(k in user_lower for k in _buy_kw):
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores, boosts={"AGENT": 0.95},
-                        reasons={"AGENT": ["local_override:ticket_buy"]}
-                    )
-                    return "AGENT", "🤖 Local-Override", context_info
-                else:
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores, boosts={"WEB_SEARCH": 0.95},
-                        reasons={"WEB_SEARCH": ["local_override:ticket_query"]}
-                    )
-                    print(f"[SmartDispatcher] 🌐 票务查询 → WEB_SEARCH")
-                    return "WEB_SEARCH", "🌐 Ticket-Query", context_info
-
-            # DOC_ANNOTATE 需要文件附件（编辑已有文档）；FILE_GEN 是生成新文件，无需附件
-            if local_task == "DOC_ANNOTATE":
-                has_file = file_context and file_context.get("has_file")
-                if not has_file:
-                    print(f"[SmartDispatcher] ⚠️ 本地模型返回 DOC_ANNOTATE 但无文件上下文，跳过")
-                    pass
-                else:
-                    if not local_confident:
-                        print(f"[SmartDispatcher] ⚠️ 本地模型低置信度({local_conf_value:.2f})，回退规则判断")
-                        pass
-                    else:
-                        context_info = context_info or {}
-                        context_info["routing_list"] = cls._build_routing_list(
-                            similarity_scores,
-                            boosts={"DOC_ANNOTATE": 0.9},
-                            reasons={"DOC_ANNOTATE": ["local_model_with_file"]}
-                        )
-                        if local_hint:
-                            context_info["skill_prompt"] = local_hint
-                        if local_complexity == "complex":
-                            context_info["complexity"] = "complex"
-                        return "DOC_ANNOTATE", f"{local_confidence}", context_info
-            elif local_task == "FILE_GEN":
-                # FILE_GEN 不需要已有文件——检测生成意图关键词即可放行
-                _file_gen_intent_kws = [
-                    "生成", "创建", "导出", "制作", "做", "写", "帮我做", "帮我写",
-                    "ppt", "word", "docx", "pdf", "excel", "报告", "文档", "幻灯片",
-                    "输出", "保存", "做成", "转成", "介绍",
-                ]
-                _has_file_gen_intent = any(w in user_lower for w in _file_gen_intent_kws)
-                if _has_file_gen_intent and local_confident:
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores,
-                        boosts={"FILE_GEN": 0.9},
-                        reasons={"FILE_GEN": ["local_model_file_gen"]}
-                    )
-                    if local_hint:
-                        context_info["skill_prompt"] = local_hint
-                    if local_complexity == "complex":
-                        context_info["complexity"] = "complex"
-                    print(f"[SmartDispatcher] 📄 本地模型 FILE_GEN 意图确认: '{user_input[:30]}'")
-                    return "FILE_GEN", f"{local_confidence}", context_info
-                else:
-                    print(f"[SmartDispatcher] ⚠️ 本地模型返回 FILE_GEN 但{'无生成意图' if not _has_file_gen_intent else '低置信度'}，继续评估")
-            else:
-                if not local_confident:
-                    print(f"[SmartDispatcher] ⚠️ 本地模型低置信度({local_conf_value:.2f})，回退规则判断")
-                else:
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores,
-                        boosts={local_task: 0.9},
-                        reasons={local_task: ["local_model"]}
-                    )
-                    if local_hint:
-                        context_info["skill_prompt"] = local_hint
-                    # 只有本地模型明确判定为 complex 时才升级；CHAT 任务不受复杂度影响（始终走 Flash）
-                    if local_complexity == "complex" and local_task != "CHAT":
-                        context_info["complexity"] = "complex"
-                    return local_task, f"{local_confidence}", context_info
-
-        # === 在线 AI 路由（本地模型不可用或低置信时的第二优先级） ===
-        # 放在关键词规则之前，用语义理解而非关键词匹配来判断任务
-        if not local_task or not local_confident:
-            if client:
-                print(f"[SmartDispatcher] 🌐 本地模型{'不可用' if not local_task else f'低置信({local_conf_value:.2f})'}，尝试在线 AI 路由...")
-                ai_task, ai_confidence, ai_source, ai_hint = _get_ai_router().classify_with_hint(client, user_input, timeout=3.0)
-                if ai_task:
-                    latency = (time.time() - start_time) * 1000
-                    
-                    # 对 FILE_GEN/DOC_ANNOTATE 额外检查：
-                    # DOC_ANNOTATE 需要文件；FILE_GEN 只需有生成意图（创建新文件）
-                    if ai_task == "DOC_ANNOTATE":
-                        has_file = file_context and file_context.get("has_file")
-                        if not has_file:
-                            print(f"[SmartDispatcher] ⚠️ AI路由返回 DOC_ANNOTATE，但无文件附件，降级 CHAT")
-                            ai_task = "CHAT"
-                    elif ai_task == "FILE_GEN":
-                        has_file = file_context and file_context.get("has_file")
-                        _ai_has_output_intent = any(w in user_lower for w in [
-                            "生成", "创建", "导出", "制作", "输出", "保存为", "做成", "转成",
-                            "写份", "写一份", "写一个", "做一个", "做一份", "做个",
-                            "word", "docx", ".doc", "pdf", "excel", "ppt", "幻灯片",
-                            "帮我做", "帮我写", "帮我生成", "报告", "文档", "介绍文档",
-                        ])
-                        if not has_file and not _ai_has_output_intent:
-                            print(f"[SmartDispatcher] ⚠️ AI路由返回 FILE_GEN，但无文件且无生成意图，降级 CHAT")
-                            ai_task = "CHAT"
-                    
-                    context_info = context_info or {}
-                    context_info["routing_list"] = cls._build_routing_list(
-                        similarity_scores,
-                        boosts={ai_task: 0.85},
-                        reasons={ai_task: ["ai_router"]}
-                    )
-                    if ai_hint:
-                        context_info["skill_prompt"] = ai_hint
-                    print(f"[SmartDispatcher] ✅ AI路由决策: {ai_task} ({ai_confidence}) hint={'yes' if ai_hint else 'no'}")
-                    return ai_task, f"{ai_confidence} ({latency:.0f}ms)", context_info
-
-        # === 关键词兜底规则（仅在本地模型+在线模型都无法判断时触发） ===
+        # === 关键词兜底规则（云端和本地模型都无法判断时触发）===
         print(f"[SmartDispatcher] ⚠️ 模型路由均未成功，回退关键词兜底规则...")
 
         # -- 附件文档标注 (需要 file_context 支撑，不纯靠关键词) --
@@ -1386,12 +1261,12 @@ class SmartDispatcher:
 
         if task_type == "FILE_GEN":
             if complexity == "complex":
-                return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                return MODEL_MAP.get("COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
             return MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
         
         if task_type == "DOC_ANNOTATE":
             if complexity == "complex":
-                return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                return MODEL_MAP.get("COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
             return MODEL_MAP.get("DOC_ANNOTATE", "gemini-3-flash-preview")
             
         if task_type == "RESEARCH":

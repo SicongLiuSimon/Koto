@@ -110,17 +110,26 @@ class AIRouter:
         
         try:
             result_holder = {"task": None, "error": None}
+            valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
+                           "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
 
             def call_model():
-                try:
-                    from google.genai import types
-                    response = client.models.generate_content(
-                        model="gemini-2.0-flash-lite",  # 最快的模型
-                        contents=user_input,
-                        config=types.GenerateContentConfig(
-                            system_instruction=_dynamic_instruction,
-                            max_output_tokens=20,  # 只需要一个词
-                            temperature=0.1,  # 低温度，更确定性
+                from google.genai import types
+                # 构建尝试顺序：当前模型优先，再按降级链补全
+                models_to_try = [cls._router_model]
+                for m in cls._ROUTER_MODEL_CHAIN:
+                    if m not in models_to_try:
+                        models_to_try.append(m)
+                for model_id in models_to_try:
+                    try:
+                        response = client.models.generate_content(
+                            model=model_id,
+                            contents=user_input,
+                            config=types.GenerateContentConfig(
+                                system_instruction=_dynamic_instruction,
+                                max_output_tokens=20,  # 只需要一个词
+                                temperature=0.1,  # 低温度，更确定性
+                            )
                         )
                     )
                     if response.candidates and response.candidates[0].content.parts:

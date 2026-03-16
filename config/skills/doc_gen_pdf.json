@@ -9,21 +9,41 @@
   "input_variables": [],
   "output_spec": {
     "format": "markdown",
-    "must_contain": ["pdf", "下载"],
+    "must_contain": [
+      "pdf",
+      "下载"
+    ],
     "must_not_contain": [],
     "min_chars": 100,
     "max_chars": null,
     "required_json_keys": [],
     "description": "告知用户 PDF 文档已生成，提供文件名和下载链接"
   },
-  "bound_tools": ["create_pdf_document"],
-  "task_types": ["CHAT", "FILE_GEN", "RESEARCH"],
+  "bound_tools": [
+    "create_pdf_document"
+  ],
+  "task_types": [
+    "CHAT",
+    "FILE_GEN",
+    "RESEARCH"
+  ],
   "priority": 74,
   "conflict_with": [],
-  "enabled": true,
+  "enabled": false,
   "prompt": "\n\n## 📑 能力增强：专业 PDF 文档生成\n\n当用户要求生成 PDF 文档时，请按以下步骤操作。PDF 适合正式对外发布、存档留底、合规提交，内容一旦生成无法被接收方修改。\n\n---\n\n### ⚙️ 执行步骤\n\n**步骤 1 — 明确文档定位**\n识别以下要素：\n- 文档用途（正式报告/白皮书/简历/合规文件/产品说明书）\n- 目标读者（内部/外部客户/监管机构/公众）\n- 保密等级（影响是否在页眉页脚加水印提示）\n- 语言（中文/英文/双语）\n\n**步骤 2 — 规划结构（遵循 PDF 排版规则）**\nPDF 排版特点与 Word 不同，注意：\n- 每页内容不宜过密，重要内容之间加空行或分页符\n- 大表格（>8行）建议拆分或分页\n- 代码块自动使用等宽字体\n- 图片需提供本地文件路径方可嵌入\n\n大纲示例（白皮书/研究报告）：\n摘要（Executive Summary）→ 背景与问题陈述 → 方法论 → 核心发现 → 分析与讨论 → 结论与建议 → 参考资料\n\n**步骤 3 — 生成高质量内容**\n- 摘要：100～200字，包含：文档目的、核心结论、关键数据\n- 正文段落：每段聚焦一个观点，150～300字\n- 表格：首行表头必须简洁，数值列右对齐提示，百分比统一格式\n- 引用块：用于重要结论、定义、名言等，突出显示\n- 数值数据：使用具体数字，避免「较多」「较少」等模糊表述\n\n**步骤 4 — 调用生成工具**\n整理为 JSON 并调用 `create_pdf_document`：\n\n```json\n{\n  \"title\": \"文档标题\",\n  \"author\": \"机构/作者名称\",\n  \"subject\": \"文档主题一行描述\",\n  \"keywords\": \"关键词1, 关键词2, 关键词3\",\n  \"style_preset\": \"professional\",\n  \"sections\": [\n    {\"content_type\": \"heading\", \"content\": \"执行摘要\", \"level\": 1},\n    {\"content_type\": \"text\",    \"content\": \"本报告分析了...\"},\n    {\"content_type\": \"quote\",   \"content\": \"核心结论：该行业在2026年将实现20%增速，主要驱动力为...\"},\n    {\"content_type\": \"heading\", \"content\": \"一、背景与问题陈述\", \"level\": 1},\n    {\"content_type\": \"text\",    \"content\": \"详细背景描述...\"},\n    {\"content_type\": \"heading\", \"content\": \"1.1 宏观环境\", \"level\": 2},\n    {\"content_type\": \"table\",   \"content\": [[\"维度\",\"现状\",\"趋势\"],[\"经济\",\"增速放缓\",\"企稳回升\"]]},\n    {\"content_type\": \"bullet\",  \"content\": [\"关键发现一\",\"关键发现二\"]},\n    {\"content_type\": \"page_break\"},\n    {\"content_type\": \"heading\", \"content\": \"二、核心发现\", \"level\": 1}\n  ]\n}\n```\n\n**步骤 5 — 反馈与后续**\n- 告知文件名和下载链接\n- 说明文档页数估算（每500字≈1页）\n- 提示：「如需可编辑版本，可使用 Word 文档生成功能」\n\n---\n\n### 📋 各场景内容规范\n\n**白皮书 / 研究报告**\n- 摘要必须独立成章，含数据佐证\n- 参考资料章节即使无外部引用也应列出数据来源\n- 图表必须有图注（caption 字段）\n\n**产品说明书 / 手册**\n- 功能描述：「功能名 → 用途 → 操作步骤 → 注意事项」结构\n- 步骤说明使用 `numbered`（有序列表）而非 `bullet`\n- 警告/注意事项使用 `quote` 块\n\n**合规文件 / 正式合同**\n- 严格使用 `professional` 风格\n- 条款编号使用 `numbered` 列表\n- 定义条款使用表格格式展示\n- 签名/盖章区块用空行表示（文本：「签字：___________  日期：___________」）\n\n**简历**\n- 使用 `minimal` 风格\n- 个人信息 → 求职意向 → 教育背景（表格）→ 工作经历（时间倒序）→ 技能 → 获奖/证书\n\n---\n\n### 🔧 技术说明\n- PDF 生成依赖 reportlab 库（已包含在 Koto 依赖中）\n- 中文字体：自动检测系统中的微软雅黑/黑体/宋体，建议在 Windows 系统使用\n- 图片嵌入：需提供本地绝对路径，URL 图片不支持直接嵌入",
   "version": "1.0.0",
   "author": "koto",
   "created_at": "2026-03-11T00:00:00Z",
-  "tags": ["pdf", "文档", "报告", "白皮书", "合规", "简历", "说明书", "正式文件", "归档", "文件生成"]
+  "tags": [
+    "pdf",
+    "文档",
+    "报告",
+    "白皮书",
+    "合规",
+    "简历",
+    "说明书",
+    "正式文件",
+    "归档",
+    "文件生成"
+  ]
 }

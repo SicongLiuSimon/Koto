@@ -1557,34 +1557,16 @@ def _register_blueprints_deferred():
     except Exception as e:
         _app_logger.error(f"[MacroAPI] ❌ 宏录制 API 注册失败: {e}")
 
-    # ── 新拆分的路由蓝图（从 app.py 提取的路由模块）──────────────────────────
-    _new_blueprints = [
-        ("web.blueprints.sessions", "sessions_bp", "Sessions"),
-        ("web.blueprints.analytics", "analytics_bp", "Analytics"),
-        ("web.blueprints.proactive", "proactive_bp", "Proactive"),
-        ("web.blueprints.execution", "execution_bp", "Execution"),
-        ("web.blueprints.knowledge", "knowledge_bp", "Knowledge"),
-        ("web.blueprints.file_editor", "file_editor_bp", "FileEditor"),
-        ("web.blueprints.dev", "dev_bp", "Dev"),
-        ("web.blueprints.voice", "voice_bp", "Voice"),
-        ("web.blueprints.document", "document_bp", "Document"),
-        ("web.blueprints.file_organize", "file_organize_bp", "FileOrganize"),
-        ("web.blueprints.workspace", "workspace_bp", "Workspace"),
-        ("web.blueprints.settings", "settings_bp", "Settings"),
-        ("web.blueprints.misc_api", "misc_api_bp", "MiscAPI"),
-        ("web.blueprints.pages", "pages_bp", "Pages"),
-    ]
-    for mod_path, bp_attr, label in _new_blueprints:
-        try:
-            import importlib
-            _mod = importlib.import_module(mod_path)
-            _bp = getattr(_mod, bp_attr)
-            app.register_blueprint(_bp)
-            _app_logger.info("[%s] ✅ 蓝图已注册", label)
-        except ImportError as e:
-            _app_logger.warning("[%s] ⚠️ 蓝图导入失败: %s", label, e)
-        except Exception as e:
-            _app_logger.error("[%s] ❌ 蓝图注册失败: %s", label, e)
+    # 注册健康检查 API（/api/health + /api/ping）
+    try:
+        from web.routes.health import health_bp as _health_bp
+
+        app.register_blueprint(_health_bp)
+        _app_logger.info("[HealthAPI] ✅ 健康检查 API 已注册: /api/health")
+    except ImportError as e:
+        _app_logger.warning(f"[HealthAPI] ⚠️ 未能导入健康检查蓝图: {e}")
+    except Exception as e:
+        _app_logger.error(f"[HealthAPI] ❌ 健康检查 API 注册失败: {e}")
 
     _app_logger.info("[INIT] ✅ 所有蓝图注册完成")
 
