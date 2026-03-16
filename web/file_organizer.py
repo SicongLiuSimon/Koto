@@ -12,7 +12,10 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import hashlib
 from difflib import SequenceMatcher
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class FileOrganizer:
     """文件归纳管理器"""
@@ -498,12 +501,12 @@ if __name__ == "__main__":
     organizer = FileOrganizer()
     
     # 测试统计
-    print("\n📊 分类统计:")
+    logger.info("\n📊 分类统计:")
     stats = organizer.get_categories_stats()
     for industry, info in stats.items():
-        print(f"  {industry}: {info['count']} 文件")
+        logger.info(f"  {industry}: {info['count']} 文件")
     
-    print("\n📁 已创建的文件夹:")
+    logger.info("\n📁 已创建的文件夹:")
     folders = organizer.list_organized_folders()
     for folder, info in folders.items():
-        print(f"  {folder}: {info['file_count']} 文件")
+        logger.info(f"  {folder}: {info['file_count']} 文件")

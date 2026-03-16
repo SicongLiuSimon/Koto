@@ -16,7 +16,10 @@ from typing import Dict, List, Optional, Set
 import asyncio
 from collections import defaultdict
 import threading
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class NotificationManager:
     """实时通知管理器"""
@@ -302,7 +305,7 @@ class NotificationManager:
             try:
                 ws.send(message)
             except Exception as e:
-                print(f"发送通知失败: {e}")
+                logger.info(f"发送通知失败: {e}")
     
     def _update_stats(self, user_id: str, notification_type: str, action: str):
         """更新通知统计"""

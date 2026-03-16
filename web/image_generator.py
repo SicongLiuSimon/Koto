@@ -11,6 +11,9 @@ import time
 from typing import Optional
 from google import genai
 from google.genai import types
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ImageGenerator:
     """
@@ -41,10 +44,10 @@ class ImageGenerator:
             True if successful, False otherwise.
         """
         if not self.client:
-            print("[ImageGenerator] No API Key available.")
+            logger.info("[ImageGenerator] No API Key available.")
             return False
             
-        print(f"[ImageGenerator] Generating image for: '{prompt[:50]}...'")
+        logger.info(f"[ImageGenerator] Generating image for: '{prompt[:50]}...'")
         
         try:
             # Prepare configuration
@@ -73,10 +76,10 @@ class ImageGenerator:
                     img_bytes = response.generated_images[0].image.image_bytes
                     with open(output_path, "wb") as f:
                         f.write(img_bytes)
-                    print(f"[ImageGenerator] ✅ Saved to {output_path}")
+                    logger.info(f"[ImageGenerator] ✅ Saved to {output_path}")
                     return True
             except Exception as e_img:
-                print(f"[ImageGenerator] generate_images failed: {e_img}, trying generate_content...")
+                logger.info(f"[ImageGenerator] generate_images failed: {e_img}, trying generate_content...")
                 
                 # Scenario B: generate_content (Gemini 3.1 Flash Image)
                 # Some models support text-to-image via standard generate_content
@@ -94,14 +97,14 @@ class ImageGenerator:
                             img_data = base64.b64decode(part.inline_data.data)
                             with open(output_path, "wb") as f:
                                 f.write(img_data)
-                            print(f"[ImageGenerator] ✅ Saved to {output_path} (via generate_content)")
+                            logger.info(f"[ImageGenerator] ✅ Saved to {output_path} (via generate_content)")
                             return True
                             
-                print("[ImageGenerator] No image data found in response.")
+                logger.info("[ImageGenerator] No image data found in response.")
                 return False
 
         except Exception as e:
-            print(f"[ImageGenerator] Critical Error: {e}")
+            logger.error(f"[ImageGenerator] Critical Error: {e}")
             return False
 
     def generate_placeholder(self, prompt: str, output_path: str):

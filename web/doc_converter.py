@@ -24,10 +24,14 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
+import logging
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 支持的输入格式 & 对应的 MIME 类型（供前端 accept 属性参考）
 # ──────────────────────────────────────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
+
 SUPPORTED_INPUT_EXTS = {
     ".docx", ".doc",
     ".pdf",
@@ -159,7 +163,7 @@ def _convert_doc(source_path: str, out_path: str) -> Tuple[str, str]:
         from docx import Document
         doc = Document(source_path)
         doc.save(out_path)
-        print(f"[DocConverter] .doc → .docx via python-docx ✓")
+        logger.info(f"[DocConverter] .doc → .docx via python-docx ✓")
         return out_path, warning
     except Exception:
         pass
@@ -169,7 +173,7 @@ def _convert_doc(source_path: str, out_path: str) -> Tuple[str, str]:
     if lo_result:
         if lo_result != out_path:
             shutil.move(lo_result, out_path)
-        print(f"[DocConverter] .doc → .docx via LibreOffice ✓")
+        logger.info(f"[DocConverter] .doc → .docx via LibreOffice ✓")
         return out_path, warning
 
     # 方法 3: docx2txt 文本提取 → 重建
@@ -179,7 +183,7 @@ def _convert_doc(source_path: str, out_path: str) -> Tuple[str, str]:
         if text and text.strip():
             _build_docx_from_text(text, out_path, title=Path(source_path).stem)
             warning = "⚠️ `.doc` 文件格式较旧，已提取文本并重建为 `.docx`（原有图片/表格样式可能丢失）。"
-            print(f"[DocConverter] .doc → .docx via docx2txt text extraction ✓ (degraded)")
+            logger.info(f"[DocConverter] .doc → .docx via docx2txt text extraction ✓ (degraded)")
             return out_path, warning
     except Exception:
         pass
@@ -211,7 +215,7 @@ def _convert_doc(source_path: str, out_path: str) -> Tuple[str, str]:
         if len(text.strip()) > 50:
             _build_docx_from_text(text, out_path, title=Path(source_path).stem)
             warning = "⚠️ `.doc` 格式无法完整解析，仅提取了可读文本片段，部分内容可能缺失。"
-            print(f"[DocConverter] .doc → .docx via raw binary extraction ✓ (highly degraded, {len(_meaningful)} fragments)")
+            logger.info(f"[DocConverter] .doc → .docx via raw binary extraction ✓ (highly degraded, {len(_meaningful)} fragments)")
             return out_path, warning
     except Exception:
         pass
@@ -232,7 +236,7 @@ def _convert_pdf(source_path: str, out_path: str) -> Tuple[str, str]:
     if lo_result:
         if lo_result != out_path:
             shutil.move(lo_result, out_path)
-        print(f"[DocConverter] .pdf → .docx via LibreOffice ✓")
+        logger.info(f"[DocConverter] .pdf → .docx via LibreOffice ✓")
         return out_path, "⚠️ PDF 已由 LibreOffice 转换为 .docx（排版可能略有偏差）。"
 
     # 方法 2: pypdf
@@ -248,10 +252,10 @@ def _convert_pdf(source_path: str, out_path: str) -> Tuple[str, str]:
         text = "\n\n".join(pages)
         if text.strip():
             _build_docx_from_text(text, out_path, title=Path(source_path).stem)
-            print(f"[DocConverter] .pdf → .docx via pypdf ✓ ({len(pages)} pages)")
+            logger.info(f"[DocConverter] .pdf → .docx via pypdf ✓ ({len(pages)} pages)")
             return out_path, warning
     except Exception as e:
-        print(f"[DocConverter] pypdf failed: {e}")
+        logger.info(f"[DocConverter] pypdf failed: {e}")
 
     raise RuntimeError("PDF 文本提取失败。请确保文件不是扫描件（图片 PDF）。")
 
@@ -264,7 +268,7 @@ def _convert_txt(source_path: str, out_path: str) -> Tuple[str, str]:
             with open(source_path, encoding=enc) as f:
                 text = f.read()
             _build_docx_from_text(text, out_path, title=Path(source_path).stem)
-            print(f"[DocConverter] .txt → .docx ✓ (encoding={enc})")
+            logger.info(f"[DocConverter] .txt → .docx ✓ (encoding={enc})")
             return out_path, ""
         except UnicodeDecodeError:
             continue
@@ -282,7 +286,7 @@ def _convert_md(source_path: str, out_path: str) -> Tuple[str, str]:
                 text = f.read()
             # _build_docx_from_text 已支持 Markdown 标题语法
             _build_docx_from_text(text, out_path, title=Path(source_path).stem)
-            print(f"[DocConverter] .md → .docx ✓")
+            logger.info(f"[DocConverter] .md → .docx ✓")
             return out_path, ""
         except UnicodeDecodeError:
             continue
@@ -311,10 +315,10 @@ def _convert_rtf(source_path: str, out_path: str) -> Tuple[str, str]:
         text = rtf_to_text(rtf_content)
         if text and text.strip():
             _build_docx_from_text(text, out_path, title=Path(source_path).stem)
-            print(f"[DocConverter] .rtf → .docx via striprtf ✓")
+            logger.info(f"[DocConverter] .rtf → .docx via striprtf ✓")
             return out_path, warning
     except Exception as e:
-        print(f"[DocConverter] striprtf failed: {e}")
+        logger.info(f"[DocConverter] striprtf failed: {e}")
 
     raise RuntimeError("RTF 转换失败，请安装 LibreOffice 或手动另存为 .docx。")
 
@@ -327,7 +331,7 @@ def _convert_odt(source_path: str, out_path: str) -> Tuple[str, str]:
     if lo_result:
         if lo_result != out_path:
             shutil.move(lo_result, out_path)
-        print(f"[DocConverter] .odt → .docx via LibreOffice ✓")
+        logger.info(f"[DocConverter] .odt → .docx via LibreOffice ✓")
         return out_path, ""
 
     # 方法 2: ODT 是 ZIP，直接提取 content.xml 文本
@@ -344,9 +348,9 @@ def _convert_odt(source_path: str, out_path: str) -> Tuple[str, str]:
         text = "\n".join(paragraphs)
         if text.strip():
             _build_docx_from_text(text, out_path, title=Path(source_path).stem)
-            print(f"[DocConverter] .odt → .docx via ZIP/XML ✓")
+            logger.info(f"[DocConverter] .odt → .docx via ZIP/XML ✓")
             return out_path, "⚠️ ODT 已提取文本并重建为 .docx（原有格式可能丢失）。"
     except Exception as e:
-        print(f"[DocConverter] ODT ZIP extraction failed: {e}")
+        logger.info(f"[DocConverter] ODT ZIP extraction failed: {e}")
 
     raise RuntimeError("ODT 转换失败，请安装 LibreOffice 以支持自动转换。")

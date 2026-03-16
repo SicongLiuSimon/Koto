@@ -13,8 +13,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 import json
 from datetime import datetime
+import logging
 
 # 简化的中文停用词表
+
+logger = logging.getLogger(__name__)
+
 CHINESE_STOPWORDS = {
     '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个',
     '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好',
@@ -484,13 +488,13 @@ if __name__ == "__main__":
     计算机视觉技术能够识别图像中的物体。强化学习用于训练智能代理。
     """
     
-    print("🧠 概念提取测试")
-    print("=" * 50)
+    logger.info("🧠 概念提取测试")
+    logger.info("=" * 50)
     
     concepts = extractor.extract_concepts(test_text, top_n=10)
-    print("\n提取的关键概念：")
+    logger.info("\n提取的关键概念：")
     for concept, score in concepts:
-        print(f"  • {concept}: {score:.4f}")
+        logger.info(f"  • {concept}: {score:.4f}")
     
-    print("\n" + "=" * 50)
-    print("✅ 概念提取模块已就绪")
+    logger.info("\n" + "=" * 50)
+    logger.info("✅ 概念提取模块已就绪")

@@ -9,7 +9,10 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from pathlib import Path
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class SpeechTranscriber:
     """语音转写与总结系统"""
@@ -28,8 +31,8 @@ class SpeechTranscriber:
             import speech_recognition as sr
             return sr.Recognizer()
         except ImportError:
-            print("⚠️ 未安装 SpeechRecognition 库")
-            print("安装方法: pip install SpeechRecognition pydub")
+            logger.warning("⚠️ 未安装 SpeechRecognition 库")
+            logger.info("安装方法: pip install SpeechRecognition pydub")
             return None
     
     def transcribe_audio_file(self, audio_path: str, language: str = "zh-CN") -> Dict[str, Any]:
@@ -112,17 +115,17 @@ class SpeechTranscriber:
         try:
             import speech_recognition as sr
             
-            print(f"🎤 开始录音（{duration}秒）...")
+            logger.info(f"🎤 开始录音（{duration}秒）...")
             
             with sr.Microphone() as source:
                 # 调整麦克风灵敏度
                 self.recognizer.adjust_for_ambient_noise(source, duration=1)
                 
                 # 开始录音
-                print("正在听取...")
+                logger.info("正在听取...")
                 audio = self.recognizer.listen(source, timeout=duration)
             
-            print("正在识别...")
+            logger.info("正在识别...")
             
             # 识别
             try:
@@ -484,14 +487,14 @@ class SpeechTranscriber:
             完整处理结果
         """
         # 第一步：转写
-        print(f"📝 开始转写 {audio_path}...")
+        logger.info(f"📝 开始转写 {audio_path}...")
         transcribe_result = self.transcribe_audio_file(audio_path, language)
         
         if not transcribe_result["success"]:
             return transcribe_result
         
         text = transcribe_result["text"]
-        print(f"✅ 转写完成: {len(text)} 字符")
+        logger.info(f"✅ 转写完成: {len(text)} 字符")
         
         keywords = None
         summary = None
@@ -502,15 +505,15 @@ class SpeechTranscriber:
         
         # 第二步：提取关键词和总结
         if auto_summary:
-            print("📊 提取关键词和总结...")
+            logger.info("📊 提取关键词和总结...")
             summary_result = self.extract_keywords_and_summary(text)
             
             if summary_result["success"]:
                 keywords = summary_result.get("keywords")
                 summary = summary_result.get("summary")
-                print(f"✅ 提取完成: {len(keywords)} 个关键词, {len(summary)} 行摘要")
+                logger.info(f"✅ 提取完成: {len(keywords)} 个关键词, {len(summary)} 行摘要")
             else:
-                print(f"⚠️ 总结失败: {summary_result.get('error')}")
+                logger.warning(f"⚠️ 总结失败: {summary_result.get('error')}")
 
         # 会议要素提取
         if extract_meeting_items:
@@ -521,7 +524,7 @@ class SpeechTranscriber:
             speaker_segments = self._segment_speakers_simple(text)
         
         # 第三步：生成文档
-        print("📄 生成文档...")
+        logger.info("📄 生成文档...")
         output_file = self.generate_transcript_document(
             text,
             keywords=keywords,
@@ -534,7 +537,7 @@ class SpeechTranscriber:
             speaker_segments=speaker_segments
         )
         
-        print(f"✅ 文档已保存: {output_file}")
+        logger.info(f"✅ 文档已保存: {output_file}")
         
         return {
             "success": True,
@@ -555,15 +558,15 @@ class SpeechTranscriber:
 if __name__ == "__main__":
     transcriber = SpeechTranscriber()
     
-    print("=" * 60)
-    print("语音转写与总结系统测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("语音转写与总结系统测试")
+    logger.info("=" * 60)
     
     # 测试音频文件（如果存在）
     test_audio = "test_audio.wav"
     
     if os.path.exists(test_audio):
-        print(f"\n1. 测试文件转写: {test_audio}")
+        logger.info(f"\n1. 测试文件转写: {test_audio}")
         result = transcriber.process_audio_complete(
             test_audio,
             language="zh-CN",
@@ -573,12 +576,12 @@ if __name__ == "__main__":
         )
         
         if result["success"]:
-            print(f"\n✅ 转写成功")
-            print(f"   字符数: {result['char_count']}")
-            print(f"   关键词: {', '.join(result['keywords'] or [])}")
-            print(f"   保存位置: {result['output_file']}")
+            logger.info(f"\n✅ 转写成功")
+            logger.info(f"   字符数: {result['char_count']}")
+            logger.info(f"   关键词: {', '.join(result['keywords'] or [])}")
+            logger.info(f"   保存位置: {result['output_file']}")
     else:
-        print(f"\n⚠️ 测试音频文件不存在: {test_audio}")
-        print("   支持的格式: .wav, .mp3, .m4a, .flac")
+        logger.warning(f"\n⚠️ 测试音频文件不存在: {test_audio}")
+        logger.info("   支持的格式: .wav, .mp3, .m4a, .flac")
     
-    print("\n✅ 语音转写系统就绪")
+    logger.info("\n✅ 语音转写系统就绪")

@@ -12,7 +12,10 @@ import re
 from typing import Dict, List, Any, Generator, Tuple, Optional
 from datetime import datetime
 from copy import deepcopy
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class DirectEditAnnotator:
     """直接修改文档内容（不用Comments）"""
@@ -28,7 +31,7 @@ class DirectEditAnnotator:
         ext = os.path.splitext(file_path)[1]
         revised_path = f"{base_name}_revised{ext}"
         copy2(file_path, revised_path)
-        print(f"[DirectEdit] 📋 已创建工作副本: {os.path.basename(revised_path)}")
+        logger.info(f"[DirectEdit] 📋 已创建工作副本: {os.path.basename(revised_path)}")
         return file_path, revised_path
     
     @staticmethod
@@ -69,7 +72,7 @@ class DirectEditAnnotator:
                             para.clear()
                             para.add_run(new_text)
                             modified_count += 1
-                            print(f"[DirectEdit] ✅ 已修改: '{original}' -> '{modified}'")
+                            logger.info(f"[DirectEdit] ✅ 已修改: '{original}' -> '{modified}'")
                             break
                 
                 # 检查表格
@@ -87,7 +90,7 @@ class DirectEditAnnotator:
                                         break
             
             doc.save(file_path)
-            print(f"[DirectEdit] 💾 文档已保存: {modified_count}处修改")
+            logger.info(f"[DirectEdit] 💾 文档已保存: {modified_count}处修改")
             
             return {
                 "success": True,
@@ -96,7 +99,7 @@ class DirectEditAnnotator:
             }
         
         except Exception as e:
-            print(f"[DirectEdit] ✗ 应用编辑失败: {str(e)}")
+            logger.info(f"[DirectEdit] ✗ 应用编辑失败: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
@@ -202,7 +205,7 @@ class ImprovedBatchAnnotator:
         """分析一批段落，返回修改建议"""
         
         # 暂时禁用AI，使用改进的本地规则
-        print(f"[BatchAnnotator] 📋 使用改进规则分析")
+        logger.info(f"[BatchAnnotator] 📋 使用改进规则分析")
         return self._improved_local_rules(batch_text)
     
     def _improved_local_rules(self, batch_text: str) -> List[Dict[str, str]]:

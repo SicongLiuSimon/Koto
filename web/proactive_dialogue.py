@@ -16,7 +16,10 @@ from typing import Dict, List, Optional
 import random
 import threading
 import time
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class ProactiveDialogueEngine:
     """主动对话引擎"""
@@ -173,14 +176,14 @@ class ProactiveDialogueEngine:
             daemon=True
         )
         self.thread.start()
-        print("✅ 主动对话引擎已启动")
+        logger.info("✅ 主动对话引擎已启动")
     
     def stop_monitoring(self):
         """停止主动监控"""
         self.running = False
         if self.thread:
             self.thread.join(timeout=5)
-        print("🛑 主动对话引擎已停止")
+        logger.info("🛑 主动对话引擎已停止")
     
     def _monitoring_loop(self, interval: int):
         """监控循环"""
@@ -188,7 +191,7 @@ class ProactiveDialogueEngine:
             try:
                 self.check_and_trigger_dialogues()
             except Exception as e:
-                print(f"主动对话检查出错: {e}")
+                logger.info(f"主动对话检查出错: {e}")
             
             # 等待下一次检查
             time.sleep(interval)

@@ -11,6 +11,9 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import Counter, defaultdict
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     from web.behavior_monitor import BehaviorMonitor
@@ -154,7 +157,7 @@ class SuggestionEngine:
                 self._log_rule_execution(rule_name, triggered, len(rule_suggestions or []))
                 
             except Exception as e:
-                print(f"规则执行失败 {rule.__name__}: {str(e)}")
+                logger.info(f"规则执行失败 {rule.__name__}: {str(e)}")
         
         # 保存建议到数据库
         for suggestion in suggestions:
@@ -646,22 +649,22 @@ if __name__ == "__main__":
     # 测试代码
     engine = SuggestionEngine()
     
-    print("💡 智能建议引擎测试")
-    print("=" * 50)
+    logger.info("💡 智能建议引擎测试")
+    logger.info("=" * 50)
     
     # 生成建议
     suggestions = engine.generate_suggestions(force_regenerate=True)
     
-    print(f"\n生成建议: {len(suggestions)} 条")
+    logger.info(f"\n生成建议: {len(suggestions)} 条")
     for i, suggestion in enumerate(suggestions[:3], 1):
-        print(f"\n{i}. [{suggestion['priority'].upper()}] {suggestion['title']}")
-        print(f"   {suggestion['description']}")
+        logger.info(f"\n{i}. [{suggestion['priority'].upper()}] {suggestion['title']}")
+        logger.info(f"   {suggestion['description']}")
     
     # 获取统计信息
     stats = engine.get_statistics()
-    print("\n统计信息：")
+    logger.info("\n统计信息：")
     for key, value in stats.items():
-        print(f"  • {key}: {value}")
+        logger.info(f"  • {key}: {value}")
     
-    print("\n" + "=" * 50)
-    print("✅ 智能建议引擎已就绪")
+    logger.info("\n" + "=" * 50)
+    logger.info("✅ 智能建议引擎已就绪")

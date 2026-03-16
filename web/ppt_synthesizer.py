@@ -9,7 +9,10 @@ import os
 import re
 from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class PPTSynthesizer:
     """PPT合成器 - 从蓝图生成最终PPT"""
@@ -488,7 +491,7 @@ class PPTSynthesizer:
                     width=Inches(4)
                 )
             except Exception as e:
-                print(f"[PPTSynthesizer] 添加图片失败: {e}")
+                logger.info(f"[PPTSynthesizer] 添加图片失败: {e}")
     
     async def _populate_summary_slide(
         self,

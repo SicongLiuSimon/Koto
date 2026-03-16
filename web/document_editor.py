@@ -9,7 +9,10 @@ import os
 import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class DocumentEditor:
     """文档智能编辑器"""
@@ -205,7 +208,7 @@ class DocumentEditor:
                                 else:
                                     cell.add_paragraph(value)
                                 applied_count += 1
-                                print(f"  ✅ 表格{t_idx+1}[{row_i},{col_i}] → '{value}'")
+                                logger.info(f"  ✅ 表格{t_idx+1}[{row_i},{col_i}] → '{value}'")
                             else:
                                 errors.append(f"表格{t_idx+1} 单元格({row_i},{col_i})超出范围")
 
@@ -225,7 +228,7 @@ class DocumentEditor:
                             else:
                                 table._tbl.append(new_tr)
                             applied_count += 1
-                            print(f"  ✅ 表格{t_idx+1} 第{row_i}行前插入新行")
+                            logger.info(f"  ✅ 表格{t_idx+1} 第{row_i}行前插入新行")
 
                         elif action == "delete_table_row":
                             row_i = mod.get("row", 0)
@@ -233,7 +236,7 @@ class DocumentEditor:
                                 tr = table.rows[row_i]._tr
                                 tr.getparent().remove(tr)
                                 applied_count += 1
-                                print(f"  ✅ 表格{t_idx+1} 删除第{row_i}行")
+                                logger.info(f"  ✅ 表格{t_idx+1} 删除第{row_i}行")
                             else:
                                 errors.append(f"表格{t_idx+1} 行{row_i}超出范围")
                         continue
@@ -417,7 +420,7 @@ class DocumentEditor:
                 return []
         
         except Exception as e:
-            print(f"[DocumentEditor] 解析AI建议失败: {e}")
+            logger.info(f"[DocumentEditor] 解析AI建议失败: {e}")
             return []
 
 
@@ -447,13 +450,13 @@ class DocumentEditor:
             applied_count = 0
             failed_count = 0
             
-            print(f"[Editor] 📝 开始应用编辑修改...")
-            print(f"[Editor] 📊 收到 {len(annotations)} 条标注")
+            logger.info(f"[Editor] 📝 开始应用编辑修改...")
+            logger.info(f"[Editor] 📊 收到 {len(annotations)} 条标注")
             
             # Debug: 检查第一条标注的结构
             if annotations:
                 first_anno = annotations[0]
-                print(f"[Editor] 🔍 第一条标注示例: {first_anno}")
+                logger.info(f"[Editor] 🔍 第一条标注示例: {first_anno}")
             
             # 对每个标注进行处理
             for anno in annotations:
@@ -517,12 +520,12 @@ class DocumentEditor:
                     
                     applied_count += 1
                     found = True
-                    print(f"  ✅ 修改: '{original}' → '{modified}'")
+                    logger.info(f"  ✅ 修改: '{original}' → '{modified}'")
                     break
                 
                 if not found:
                     failed_count += 1
-                    print(f"  ⚠️ 未找到: '{original}'")
+                    logger.warning(f"  ⚠️ 未找到: '{original}'")
             
             # 生成修改版文件名
             if file_path.endswith('.docx'):
@@ -532,7 +535,7 @@ class DocumentEditor:
             
             # 保存文档
             doc.save(revised_file)
-            print(f"[Editor] 💾 修改版已保存 ({applied_count}个修改)")
+            logger.info(f"[Editor] 💾 修改版已保存 ({applied_count}个修改)")
             
             return {
                 "success": True,
@@ -543,7 +546,7 @@ class DocumentEditor:
             }
             
         except Exception as e:
-            print(f"[Editor] ❌ 编辑失败: {str(e)}")
+            logger.error(f"[Editor] ❌ 编辑失败: {str(e)}")
             import traceback
             traceback.print_exc()
             return {
@@ -572,4 +575,4 @@ if __name__ == "__main__":
         }
     ]
     
-    print("文档编辑器准备就绪")
+    logger.info("文档编辑器准备就绪")

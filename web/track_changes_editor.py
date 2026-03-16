@@ -21,7 +21,10 @@ import zipfile
 import shutil
 import tempfile
 import os
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class TrackChangesEditor:
     """Word Track Changes 修订编辑器（改进版）"""
@@ -56,8 +59,8 @@ class TrackChangesEditor:
             applied_count = 0
             failed_count = 0
             
-            print(f"[Comments] 💬 开始添加批注...")
-            print(f"[Comments] 📊 共 {len(annotations)} 条修改建议")
+            logger.info(f"[Comments] 💬 开始添加批注...")
+            logger.info(f"[Comments] 📊 共 {len(annotations)} 条修改建议")
             
             # 预处理标注
             normalized = []
@@ -75,7 +78,7 @@ class TrackChangesEditor:
                         "reason": reason
                     })
             
-            print(f"[Comments] ✅ 有效修改: {len(normalized)} 条")
+            logger.info(f"[Comments] ✅ 有效修改: {len(normalized)} 条")
             
             if not normalized:
                 doc.save(file_path)
@@ -119,7 +122,7 @@ class TrackChangesEditor:
                             applied_count += 1
                             found = True
                             detail_msg = f"✅ #{idx}/{len(normalized)}: '{original[:25]}...'"
-                            print(f"  💬 {detail_msg}")
+                            logger.info(f"  💬 {detail_msg}")
                             if progress_callback:
                                 progress_callback(idx, len(normalized), "success", detail_msg)
                             break
@@ -145,7 +148,7 @@ class TrackChangesEditor:
                                             applied_count += 1
                                             found = True
                                             detail_msg = f"✅ (表格) #{idx}/{len(normalized)}: '{original[:20]}...'"
-                                            print(f"  💬 {detail_msg}")
+                                            logger.info(f"  💬 {detail_msg}")
                                             if progress_callback:
                                                 progress_callback(idx, len(normalized), "success", detail_msg)
                                             break
@@ -153,7 +156,7 @@ class TrackChangesEditor:
                 if not found:
                     failed_count += 1
                     detail_msg = f"⚠️ #{idx} 未找到: '{original[:30]}...'"
-                    print(f"  {detail_msg}")
+                    logger.info(f"  {detail_msg}")
                     if progress_callback:
                         progress_callback(idx, len(normalized), "failed", detail_msg)
             
@@ -188,8 +191,8 @@ class TrackChangesEditor:
             doc.save(file_path)
             
             success_rate = (applied_count / len(normalized) * 100) if normalized else 0
-            print(f"\n[Comments] 💾 文档已保存")
-            print(f"[Comments] 📊 成功: {applied_count}, 失败: {failed_count}, 成功率: {success_rate:.1f}%")
+            logger.info(f"\n[Comments] 💾 文档已保存")
+            logger.info(f"[Comments] 📊 成功: {applied_count}, 失败: {failed_count}, 成功率: {success_rate:.1f}%")
             
             return {
                 "success": True,
@@ -199,7 +202,7 @@ class TrackChangesEditor:
             }
         
         except Exception as e:
-            print(f"[Comments] ❌ 错误: {str(e)}")
+            logger.error(f"[Comments] ❌ 错误: {str(e)}")
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
@@ -337,7 +340,7 @@ class TrackChangesEditor:
             return True
             
         except Exception as e:
-            print(f"[Comments] ⚠️ 添加批注标记失败: {str(e)}")
+            logger.warning(f"[Comments] ⚠️ 添加批注标记失败: {str(e)}")
             return False
     
     def apply_tracked_changes(
@@ -365,8 +368,8 @@ class TrackChangesEditor:
             applied_count = 0
             failed_count = 0
             
-            print(f"[TrackChanges] 📝 开始应用修订...")
-            print(f"[TrackChanges] 📊 共 {len(annotations)} 条修改建议")
+            logger.info(f"[TrackChanges] 📝 开始应用修订...")
+            logger.info(f"[TrackChanges] 📊 共 {len(annotations)} 条修改建议")
             
             # 预处理标注：标准化字段名
             normalized = []
@@ -380,7 +383,7 @@ class TrackChangesEditor:
                 if original and modified and original != modified:
                     normalized.append({"original": original, "modified": modified})
             
-            print(f"[TrackChanges] ✅ 有效修改: {len(normalized)} 条")
+            logger.info(f"[TrackChanges] ✅ 有效修改: {len(normalized)} 条")
             
             if progress_callback:
                 progress_callback(0, len(normalized), "start", f"开始应用 {len(normalized)} 条修订")
@@ -408,7 +411,7 @@ class TrackChangesEditor:
                             applied_count += 1
                             found = True
                             detail_msg = f"✅ #{idx}/{len(normalized)}: '{original[:25]}...' → '{modified[:25]}...'"
-                            print(f"  {detail_msg}")
+                            logger.info(f"  {detail_msg}")
                             if progress_callback:
                                 progress_callback(idx, len(normalized), "success", detail_msg)
                             break
@@ -431,7 +434,7 @@ class TrackChangesEditor:
                                             applied_count += 1
                                             found = True
                                             detail_msg = f"✅ (表格) #{idx}/{len(normalized)}: '{original[:20]}...'"
-                                            print(f"  {detail_msg}")
+                                            logger.info(f"  {detail_msg}")
                                             if progress_callback:
                                                 progress_callback(idx, len(normalized), "success", detail_msg)
                                             break
@@ -439,7 +442,7 @@ class TrackChangesEditor:
                 if not found:
                     failed_count += 1
                     detail_msg = f"⚠️ #{idx} 未找到: '{original[:30]}...'"
-                    print(f"  {detail_msg}")
+                    logger.info(f"  {detail_msg}")
                     if progress_callback:
                         progress_callback(idx, len(normalized), "failed", detail_msg)
             
@@ -447,8 +450,8 @@ class TrackChangesEditor:
             doc.save(file_path)
             
             success_rate = (applied_count / len(normalized) * 100) if normalized else 0
-            print(f"\n[TrackChanges] 💾 文档已保存")
-            print(f"[TrackChanges] 📊 成功: {applied_count}, 失败: {failed_count}, 成功率: {success_rate:.1f}%")
+            logger.info(f"\n[TrackChanges] 💾 文档已保存")
+            logger.info(f"[TrackChanges] 📊 成功: {applied_count}, 失败: {failed_count}, 成功率: {success_rate:.1f}%")
             
             return {
                 "success": True,
@@ -458,7 +461,7 @@ class TrackChangesEditor:
             }
             
         except Exception as e:
-            print(f"[TrackChanges] ❌ 错误: {str(e)}")
+            logger.error(f"[TrackChanges] ❌ 错误: {str(e)}")
             import traceback
             traceback.print_exc()
             return {
@@ -610,7 +613,7 @@ class TrackChangesEditor:
                 return True
             
         except Exception as e:
-            print(f"[TrackChanges] ⚠️ 段落修订失败: {str(e)}")
+            logger.warning(f"[TrackChanges] ⚠️ 段落修订失败: {str(e)}")
             return False
     
     def _get_run_text(self, run) -> str:
@@ -718,16 +721,16 @@ class TrackChangesEditor:
                         "reason": reason
                     })
             
-            print(f"\n[Hybrid] 🎯 混合标注模式")
-            print(f"[Hybrid] ✏️  精确修改: {len(track_changes_items)} 条（Track Changes）")
-            print(f"[Hybrid] 💬 方向建议: {len(comment_items)} 条（Comments）")
+            logger.info(f"\n[Hybrid] 🎯 混合标注模式")
+            logger.info(f"[Hybrid] ✏️  精确修改: {len(track_changes_items)} 条（Track Changes）")
+            logger.info(f"[Hybrid] 💬 方向建议: {len(comment_items)} 条（Comments）")
             
             # 先应用 Track Changes
             tracked_success = 0
             tracked_failed = 0
             
             if track_changes_items:
-                print(f"\n[Hybrid] 📝 第1步：应用精确修改...")
+                logger.info(f"\n[Hybrid] 📝 第1步：应用精确修改...")
                 
                 for idx, item in enumerate(track_changes_items, 1):
                     if progress_callback:
@@ -749,7 +752,7 @@ class TrackChangesEditor:
                         tracked_success += 1
                     else:
                         tracked_failed += 1
-                        print(f"[Hybrid] ⚠️  修订失败: {item['original'][:30]}...")
+                        logger.warning(f"[Hybrid] ⚠️  修订失败: {item['original'][:30]}...")
             
             # 再应用 Comments
             commented_success = 0
@@ -758,7 +761,7 @@ class TrackChangesEditor:
             comments_part_ref = None
             
             if comment_items:
-                print(f"\n[Hybrid] 💬 第2步：添加批注建议...")
+                logger.info(f"\n[Hybrid] 💬 第2步：添加批注建议...")
                 
                 # 获取 comments part
                 comments_el, comments_part_ref = self._get_or_create_comments_part(doc)
@@ -784,7 +787,7 @@ class TrackChangesEditor:
                         commented_success += 1
                     else:
                         commented_failed += 1
-                        print(f"[Hybrid] ⚠️  批注失败: {item['original'][:30]}...")
+                        logger.warning(f"[Hybrid] ⚠️  批注失败: {item['original'][:30]}...")
             
             # 将 comments XML 写入文档 Part（python-docx OPC 方式）
             if commented_success > 0 and comments_el is not None:
@@ -820,10 +823,10 @@ class TrackChangesEditor:
             total_success = tracked_success + commented_success
             total_failed = tracked_failed + commented_failed
             
-            print(f"\n[Hybrid] ✅ 完成！")
-            print(f"[Hybrid] 📊 修订标记: {tracked_success}成功 / {tracked_failed}失败")
-            print(f"[Hybrid] 📊 批注建议: {commented_success}成功 / {commented_failed}失败")
-            print(f"[Hybrid] 📊 总计: {total_success}成功 / {total_failed}失败\n")
+            logger.info(f"\n[Hybrid] ✅ 完成！")
+            logger.info(f"[Hybrid] 📊 修订标记: {tracked_success}成功 / {tracked_failed}失败")
+            logger.info(f"[Hybrid] 📊 批注建议: {commented_success}成功 / {commented_failed}失败")
+            logger.info(f"[Hybrid] 📊 总计: {total_success}成功 / {total_failed}失败\n")
             
             return {
                 "success": True,
@@ -835,7 +838,7 @@ class TrackChangesEditor:
             }
             
         except Exception as e:
-            print(f"[Hybrid] ❌ 混合标注失败: {e}")
+            logger.error(f"[Hybrid] ❌ 混合标注失败: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -1058,7 +1061,7 @@ class TrackChangesEditor:
                 
             return False
         except Exception as e:
-            print(f"[TrackChange] Error: {e}")
+            logger.error(f"[TrackChange] Error: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1098,11 +1101,11 @@ class TrackChangesEditor:
             
             # 替换原文件
             shutil.move(tmp_path, file_path)
-            print(f"[Hybrid] 💾 comments.xml 已注入 ({len(comments_xml)} bytes)")
+            logger.info(f"[Hybrid] 💾 comments.xml 已注入 ({len(comments_xml)} bytes)")
             return True
             
         except Exception as e:
-            print(f"[Hybrid] ❌ 注入 comments.xml 失败: {e}")
+            logger.error(f"[Hybrid] ❌ 注入 comments.xml 失败: {e}")
             tmp_path = file_path + '.tmp'
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
@@ -1125,7 +1128,7 @@ class TrackChangesEditor:
             
             return etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True)
         except Exception as e:
-            print(f"[Hybrid] ⚠️ Content_Types 修改失败: {e}")
+            logger.warning(f"[Hybrid] ⚠️ Content_Types 修改失败: {e}")
             return content_types_data
     
     def _add_comments_relationship(self, rels_data: bytes) -> bytes:
@@ -1155,7 +1158,7 @@ class TrackChangesEditor:
             
             return etree.tostring(root, xml_declaration=True, encoding='UTF-8', standalone=True)
         except Exception as e:
-            print(f"[Hybrid] ⚠️ Rels 修改失败: {e}")
+            logger.warning(f"[Hybrid] ⚠️ Rels 修改失败: {e}")
             return rels_data
     
     def _apply_single_comment(
@@ -1247,9 +1250,9 @@ class TrackChangesEditor:
             return False
             
         except Exception as e:
-            print(f"[Comment] 单条批注失败: {e}")
+            logger.info(f"[Comment] 单条批注失败: {e}")
             return False
 
 
 if __name__ == "__main__":
-    print("Track Changes Editor 已准备就绪")
+    logger.info("Track Changes Editor 已准备就绪")

@@ -13,7 +13,10 @@ import traceback
 from typing import Dict, Optional, List
 from dataclasses import dataclass
 from enum import Enum
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class EngineType(Enum):
     """引擎类型"""
@@ -57,31 +60,31 @@ class VoiceInputEngine:
         
     def _detect_engines(self):
         """检测可用的语音引擎"""
-        print("\n[语音输入] 正在检测可用引擎...")
+        logger.info("\n[语音输入] 正在检测可用引擎...")
         
         # 0. 检测 Vosk 本地识别（最快，完全离线）
         if self._check_vosk():
             self.available_engines.append(EngineType.VOSK_LOCAL)
-            print("  ✓ Vosk 本地识别可用（推荐，最快）")
+            logger.info("  ✓ Vosk 本地识别可用（推荐，最快）")
         
         # 1. 检测本地 speech_recognition + pyaudio
         if self._check_speech_recognition():
             self.available_engines.append(EngineType.GOOGLE_WEB)
-            print("  ✓ Google Speech API 可用 (需网络)")
+            logger.info("  ✓ Google Speech API 可用 (需网络)")
         
         # 2. 检测 Windows 语音识别
         if self._check_windows_speech():
             self.available_engines.append(EngineType.WINDOWS_SPEECH)
-            print("  ✓ Windows 语音识别可用")
+            logger.info("  ✓ Windows 语音识别可用")
         
         # 3. 检测 Gemini API
         if self._check_gemini_api():
             self.available_engines.append(EngineType.GEMINI_API)
-            print("  ✓ Gemini API 可用")
+            logger.info("  ✓ Gemini API 可用")
         
         # 4. 离线模式（兜底）
         self.available_engines.append(EngineType.OFFLINE)
-        print("  ✓ 离线录音模式可用")
+        logger.info("  ✓ 离线录音模式可用")
         
         # 设置主引擎 - 优先 Vosk 本地识别（最快）
         if EngineType.VOSK_LOCAL in self.available_engines:
@@ -95,14 +98,14 @@ class VoiceInputEngine:
         else:
             self.primary_engine = EngineType.OFFLINE
         
-        print(f"\n[语音输入] 主引擎: {self.primary_engine.value}")
-        print(f"[语音输入] 可用引擎: {[e.value for e in self.available_engines]}")
+        logger.info(f"\n[语音输入] 主引擎: {self.primary_engine.value}")
+        logger.info(f"[语音输入] 可用引擎: {[e.value for e in self.available_engines]}")
     
     def _check_vosk(self) -> bool:
         """检查 Vosk 本地识别是否可用"""
         # 在打包环境中禁用 Vosk（vosk在PyInstaller中有依赖问题）
         if getattr(sys, 'frozen', False):
-            print("  ⚠ 打包环境中禁用 Vosk（依赖问题）")
+            logger.warning("  ⚠ 打包环境中禁用 Vosk（依赖问题）")
             return False
             
         try:
@@ -124,17 +127,17 @@ class VoiceInputEngine:
                 abs_path = os.path.abspath(path)
                 if os.path.exists(abs_path) and os.path.isdir(abs_path):
                     self.vosk_model_path = abs_path
-                    print(f"  ✓ 找到 Vosk 模型: {abs_path}")
+                    logger.info(f"  ✓ 找到 Vosk 模型: {abs_path}")
                     return True
             
             # 模型不存在，但 Vosk 库可用，可以下载
-            print("  ⚠ Vosk 库已安装，但需要下载中文模型")
+            logger.warning("  ⚠ Vosk 库已安装，但需要下载中文模型")
             return True  # 允许使用，稍后下载模型
             
         except ImportError:
             return False
         except Exception as e:
-            print(f"  ⚠ Vosk 检查失败: {e}")
+            logger.warning(f"  ⚠ Vosk 检查失败: {e}")
             return False
     
     def _check_speech_recognition(self) -> bool:
@@ -149,10 +152,10 @@ class VoiceInputEngine:
                     pass  # 只测试能否打开麦克风
                 return True
             except Exception as e:
-                print(f"  ⚠ 麦克风测试失败: {e}")
+                logger.warning(f"  ⚠ 麦克风测试失败: {e}")
                 return False
         except ImportError as e:
-            print(f"  ⚠ 缺少依赖: {e}")
+            logger.warning(f"  ⚠ 缺少依赖: {e}")
             return False
     
     def _check_windows_speech(self) -> bool:
@@ -232,14 +235,14 @@ class VoiceInputEngine:
             result = self._recognize_with_vosk(timeout, language)
             if result.success:
                 return result
-            print("[语音输入] Vosk 失败，尝试 Google...")
+            logger.info("[语音输入] Vosk 失败，尝试 Google...")
         
         # 其次 Windows SAPI
         if self.primary_engine == EngineType.WINDOWS_SPEECH:
             result = self._recognize_with_windows_sapi(timeout, language)
             if result.success:
                 return result
-            print("[语音输入] Windows SAPI 失败，尝试 Google...")
+            logger.info("[语音输入] Windows SAPI 失败，尝试 Google...")
         
         # 使用 speech_recognition + Google API
         return self._recognize_with_google(timeout, language)
@@ -278,7 +281,7 @@ class VoiceInputEngine:
                         message="Vosk 模型未找到，请稍候自动下载...",
                         engine="vosk"
                     )
-                print(f"[语音输入] 加载 Vosk 模型: {model_path}")
+                logger.info(f"[语音输入] 加载 Vosk 模型: {model_path}")
                 self.vosk_model = Model(model_path)
             
             # 音频参数 - 优化的参数以提高识别精准度
@@ -305,7 +308,7 @@ class VoiceInputEngine:
                 frames_per_buffer=CHUNK
             )
             
-            print("[语音输入] 🎤 Vosk 本地识别中...")
+            logger.info("[语音输入] 🎤 Vosk 本地识别中...")
             
             # 实时识别 - 使用更智能的静音检测
             silence_count = 0
@@ -415,7 +418,7 @@ class VoiceInputEngine:
         
         # 在打包环境中，vosk可能无法正常工作，降级到非流式识别
         if is_frozen and self.primary_engine == EngineType.VOSK_LOCAL:
-            print("[语音流式] 打包环境检测到，使用非流式识别...")
+            logger.info("[语音流式] 打包环境检测到，使用非流式识别...")
             result = self.recognize_microphone(timeout=timeout, language=language)
             # 转换为流式格式
             yield {"type": "start", "message": "开始识别"}
@@ -558,7 +561,7 @@ class VoiceInputEngine:
                     return path
         
         # 尝试自动下载小模型
-        print("[语音输入] 正在下载 Vosk 中文模型（约50MB）...")
+        logger.info("[语音输入] 正在下载 Vosk 中文模型（约50MB）...")
         try:
             import requests as _requests
             import zipfile
@@ -590,11 +593,11 @@ class VoiceInputEngine:
             model_path = os.path.join(model_dir, "vosk-model-small-cn-0.22")
             if os.path.exists(model_path):
                 self.vosk_model_path = model_path
-                print(f"[语音输入] ✓ 模型下载完成: {model_path}")
+                logger.info(f"[语音输入] ✓ 模型下载完成: {model_path}")
                 return model_path
                 
         except Exception as e:
-            print(f"[语音输入] ⚠ 模型下载失败: {e}")
+            logger.warning(f"[语音输入] ⚠ 模型下载失败: {e}")
         
         return None
     
@@ -619,7 +622,7 @@ class VoiceInputEngine:
                 # 获取识别器
                 recognizer = context.Recognizer
                 
-                print("[语音输入] 🎤 Windows SAPI 本地识别...")
+                logger.info("[语音输入] 🎤 Windows SAPI 本地识别...")
                 
                 # 使用简单的同步识别
                 # 注意：SAPI 的实时识别比较复杂，这里用 speech_recognition 的 Windows 后端
@@ -694,7 +697,7 @@ class VoiceInputEngine:
             r.non_speaking_duration = 0.5  # 非语音持续时间（增加容忍度）
             
             with sr.Microphone(sample_rate=16000) as source:  # 指定采样率
-                print(f"[语音输入] 🎤 请说话...")
+                logger.info(f"[语音输入] 🎤 请说话...")
                 r.adjust_for_ambient_noise(source, duration=0.3)  # 稍微延长环境噪音适应时间
                 
                 audio = r.listen(
@@ -703,7 +706,7 @@ class VoiceInputEngine:
                     phrase_time_limit=15
                 )
                 
-                print("[语音输入] 🔄 正在识别...")
+                logger.info("[语音输入] 🔄 正在识别...")
                 text = r.recognize_google(audio, language=language)
                 
                 return RecognitionResult(
@@ -852,14 +855,14 @@ class VoiceInputEngine:
                     frames_per_buffer=CHUNK
                 )
                 
-                print(f"[语音输入] 🎤 开始录音 ({duration} 秒)...")
+                logger.info(f"[语音输入] 🎤 开始录音 ({duration} 秒)...")
                 frames = []
                 
                 for i in range(0, int(RATE / CHUNK * duration)):
                     data = stream.read(CHUNK)
                     frames.append(data)
                 
-                print("[语音输入] ✓ 录音完成")
+                logger.info("[语音输入] ✓ 录音完成")
                 
                 # 停止录音
                 stream.stop_stream()
@@ -941,22 +944,22 @@ def recognize_audio(audio_path: str, engine: Optional[str] = None) -> Dict:
 
 # 测试代码
 if __name__ == "__main__":
-    print("=" * 60)
-    print("Koto 语音输入引擎测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Koto 语音输入引擎测试")
+    logger.info("=" * 60)
     
     # 获取引擎
     engine = get_voice_engine()
     
     # 显示可用引擎
     engines_info = engine.get_available_engines()
-    print(f"\n主引擎: {engines_info['primary']}")
-    print(f"\n可用引擎列表:")
+    logger.info(f"\n主引擎: {engines_info['primary']}")
+    logger.info(f"\n可用引擎列表:")
     for eng in engines_info['engines']:
         primary_mark = " ★" if eng['is_primary'] else ""
-        print(f"  • {eng['name']}{primary_mark}")
-        print(f"    {eng['description']}")
+        logger.info(f"  • {eng['name']}{primary_mark}")
+        logger.info(f"    {eng['description']}")
     
-    print("\n" + "=" * 60)
-    print("✓ 语音输入引擎初始化成功")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("✓ 语音输入引擎初始化成功")
+    logger.info("=" * 60)

@@ -11,6 +11,10 @@ file_scanner.py — Koto 全盘文件扫描器
 
 使用示例:
     from web.file_scanner import FileScanner
+import logging
+
+logger = logging.getLogger(__name__)
+
     FileScanner.start_scan()                        # 后台扫描
     results = FileScanner.search("报告 2025", limit=10)
     FileScanner.open_file(results[0]["path"])
@@ -149,9 +153,9 @@ class FileScanner:
                     pass
             with cls._lock:
                 cls._index = loaded
-            print(f"[FileScanner] 📂 已加载历史索引 {len(loaded):,} 个文件")
+            logger.info(f"[FileScanner] 📂 已加载历史索引 {len(loaded):,} 个文件")
         except Exception as e:
-            print(f"[FileScanner] ⚠️ 索引加载失败: {e}")
+            logger.warning(f"[FileScanner] ⚠️ 索引加载失败: {e}")
 
     @classmethod
     def _save_index(cls) -> None:
@@ -162,9 +166,9 @@ class FileScanner:
                 data = {k: asdict(v) for k, v in cls._index.items()}
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
-            print(f"[FileScanner] 💾 索引已保存 {len(data):,} 个文件 → {path}")
+            logger.info(f"[FileScanner] 💾 索引已保存 {len(data):,} 个文件 → {path}")
         except Exception as e:
-            print(f"[FileScanner] ⚠️ 索引保存失败: {e}")
+            logger.warning(f"[FileScanner] ⚠️ 索引保存失败: {e}")
 
     # ── Scan ───────────────────────────────────────────────────────────────────
 
@@ -216,7 +220,7 @@ class FileScanner:
                 "error": None,
             }
         t.start()
-        print(f"[FileScanner] 🚀 开始扫描 {drives}")
+        logger.info(f"[FileScanner] 🚀 开始扫描 {drives}")
         return True
 
     @classmethod
@@ -311,13 +315,13 @@ class FileScanner:
                 cls._status["end_time"] = time.time()
 
             cls._save_index()
-            print(f"[FileScanner] ✅ 扫描完成: {scanned:,} 已检查 / {len(new_index):,} 已索引")
+            logger.info(f"[FileScanner] ✅ 扫描完成: {scanned:,} 已检查 / {len(new_index):,} 已索引")
 
         except Exception as e:
             with cls._lock:
                 cls._status["running"] = False
                 cls._status["error"] = str(e)
-            print(f"[FileScanner] ❌ 扫描错误: {e}")
+            logger.error(f"[FileScanner] ❌ 扫描错误: {e}")
 
     # ── Search ─────────────────────────────────────────────────────────────────
 

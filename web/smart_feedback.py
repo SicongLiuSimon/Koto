@@ -13,7 +13,10 @@ import time
 import re
 import threading
 from typing import Optional, Callable, Dict, Any, List
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class SmartFeedback:
     """
@@ -105,7 +108,7 @@ class SmartFeedback:
         try:
             self.emit(message, detail)
         except Exception as e:
-            print(f"[SmartFeedback] emit error: {e}")
+            logger.info(f"[SmartFeedback] emit error: {e}")
         return (message, detail)
 
     def start(self, context_hint: str = ""):

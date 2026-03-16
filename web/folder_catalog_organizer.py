@@ -10,7 +10,10 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class FolderCatalogOrganizer:
     """对指定文件夹执行批量归纳，并输出带发送者线索的清单。"""
@@ -186,7 +189,7 @@ class FolderCatalogOrganizer:
                     remind_at=remind_at,
                 )
                 created.append(rid)
-                print(f"[Catalog] ⏰ 已注册提醒: {file_name} {label} {value}")
+                logger.info(f"[Catalog] ⏰ 已注册提醒: {file_name} {label} {value}")
             except Exception:
                 pass
         return created
@@ -199,18 +202,18 @@ class FolderCatalogOrganizer:
             _sample_file = _P(__file__).parent.parent / "config" / "training_data" / "file_classify_samples.jsonl"
             if not _sample_file.exists() or _sample_file.stat().st_size == 0:
                 if verbose:
-                    print("[CatalogOrganizer] ⚠️ 无新分类训练样本，跳过推送")
+                    logger.warning("[CatalogOrganizer] ⚠️ 无新分类训练样本，跳过推送")
                 return
             try:
                 from app.core.learning.training_data_builder import TrainingDataBuilder
             except ImportError:
                 if verbose:
-                    print("[CatalogOrganizer] ⚠️ TrainingDataBuilder 不可用，跳过推送")
+                    logger.warning("[CatalogOrganizer] ⚠️ TrainingDataBuilder 不可用，跳过推送")
                 return
             if verbose:
                 import os
                 n = sum(1 for _ in open(_sample_file, encoding="utf-8"))
-                print(f"[CatalogOrganizer] 🧠 构建训练集（含 {n} 条新分类样本）并推送 Ollama...")
+                logger.info(f"[CatalogOrganizer] 🧠 构建训练集（含 {n} 条新分类样本）并推送 Ollama...")
             result = TrainingDataBuilder.build_all(
                 include_routing=False,
                 include_chat=False,
@@ -222,10 +225,10 @@ class FolderCatalogOrganizer:
             )
             if verbose:
                 stats = result.get("stats", {})
-                print(f"[CatalogOrganizer] ✅ 训练集已更新: {stats.get('total', 0)} 条样本，文件: {result.get('full_file', '')}")
+                logger.info(f"[CatalogOrganizer] ✅ 训练集已更新: {stats.get('total', 0)} 条样本，文件: {result.get('full_file', '')}")
         except Exception as _e:
             if verbose:
-                print(f"[CatalogOrganizer] ⚠️ 训练集推送失败（不影响归纳）: {_e}")
+                logger.warning(f"[CatalogOrganizer] ⚠️ 训练集推送失败（不影响归纳）: {_e}")
 
     def _extract_sender_info(self, file_path: Path) -> Dict[str, Optional[str]]:
         ext = file_path.suffix.lower()

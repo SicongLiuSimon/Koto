@@ -15,8 +15,12 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+import logging
 
 # watchdog import — 软依赖，不安装时以 None 标记
+
+logger = logging.getLogger(__name__)
+
 try:
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler, FileCreatedEvent
@@ -73,7 +77,7 @@ class _CatalogEventHandler(FileSystemEventHandler):
         try:
             self._callback(file_path)
         except Exception as e:
-            print(f"[FileWatcher] ⚠️ 处理 {file_path} 时出错: {e}")
+            logger.warning(f"[FileWatcher] ⚠️ 处理 {file_path} 时出错: {e}")
 
 
 class _WatchEntry:
@@ -122,7 +126,7 @@ class FileWatcher:
             observer.daemon = True
             observer.start()
             self._watches[directory] = _WatchEntry(directory, observer, handler)
-            print(f"[FileWatcher] 👁️ 开始监控: {directory}")
+            logger.info(f"[FileWatcher] 👁️ 开始监控: {directory}")
         return {"success": True, "status": "started", "path": directory}
 
     def stop_watch(self, directory: str) -> Dict[str, Any]:
@@ -137,7 +141,7 @@ class FileWatcher:
             entry.observer.join(timeout=3)
         except Exception:
             pass
-        print(f"[FileWatcher] ⛔ 已停止监控: {directory}")
+        logger.info(f"[FileWatcher] ⛔ 已停止监控: {directory}")
         return {"success": True, "status": "stopped", "path": directory}
 
     def stop_all(self):
@@ -162,10 +166,10 @@ class FileWatcher:
     def _handle_new_file(self, file_path: str):
         """新文件落地后：分析 → 归类 → 可选回调通知。"""
         p = Path(file_path)
-        print(f"[FileWatcher] 📥 检测到新文件: {p.name}")
+        logger.info(f"[FileWatcher] 📥 检测到新文件: {p.name}")
 
         if not self._analyzer or not self._organizer or not self._organize_root:
-            print("[FileWatcher] ⚠️ 未完成 configure()，跳过自动归类")
+            logger.warning("[FileWatcher] ⚠️ 未完成 configure()，跳过自动归类")
             return
 
         try:
@@ -207,10 +211,10 @@ class FileWatcher:
                     pass
 
             status = "✅" if outcome["success"] else "⚠️"
-            print(f"[FileWatcher] {status} {p.name} → {suggested_folder}")
+            logger.info(f"[FileWatcher] {status} {p.name} → {suggested_folder}")
 
         except Exception as e:
-            print(f"[FileWatcher] ❌ 自动归类异常: {e}")
+            logger.error(f"[FileWatcher] ❌ 自动归类异常: {e}")
 
 
 # ── 单例 ─────────────────────────────────────────────────────────────────────

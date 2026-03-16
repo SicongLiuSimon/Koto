@@ -23,8 +23,12 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 import json
+import logging
 
 # 尝试导入可选的依赖
+
+logger = logging.getLogger(__name__)
+
 try:
     import wmi
     HAS_WMI = True
@@ -109,7 +113,7 @@ class SystemInfoCollector:
             return info
             
         except Exception as e:
-            print(f"[SystemInfo] Warning: Failed to get CPU info: {e}")
+            logger.warning(f"[SystemInfo] Warning: Failed to get CPU info: {e}")
             return {
                 'usage_percent': 0,
                 'physical_cores': 0,
@@ -144,7 +148,7 @@ class SystemInfoCollector:
             return info
             
         except Exception as e:
-            print(f"[SystemInfo] Warning: Failed to get memory info: {e}")
+            logger.warning(f"[SystemInfo] Warning: Failed to get memory info: {e}")
             return {
                 'total_gb': 0,
                 'used_gb': 0,
@@ -200,7 +204,7 @@ class SystemInfoCollector:
             return info
             
         except Exception as e:
-            print(f"[SystemInfo] Warning: Failed to get disk info: {e}")
+            logger.warning(f"[SystemInfo] Warning: Failed to get disk info: {e}")
             return {
                 'drives': {},
                 'total_gb': 0,
@@ -253,7 +257,7 @@ class SystemInfoCollector:
             return info
             
         except Exception as e:
-            print(f"[SystemInfo] Warning: Failed to get network info: {e}")
+            logger.warning(f"[SystemInfo] Warning: Failed to get network info: {e}")
             return {
                 'hostname': socket.gethostname(),
                 'interfaces': {},
@@ -294,7 +298,7 @@ class SystemInfoCollector:
             return info
             
         except Exception as e:
-            print(f"[SystemInfo] Warning: Failed to get process info: {e}")
+            logger.warning(f"[SystemInfo] Warning: Failed to get process info: {e}")
             return {
                 'total_processes': 0,
                 'top_processes': [],
@@ -342,7 +346,7 @@ class SystemInfoCollector:
             return info
             
         except Exception as e:
-            print(f"[SystemInfo] Warning: Failed to get Python environment info: {e}")
+            logger.warning(f"[SystemInfo] Warning: Failed to get Python environment info: {e}")
             return {
                 'version': platform.python_version(),
                 'executable': sys.executable,
@@ -361,7 +365,7 @@ class SystemInfoCollector:
             self._set_cached('top_processes', top_list)
             return top_list[:limit]
         except Exception as e:
-            print(f"[SystemInfo] Warning: Failed to get top processes: {e}")
+            logger.warning(f"[SystemInfo] Warning: Failed to get top processes: {e}")
             return []
     
     def get_installed_apps(self) -> List[str]:
@@ -409,7 +413,7 @@ class SystemInfoCollector:
             return apps
             
         except Exception as e:
-            print(f"[SystemInfo] Warning: Failed to get installed apps: {e}")
+            logger.warning(f"[SystemInfo] Warning: Failed to get installed apps: {e}")
             return ['Python', 'Windows']
     
     def _check_program_files(self, exe_name: str) -> bool:
@@ -562,18 +566,18 @@ def get_system_warnings() -> List[str]:
 
 if __name__ == '__main__':
     # 测试脚本
-    print("🖥️ Koto 系统信息收集器")
-    print("=" * 60)
+    logger.info("🖥️ Koto 系统信息收集器")
+    logger.info("=" * 60)
     
     collector = get_system_info_collector()
     
     # 打印格式化信息
-    print(collector.get_formatted_info())
+    logger.info(collector.get_formatted_info())
     
     # 打印警告
     warnings = collector.get_system_warnings()
     if warnings:
-        print("\n" + "=" * 60)
-        print("⚠️ 系统警告:")
+        logger.info("\n" + "=" * 60)
+        logger.warning("⚠️ 系统警告:")
         for warning in warnings:
-            print(f"  {warning}")
+            logger.info(f"  {warning}")

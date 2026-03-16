@@ -4,6 +4,9 @@ import json
 import asyncio
 import edge_tts
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 class AudioOverviewGenerator:
     """
@@ -59,7 +62,7 @@ class AudioOverviewGenerator:
             script = json.loads(res_text)
             return script
         except Exception as e:
-            print(f"Error generating script: {e}")
+            logger.info(f"Error generating script: {e}")
             return None
 
     async def synthesize_audio(self, script, session_id):
@@ -89,7 +92,7 @@ class AudioOverviewGenerator:
                         
             return combined_audio_path
         except Exception as e:
-            print(f"Error synthesizing audio: {e}")
+            logger.info(f"Error synthesizing audio: {e}")
             return None
         finally:
             # Cleanup temp files

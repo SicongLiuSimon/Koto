@@ -18,7 +18,10 @@ import asyncio
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from pathlib import Path
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class WorkflowStep:
     """工作流步骤"""
@@ -263,11 +266,11 @@ class DocumentWorkflowExecutor:
         Args:
             task_orchestrator: TaskOrchestrator实例（从app.py传入）
         """
-        print(f"\n{'='*70}")
-        print(f"🚀 开始执行工作流: {self.workflow_name}")
-        print(f"{'='*70}")
-        print(f"📋 总步骤数: {len(self.steps)}")
-        print(f"📝 背景: {self.workflow_context}\n")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"🚀 开始执行工作流: {self.workflow_name}")
+        logger.info(f"{'='*70}")
+        logger.info(f"📋 总步骤数: {len(self.steps)}")
+        logger.info(f"📝 背景: {self.workflow_context}\n")
         
         results = {
             "workflow_name": self.workflow_name,
@@ -277,9 +280,9 @@ class DocumentWorkflowExecutor:
         }
         
         for step in self.steps:
-            print(f"\n[步骤 {step.step_id}/{len(self.steps)}] {step.description}")
-            print(f"└─ 类型: {step.step_type}")
-            print(f"   ⏳ 执行中...")
+            logger.info(f"\n[步骤 {step.step_id}/{len(self.steps)}] {step.description}")
+            logger.info(f"└─ 类型: {step.step_type}")
+            logger.info(f"   ⏳ 执行中...")
             
             step.status = "running"
             step.start_time = datetime.now()
@@ -296,15 +299,15 @@ class DocumentWorkflowExecutor:
                 step.result = step_result
                 step.status = "completed"
                 
-                print(f"   ✅ 完成")
+                logger.info(f"   ✅ 完成")
                 if isinstance(step_result, dict):
                     if step_result.get("output"):
-                        print(f"   📄 输出: {str(step_result['output'])[:100]}...")
+                        logger.info(f"   📄 输出: {str(step_result['output'])[:100]}...")
                 
             except Exception as e:
                 step.status = "failed"
                 step.error = str(e)
-                print(f"   ❌ 失败: {e}")
+                logger.error(f"   ❌ 失败: {e}")
                 
                 # 可选：失败后是否继续
                 if not self._should_continue_on_error():
@@ -323,11 +326,11 @@ class DocumentWorkflowExecutor:
         # 生成总结报告
         results["summary"] = self._generate_summary(results)
         
-        print(f"\n{'='*70}")
-        print(f"📊 工作流执行完成")
-        print(f"{'='*70}")
-        print(f"✅ 成功步骤: {sum(1 for s in results['steps'] if s['status']=='completed')}/{len(self.steps)}")
-        print(f"❌ 失败步骤: {sum(1 for s in results['steps'] if s['status']=='failed')}/{len(self.steps)}")
+        logger.info(f"\n{'='*70}")
+        logger.info(f"📊 工作流执行完成")
+        logger.info(f"{'='*70}")
+        logger.info(f"✅ 成功步骤: {sum(1 for s in results['steps'] if s['status']=='completed')}/{len(self.steps)}")
+        logger.error(f"❌ 失败步骤: {sum(1 for s in results['steps'] if s['status']=='failed')}/{len(self.steps)}")
         
         return results
     
@@ -492,14 +495,14 @@ class DocumentWorkflowExecutor:
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
         
-        print(f"\n📁 结果已保存: {output_path}")
+        logger.info(f"\n📁 结果已保存: {output_path}")
         
         # 同时生成文本报告
         report_path = output_path.replace(".json", "_report.txt")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(results.get("summary", ""))
         
-        print(f"📄 报告已保存: {report_path}")
+        logger.info(f"📄 报告已保存: {report_path}")
         
         return output_path
 
@@ -528,9 +531,9 @@ async def execute_document_workflow(file_path: str, client,
     if not load_result.get("success"):
         return load_result
     
-    print(f"\n✅ 工作流加载成功")
-    print(f"   名称: {executor.workflow_name}")
-    print(f"   步骤: {len(executor.steps)}个")
+    logger.info(f"\n✅ 工作流加载成功")
+    logger.info(f"   名称: {executor.workflow_name}")
+    logger.info(f"   步骤: {len(executor.steps)}个")
     
     # 执行工作流
     results = await executor.execute_workflow(task_orchestrator)
@@ -553,7 +556,7 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("用法: python document_workflow_executor.py <document_path>")
+        logger.info("用法: python document_workflow_executor.py <document_path>")
         sys.exit(1)
     
     file_path = sys.argv[1]
@@ -568,9 +571,9 @@ if __name__ == "__main__":
         result = await execute_document_workflow(file_path, client)
         
         if result.get("success"):
-            print(f"\n🎉 工作流执行完成！")
-            print(f"   结果文件: {result['output_path']}")
+            logger.info(f"\n🎉 工作流执行完成！")
+            logger.info(f"   结果文件: {result['output_path']}")
         else:
-            print(f"\n❌ 执行失败: {result.get('error')}")
+            logger.error(f"\n❌ 执行失败: {result.get('error')}")
     
     asyncio.run(test())

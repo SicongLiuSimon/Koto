@@ -11,7 +11,10 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from web.ppt_master import PPTMasterOrchestrator, PPTBlueprint
 from web.ppt_synthesizer import PPTSynthesizer, PPTBeautyOptimizer, PPTQualityEnsurance
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class PPTGenerationPipeline:
     """
@@ -284,7 +287,7 @@ class PPTGenerationPipeline:
                 try:
                     from web.app import get_client
                     client = get_client()
-                    print("[PPT_Pipeline] 已懒加载 AI Client")
+                    logger.info("[PPT_Pipeline] 已懒加载 AI Client")
                 except ImportError:
                      # 尝试从 web.app 的 LazyModule 获取
                     try:
@@ -366,7 +369,7 @@ class PPTGenerationPipeline:
     def _log(self, message: str):
         """记录日志"""
         self.log.append(message)
-        print(message)
+        logger.info(message)
     
     def get_logs(self) -> List[str]:
         """获取所有日志"""
@@ -406,18 +409,18 @@ class PPTGenerationTaskHandler:
         # 步骤1: 搜索（如果有搜索执行器）
         if search_executor:
             try:
-                print("[TaskHandler] 正在搜索相关信息...")
+                logger.info("[TaskHandler] 正在搜索相关信息...")
                 search_result = await search_executor(user_request, {})
                 if search_result.get("success"):
                     search_results = search_result.get("results", [])
-                    print(f"[TaskHandler] 找到 {len(search_results)} 条相关信息")
+                    logger.info(f"[TaskHandler] 找到 {len(search_results)} 条相关信息")
             except Exception as e:
-                print(f"[TaskHandler] 搜索失败: {e}")
+                logger.info(f"[TaskHandler] 搜索失败: {e}")
         
         # 步骤2: 生成图像（如果有图像生成器）
         if image_generator:
             try:
-                print("[TaskHandler] 正在生成配图...")
+                logger.info("[TaskHandler] 正在生成配图...")
                 # 提取主题
                 import re
                 theme_match = re.search(r'关于(.{2,20}?)(的|，|。)', user_request)
@@ -431,12 +434,12 @@ class PPTGenerationTaskHandler:
                         if img_result.get("success") and img_result.get("image_paths"):
                             images.extend(img_result["image_paths"])
                     except Exception as e:
-                        print(f"[TaskHandler] 图像生成失败: {e}")
+                        logger.info(f"[TaskHandler] 图像生成失败: {e}")
             except Exception as e:
-                print(f"[TaskHandler] 图像处理失败: {e}")
+                logger.info(f"[TaskHandler] 图像处理失败: {e}")
         
         # 步骤3: 执行PPT生成
-        print("[TaskHandler] 正在生成PPT...")
+        logger.info("[TaskHandler] 正在生成PPT...")
         
         # 生成输出路径
         import re

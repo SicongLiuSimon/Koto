@@ -12,7 +12,10 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 from web.reminder_manager import get_reminder_manager
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class CalendarManager:
     def __init__(self):
@@ -36,16 +39,16 @@ class CalendarManager:
                 with open(self.events_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.events = data if isinstance(data, list) else []
-                print(f"[日程] 已加载 {len(self.events)} 条事件")
+                logger.info(f"[日程] 已加载 {len(self.events)} 条事件")
             except Exception as e:
-                print(f"[日程] 加载失败: {e}")
+                logger.info(f"[日程] 加载失败: {e}")
 
     def _save(self):
         try:
             with open(self.events_file, 'w', encoding='utf-8') as f:
                 json.dump(self.events, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[日程] 保存失败: {e}")
+            logger.info(f"[日程] 保存失败: {e}")
 
     def list_events(self, limit: int = 100) -> List[Dict]:
         # 返回按开始时间排序的最近事件
@@ -83,7 +86,7 @@ class CalendarManager:
                     icon=os.path.join(self.project_root, 'assets', 'koto_icon.ico')
                 )
         except Exception as e:
-            print(f"⚠️ 创建日程提醒失败: {e}")
+            logger.warning(f"⚠️ 创建日程提醒失败: {e}")
 
         return event_id
 

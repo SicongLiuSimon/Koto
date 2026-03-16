@@ -15,7 +15,10 @@ from email.mime.application import MIMEApplication
 from email.header import decode_header
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class EmailAccount:
     """邮箱账户配置"""
@@ -99,9 +102,9 @@ class EmailManager:
                     )
                 
                 self.default_account = data.get('default_account')
-                print(f"[邮件] 已加载 {len(self.accounts)} 个邮箱账户")
+                logger.info(f"[邮件] 已加载 {len(self.accounts)} 个邮箱账户")
             except Exception as e:
-                print(f"[邮件] 配置加载失败: {e}")
+                logger.info(f"[邮件] 配置加载失败: {e}")
     
     def _save_accounts(self):
         """保存邮箱账户配置"""
@@ -124,9 +127,9 @@ class EmailManager:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
                 
-            print("[邮件] 配置已保存")
+            logger.info("[邮件] 配置已保存")
         except Exception as e:
-            print(f"[邮件] 配置保存失败: {e}")
+            logger.info(f"[邮件] 配置保存失败: {e}")
     
     def add_account(
         self,
@@ -166,10 +169,10 @@ class EmailManager:
                 self.default_account = email_address
             
             self._save_accounts()
-            print(f"[邮件] 账户已添加: {email_address}")
+            logger.info(f"[邮件] 账户已添加: {email_address}")
             return True
         except Exception as e:
-            print(f"[邮件] 账户添加失败: {e}")
+            logger.info(f"[邮件] 账户添加失败: {e}")
             return False
     
     def send_email(
@@ -199,7 +202,7 @@ class EmailManager:
         account_email = from_account or self.default_account
         
         if not account_email or account_email not in self.accounts:
-            print("[邮件] 未找到有效的发件账户")
+            logger.info("[邮件] 未找到有效的发件账户")
             return False
         
         account = self.accounts[account_email]
@@ -241,11 +244,11 @@ class EmailManager:
                 server.login(account.email_address, account.password)
                 server.sendmail(account.email_address, all_recipients, msg.as_string())
             
-            print(f"[邮件] 已发送: {subject} -> {', '.join(to_addrs)}")
+            logger.info(f"[邮件] 已发送: {subject} -> {', '.join(to_addrs)}")
             return True
             
         except Exception as e:
-            print(f"[邮件] 发送失败: {e}")
+            logger.info(f"[邮件] 发送失败: {e}")
             return False
     
     def fetch_emails(
@@ -267,7 +270,7 @@ class EmailManager:
         account_email = account_email or self.default_account
         
         if not account_email or account_email not in self.accounts:
-            print("[邮件] 未找到有效的账户")
+            logger.info("[邮件] 未找到有效的账户")
             return []
         
         account = self.accounts[account_email]
@@ -317,11 +320,11 @@ class EmailManager:
             imap.close()
             imap.logout()
             
-            print(f"[邮件] 已获取 {len(emails)} 封邮件")
+            logger.info(f"[邮件] 已获取 {len(emails)} 封邮件")
             return emails
             
         except Exception as e:
-            print(f"[邮件] 获取失败: {e}")
+            logger.info(f"[邮件] 获取失败: {e}")
             return []
     
     def _decode_header(self, header_value: str) -> str:

@@ -3,6 +3,9 @@
 # ═══════════════════════════════════════════════════════════════
 
 from flask import jsonify, request
+import logging
+
+logger = logging.getLogger(__name__)
 
 def register_memory_routes(app, get_memory_manager):
     """注册记忆系统API路由到Flask app
@@ -209,4 +212,4 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
     
-    print("🧠 增强记忆系统API路由已注册")
+    logger.info("🧠 增强记忆系统API路由已注册")

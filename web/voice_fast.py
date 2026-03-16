@@ -70,7 +70,7 @@ class FastVoiceRecognizer:
     
     def _detect_engines(self):
         """检测可用的语音引擎 - 优先Vosk本地离线"""
-        print("\n[快速语音] 检测可用引擎...")
+        logger.info("\n[快速语音] 检测可用引擎...")
         
         is_frozen = getattr(sys, 'frozen', False)
         
@@ -78,35 +78,35 @@ class FastVoiceRecognizer:
         if self._check_vosk():
             self.available_engines.append("vosk")
             self.primary_engine = "vosk"
-            print("  ✅ Vosk离线识别可用（推荐，无需网络）")
+            logger.info("  ✅ Vosk离线识别可用（推荐，无需网络）")
         
         # 2. Win32 SAPI（Windows内置离线备用）
         if self._check_win32_sapi():
             self.available_engines.append("win32_sapi")
             if not self.primary_engine:
                 self.primary_engine = "win32_sapi"
-            print("  ✅ Windows SAPI可用（本地离线）")
+            logger.info("  ✅ Windows SAPI可用（本地离线）")
         
         # 3. Windows语音识别 + speech_recognition（本地麦克风，Google API云端）
         if self._check_windows_sapi():
             self.available_engines.append("windows_sapi")
             if not self.primary_engine:
                 self.primary_engine = "windows_sapi"
-            print("  ✅ Windows语音识别可用（本地录音，须网络识别）")
+            logger.info("  ✅ Windows语音识别可用（本地录音，须网络识别）")
         
         # 4. speech_recognition库（仅本地录音，Google API已禁用）
         if self._check_speech_recognition():
             self.available_engines.append("speech_recognition")
             if not self.primary_engine:
                 self.primary_engine = "speech_recognition"
-            print("  ✅ speech_recognition可用")
+            logger.info("  ✅ speech_recognition可用")
         
         if not self.available_engines:
-            print("  ⚠️  无可用引擎，语音功能将受限")
+            logger.warning("  ⚠️  无可用引擎，语音功能将受限")
             self.available_engines.append("offline")
             self.primary_engine = "offline"
         
-        print(f"  主引擎: {self.primary_engine}")
+        logger.info(f"  主引擎: {self.primary_engine}")
     
     def _check_vosk(self) -> bool:
         """检查Vosk离线识别是否可用（所有环境均支持）"""
@@ -141,7 +141,7 @@ class FastVoiceRecognizer:
             self._schedule_vosk_download()
             return False
         except ImportError:
-            print("  ℹ️  vosk 未安装，运行: pip install vosk")
+            logger.info("  ℹ️  vosk 未安装，运行: pip install vosk")
             return False
         except Exception:
             return False
@@ -176,25 +176,25 @@ class FastVoiceRecognizer:
             url = f"https://alphacephei.com/vosk/models/{model_name}.zip"
             
             try:
-                print(f"[Vosk] 🔽 开始下载中文离线模型 (~50MB)...")
-                print(f"[Vosk] URL: {url}")
+                logger.info(f"[Vosk] 🔽 开始下载中文离线模型 (~50MB)...")
+                logger.info(f"[Vosk] URL: {url}")
                 _download_with_timeout(url, zip_path)
-                print(f"[Vosk] 📦 解压模型到 {models_dir}...")
+                logger.info(f"[Vosk] 📦 解压模型到 {models_dir}...")
                 with zipfile.ZipFile(zip_path, 'r') as zf:
                     zf.extractall(models_dir)
                 os.remove(zip_path)
-                print(f"[Vosk] ✅ 模型下载完成，重启应用生效: {target_dir}")
+                logger.info(f"[Vosk] ✅ 模型下载完成，重启应用生效: {target_dir}")
             except Exception as e:
-                print(f"[Vosk] ❌ 模型下载失败: {e}")
-                print(f"[Vosk]    手动下载: {url}")
-                print(f"[Vosk]    解压到: {models_dir}")
+                logger.error(f"[Vosk] ❌ 模型下载失败: {e}")
+                logger.info(f"[Vosk]    手动下载: {url}")
+                logger.info(f"[Vosk]    解压到: {models_dir}")
                 if os.path.exists(zip_path):
                     try:
                         os.remove(zip_path)
                     except Exception as e:
                         logger.debug("Cleanup of zip file failed: %s", e)
         
-        print("[Vosk] 📥 未找到本地模型，启动后台自动下载...")
+        logger.info("[Vosk] 📥 未找到本地模型，启动后台自动下载...")
         t = threading.Thread(target=_do_download, daemon=True)
         t.start()
     
@@ -210,7 +210,7 @@ class FastVoiceRecognizer:
                 if "speech_recognition" in self.available_engines:
                     self._init_sr_recognizer()
             except Exception as e:
-                print(f"[快速语音] 后台初始化出错（非严重）: {e}")
+                logger.info(f"[快速语音] 后台初始化出错（非严重）: {e}")
         
         # 只在主引擎是vosk或有sr时才后台初始化
         if self.primary_engine == "vosk" or "speech_recognition" in self.available_engines:
@@ -230,10 +230,10 @@ class FastVoiceRecognizer:
                 self._vosk_model_loading = True
                 from vosk import Model, SetLogLevel
                 SetLogLevel(-1)
-                print(f"[快速语音] 后台加载Vosk模型: {self.vosk_model_path}")
+                logger.info(f"[快速语音] 后台加载Vosk模型: {self.vosk_model_path}")
                 self.vosk_model = Model(self.vosk_model_path)
             except Exception as e:
-                print(f"[快速语音] Vosk模型加载失败: {e}")
+                logger.info(f"[快速语音] Vosk模型加载失败: {e}")
             finally:
                 self._vosk_model_loading = False
     
@@ -244,7 +244,7 @@ class FastVoiceRecognizer:
                 if self.vosk_model is None:
                     from vosk import Model, SetLogLevel
                     SetLogLevel(-1)
-                    print(f"[快速语音] 立即加载Vosk模型: {self.vosk_model_path}")
+                    logger.info(f"[快速语音] 立即加载Vosk模型: {self.vosk_model_path}")
                     self.vosk_model = Model(self.vosk_model_path)
     
     def _init_sr_recognizer(self):
@@ -260,7 +260,7 @@ class FastVoiceRecognizer:
                 self._sr_recognizer.pause_threshold = 0.3  # 更快检测
                 self._sr_recognizer.non_speaking_duration = 0.2  # 更快
             except Exception as e:
-                print(f"[快速语音] 初始化speech_recognition失败: {e}")
+                logger.info(f"[快速语音] 初始化speech_recognition失败: {e}")
     
     def get_sr_recognizer(self):
         """获取或创建speech_recognition识别器"""
@@ -309,7 +309,7 @@ class FastVoiceRecognizer:
             result = self._recognize_with_vosk(timeout, language)
             if result.success:
                 return result
-            print("[快速语音] Vosk失败，降级Win32 SAPI...")
+            logger.info("[快速语音] Vosk失败，降级Win32 SAPI...")
         
         # 降级：Win32 SAPI（Windows内置，完全离线）
         if "win32_sapi" in self.available_engines:
@@ -350,7 +350,7 @@ class FastVoiceRecognizer:
                 frames_per_buffer=CHUNK
             )
             
-            print(f"[快速语音] 🎤 Vosk离线识别中（{timeout}秒）...")
+            logger.info(f"[快速语音] 🎤 Vosk离线识别中（{timeout}秒）...")
             
             # 优化：更快的静音检测和识别停止
             silence_count = 0
@@ -440,7 +440,7 @@ class FastVoiceRecognizer:
                 )
                 
         except Exception as e:
-            print(f"[快速语音] Vosk识别错误: {e}")
+            logger.error(f"[快速语音] Vosk识别错误: {e}")
             return VoiceResult(
                 success=False,
                 message=f"Vosk识别错误: {str(e)}",
@@ -465,7 +465,7 @@ class FastVoiceRecognizer:
             recognizer.non_speaking_duration = 0.2  # 从0.3改为0.2，更快反应
             
             with sr.Microphone(sample_rate=16000) as source:
-                print(f"[快速语音] Google API识别（{timeout}秒）...")          
+                logger.info(f"[快速语音] Google API识别（{timeout}秒）...")          
                 # 优化：大大减少噪音检测时间（从0.15秒改为0.05秒）
                 try:
                     recognizer.adjust_for_ambient_noise(source, duration=0.05)
@@ -493,7 +493,7 @@ class FastVoiceRecognizer:
                             engine="google"
                         )
                     except sr.RequestError as e:
-                        print(f"[快速语音] Google API不可用: {e}")
+                        logger.info(f"[快速语音] Google API不可用: {e}")
                         return VoiceResult(
                             success=False,
                             message="Google API不可用（网络问题），请使用离线识别",
@@ -508,7 +508,7 @@ class FastVoiceRecognizer:
                     )
         
         except Exception as e:
-            print(f"[快速语音] 识别错误: {e}")
+            logger.error(f"[快速语音] 识别错误: {e}")
             return VoiceResult(
                 success=False,
                 message=f"识别失败: {str(e)}",
@@ -525,7 +525,7 @@ class FastVoiceRecognizer:
             recognizer.pause_threshold = 0.4
             recognizer.non_speaking_duration = 0.3
             with sr.Microphone(sample_rate=16000) as source:
-                print(f"[快速语音] 本地麦克风录音（{timeout}秒）...")
+                logger.info(f"[快速语音] 本地麦克风录音（{timeout}秒）...")
                 try:
                     recognizer.adjust_for_ambient_noise(source, duration=0.05)
                 except Exception:
@@ -572,7 +572,7 @@ class FastVoiceRecognizer:
             # 激活识别引擎
             reco_engine.SetRecognizerState(1)   # 1 = SPRST_ACTIVE
 
-            print(f"[Win32 SAPI] 等待语音输入 (最多{timeout}秒)...")
+            logger.info(f"[Win32 SAPI] 等待语音输入 (最多{timeout}秒)...")
             timeout_ms = timeout * 1000
             result_text = None
 
@@ -605,7 +605,7 @@ class FastVoiceRecognizer:
                 pass
 
             if result_text:
-                print(f"[Win32 SAPI] 识别结果: {result_text}")
+                logger.info(f"[Win32 SAPI] 识别结果: {result_text}")
                 return VoiceResult(success=True, text=result_text, engine="win32_sapi")
             else:
                 return VoiceResult(
@@ -616,7 +616,7 @@ class FastVoiceRecognizer:
 
         except Exception as e:
             import traceback
-            print(f"[Win32 SAPI] 错误: {traceback.format_exc()}")
+            logger.error(f"[Win32 SAPI] 错误: {traceback.format_exc()}")
             return VoiceResult(
                 success=False,
                 message=f"Windows语音识别错误: {str(e)}",
@@ -753,7 +753,7 @@ def _streaming_vosk(recognizer_obj, timeout: int):
             frames_per_buffer=CHUNK
         )
 
-        print(f"[流式语音] Vosk离线识别（{timeout}秒）...")
+        logger.info(f"[流式语音] Vosk离线识别（{timeout}秒）...")
 
         silence_count = 0
         max_silence = 8     # 0.4秒静音即停（更快响应）
@@ -855,7 +855,7 @@ def _streaming_vosk(recognizer_obj, timeout: int):
             yield {"type": "error", "message": "识别超时", "engine": "vosk"}
             
     except Exception as e:
-        print(f"[流式语音] Vosk错误: {e}")
+        logger.error(f"[流式语音] Vosk错误: {e}")
         import traceback
         traceback.print_exc()
         yield {"type": "error", "message": f"识别失败: {str(e)}", "engine": "vosk"}
@@ -879,7 +879,7 @@ def _streaming_google(timeout: int):
         last_text = ""
         
         with sr.Microphone(sample_rate=16000) as source:
-            print(f"[流式语音] Google API识别（{timeout}秒）...")
+            logger.info(f"[流式语音] Google API识别（{timeout}秒）...")
             recognizer.adjust_for_ambient_noise(source, duration=0.15)
             
             start_time = time.time()
@@ -922,7 +922,7 @@ def _streaming_google(timeout: int):
                                 except sr.UnknownValueError:
                                     pass
                                 except sr.RequestError as e:
-                                    print(f"[流式] Google API错误: {e}")
+                                    logger.error(f"[流式] Google API错误: {e}")
                                     
                                 last_recognition_time = time.time()
                         
@@ -957,7 +957,7 @@ def _streaming_google(timeout: int):
                 yield {"type": "error", "message": "识别失败", "engine": "error"}
                     
     except Exception as e:
-        print(f"[流式语音] Google错误: {e}")
+        logger.error(f"[流式语音] Google错误: {e}")
         import traceback
         traceback.print_exc()
         yield {"type": "error", "message": f"识别失败: {str(e)}", "engine": "error"}
@@ -965,14 +965,14 @@ def _streaming_google(timeout: int):
 
 if __name__ == "__main__":
     # 测试
-    print("🎤 快速语音识别测试")
-    print("="*50)
+    logger.info("🎤 快速语音识别测试")
+    logger.info("="*50)
     
     recognizer = get_recognizer()
-    print(f"\n主引擎: {recognizer.primary_engine}")
-    print(f"可用引擎: {recognizer.available_engines}")
+    logger.info(f"\n主引擎: {recognizer.primary_engine}")
+    logger.info(f"可用引擎: {recognizer.available_engines}")
     
-    print("\n请在5秒内说话...")
+    logger.info("\n请在5秒内说话...")
     result = recognizer.recognize(timeout=5)
     
-    print(f"\n结果: {result.to_dict()}")
+    logger.info(f"\n结果: {result.to_dict()}")

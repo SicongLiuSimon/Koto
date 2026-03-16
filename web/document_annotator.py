@@ -18,7 +18,10 @@ from copy import deepcopy
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class DocumentAnnotator:
     """文档自动标注系统"""
@@ -59,7 +62,7 @@ class DocumentAnnotator:
         
         # 复制文件
         shutil.copy2(file_path, revised_path)
-        print(f"[Annotator] 📋 已创建工作副本: {os.path.basename(revised_path)}")
+        logger.info(f"[Annotator] 📋 已创建工作副本: {os.path.basename(revised_path)}")
         
         return file_path, revised_path
     
@@ -413,7 +416,7 @@ class DocumentAnnotator:
                 }
         
         # 第2步：模糊匹配（容错处理）
-        print(f"[Annotator] ⚠️ 精确匹配失败，启用模糊匹配: {target_text[:20]}...")
+        logger.warning(f"[Annotator] ⚠️ 精确匹配失败，启用模糊匹配: {target_text[:20]}...")
         
         best_match = None
         best_ratio = 0
@@ -430,7 +433,7 @@ class DocumentAnnotator:
         
         # 如果相似度超过阈值，使用模糊匹配
         if best_ratio >= self.min_similarity and best_match:
-            print(f"[Annotator] ✓ 模糊匹配成功 (相似度: {best_ratio:.2%})")
+            logger.info(f"[Annotator] ✓ 模糊匹配成功 (相似度: {best_ratio:.2%})")
             
             return {
                 "found": True,
@@ -480,7 +483,7 @@ class DocumentAnnotator:
                 # 传递original_text以实现精确标注
                 return self._inject_comment(doc, para_obj, suggestion, original_text)
         except Exception as e:
-            print(f"[Annotator] ⚠️ 批注注入失败，回退高亮: {str(e)}")
+            logger.warning(f"[Annotator] ⚠️ 批注注入失败，回退高亮: {str(e)}")
 
         # 回退为高亮文字
         try:
@@ -495,7 +498,7 @@ class DocumentAnnotator:
             new_run.font.bold = True
             return True
         except Exception as e:
-            print(f"[Annotator] ✗ 注入标注失败: {str(e)}")
+            logger.info(f"[Annotator] ✗ 注入标注失败: {str(e)}")
             return False
 
     @staticmethod
@@ -594,7 +597,7 @@ class DocumentAnnotator:
                             </w:r>'''
                         )
                         p.insert(list(p).index(end_run) + 2, commentRef_run)
-                        print(f"[Annotator] ✅ 精确标注: {target_text[:30]}...")
+                        logger.info(f"[Annotator] ✅ 精确标注: {target_text[:30]}...")
                     else:
                         raise Exception("End run not found")
                 else:
@@ -622,7 +625,7 @@ class DocumentAnnotator:
                     </w:r>'''
                 )
                 p.append(commentRef_run)
-                print(f"[Annotator] ⚠️ 回退到整段标注")
+                logger.warning(f"[Annotator] ⚠️ 回退到整段标注")
             
             # 4. 在comments.xml中添加批注内容
             date_str = datetime.datetime.now().isoformat()
@@ -655,11 +658,11 @@ class DocumentAnnotator:
             
             comments_root.append(comment_xml)
             
-            print(f"[Annotator] ✅ Word批注已添加（ID: {comment_id}）")
+            logger.info(f"[Annotator] ✅ Word批注已添加（ID: {comment_id}）")
             return True
             
         except Exception as e:
-            print(f"[Annotator] ⚠️ Word批注插入失败: {str(e)}")
+            logger.warning(f"[Annotator] ⚠️ Word批注插入失败: {str(e)}")
             import traceback
             traceback.print_exc()
             return False
@@ -693,7 +696,7 @@ class DocumentAnnotator:
                 "details": [...]
             }
         """
-        print(f"[Annotator] 🔄 开始处理文档...")
+        logger.info(f"[Annotator] 🔄 开始处理文档...")
         
         # 第1步：提取文本
         text_data = self.extract_text_from_word(file_path)
@@ -787,7 +790,7 @@ class DocumentAnnotator:
         # 第5步：保存修改
         try:
             doc.save(file_path)
-            print(f"[Annotator] 💾 文档已保存")
+            logger.info(f"[Annotator] 💾 文档已保存")
         except Exception as e:
             return {
                 "success": False,
@@ -826,9 +829,9 @@ class DocumentAnnotator:
                 "failed": 1
             }
         """
-        print("=" * 60)
-        print("📑 Koto 文档自动标注系统")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("📑 Koto 文档自动标注系统")
+        logger.info("=" * 60)
         
         # Step 1: 预处理 - 创建副本
         try:
@@ -845,11 +848,11 @@ class DocumentAnnotator:
         if result.get("success"):
             result["original_file"] = original_file
             result["revised_file"] = revised_file
-            print(f"[Annotator] ✅ 完成！已应用 {result['applied']} 个标注")
+            logger.info(f"[Annotator] ✅ 完成！已应用 {result['applied']} 个标注")
             return result
         else:
             return result
 
 
 if __name__ == "__main__":
-    print("文档自动标注系统已准备就绪")
+    logger.info("文档自动标注系统已准备就绪")

@@ -16,8 +16,12 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import logging
 
 # ── 工作文件扩展名 → 分类 ─────────────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
+
 WORK_FILE_TYPES: Dict[str, str] = {
     ".doc":  "Word文档",
     ".docx": "Word文档",
@@ -318,14 +322,14 @@ class WorkFileLibrary:
                         "running": False, "scanned": scanned,
                         "indexed": indexed, "done": True
                     })
-                print(f"[WorkFileLibrary] ✅ 扫描完成: 检查 {scanned} 文件，收录 {indexed} 个工作文件")
+                logger.info(f"[WorkFileLibrary] ✅ 扫描完成: 检查 {scanned} 文件，收录 {indexed} 个工作文件")
 
             except Exception as exc:
                 with self._lock:
                     self._scan_status.update({
                         "running": False, "done": True, "error": str(exc)
                     })
-                print(f"[WorkFileLibrary] ❌ 扫描出错: {exc}")
+                logger.error(f"[WorkFileLibrary] ❌ 扫描出错: {exc}")
 
         t = threading.Thread(target=_worker, name="WorkFileLibraryScan", daemon=True)
         self._scan_thread = t
@@ -352,7 +356,7 @@ class WorkFileLibrary:
                     rows
                 )
         except Exception as exc:
-            print(f"[WorkFileLibrary] ⚠️ 批量写入出错: {exc}")
+            logger.warning(f"[WorkFileLibrary] ⚠️ 批量写入出错: {exc}")
 
     # ── Search ────────────────────────────────────────────────────────────────
 
@@ -392,7 +396,7 @@ class WorkFileLibrary:
                     params + [limit * 2]
                 ).fetchall()
         except Exception as exc:
-            print(f"[WorkFileLibrary] 搜索出错: {exc}")
+            logger.info(f"[WorkFileLibrary] 搜索出错: {exc}")
             return []
 
         results: List[Dict[str, Any]] = []

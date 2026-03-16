@@ -22,7 +22,10 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class OrganizeCleanup:
     """智能整合清理 _organize 目录"""
@@ -532,7 +535,7 @@ class OrganizeCleanup:
 
     def _log(self, msg: str):
         self.log.append(msg)
-        print(msg)
+        logger.info(msg)
 
 
 # ──────────────────────────────────────────────
@@ -545,23 +548,23 @@ if __name__ == "__main__":
     ai = "--ai-rename" in sys.argv
 
     if not dry:
-        print("⚠️  即将实际执行整合清理！")
-        print("   加 --dry-run 参数可以先预演")
+        logger.warning("⚠️  即将实际执行整合清理！")
+        logger.info("   加 --dry-run 参数可以先预演")
         confirm = input("   确认执行? (y/N): ").strip().lower()
         if confirm != "y":
-            print("已取消")
+            logger.info("已取消")
             sys.exit(0)
 
     cleanup = OrganizeCleanup()
     report = cleanup.run(dry_run=dry, ai_rename=ai)
 
-    print(f"\n===== 清理完成 =====")
-    print(f"扫描文件夹: {report['total_folders_scanned']}")
-    print(f"相似组数: {report['similarity_groups']}")
-    print(f"合并计划: {report['merge_plans']}")
-    print(f"合并文件: {report['merged_files']}")
-    print(f"去重文件: {report['deduped_files']}")
-    print(f"删除文件夹: {report['removed_folders']}")
-    print(f"清理空文件夹: {report['empty_cleaned']}")
+    logger.info(f"\n===== 清理完成 =====")
+    logger.info(f"扫描文件夹: {report['total_folders_scanned']}")
+    logger.info(f"相似组数: {report['similarity_groups']}")
+    logger.info(f"合并计划: {report['merge_plans']}")
+    logger.info(f"合并文件: {report['merged_files']}")
+    logger.info(f"去重文件: {report['deduped_files']}")
+    logger.info(f"删除文件夹: {report['removed_folders']}")
+    logger.info(f"清理空文件夹: {report['empty_cleaned']}")
     if ai:
-        print(f"AI 重命名: {report['ai_renames']}")
+        logger.info(f"AI 重命名: {report['ai_renames']}")

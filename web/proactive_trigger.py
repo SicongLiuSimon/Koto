@@ -16,7 +16,10 @@ from dataclasses import dataclass
 from enum import Enum
 import threading
 import time
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class TriggerType(Enum):
     """触发器类型"""
@@ -582,7 +585,7 @@ class ProactiveTriggerSystem:
                     best_decision.content['trigger_type'] = trigger.trigger_type.value
                 
             except Exception as e:
-                print(f"触发器 {trigger_id} 执行出错: {e}")
+                logger.info(f"触发器 {trigger_id} 执行出错: {e}")
                 continue
         
         # 记录决策
@@ -1162,14 +1165,14 @@ class ProactiveTriggerSystem:
             daemon=True
         )
         self.check_thread.start()
-        print(f"✅ 主动交互触发系统已启动（检查间隔: {check_interval}秒）")
+        logger.info(f"✅ 主动交互触发系统已启动（检查间隔: {check_interval}秒）")
     
     def stop_monitoring(self):
         """停止监控"""
         self.running = False
         if self.check_thread:
             self.check_thread.join(timeout=5)
-        print("🛑 主动交互触发系统已停止")
+        logger.info("🛑 主动交互触发系统已停止")
     
     def _monitoring_loop(self, interval: int, user_id: str):
         """监控循环"""
@@ -1179,18 +1182,18 @@ class ProactiveTriggerSystem:
                 decision = self.evaluate_interaction_need(user_id)
                 
                 if decision and decision.should_interact:
-                    print(f"\n🔔 触发主动交互:")
-                    print(f"  类型: {decision.interaction_type.value}")
-                    print(f"  优先级: {decision.priority}")
-                    print(f"  原因: {decision.reason}")
-                    print(f"  得分: {decision.final_score:.2f}")
-                    print(f"  (紧急:{decision.urgency_score:.2f} + 重要:{decision.importance_score:.2f} - 打扰:{decision.disturbance_cost:.2f})")
+                    logger.info(f"\n🔔 触发主动交互:")
+                    logger.info(f"  类型: {decision.interaction_type.value}")
+                    logger.info(f"  优先级: {decision.priority}")
+                    logger.info(f"  原因: {decision.reason}")
+                    logger.info(f"  得分: {decision.final_score:.2f}")
+                    logger.info(f"  (紧急:{decision.urgency_score:.2f} + 重要:{decision.importance_score:.2f} - 打扰:{decision.disturbance_cost:.2f})")
                     
                     # 执行交互
                     self.execute_interaction(decision, user_id)
                 
             except Exception as e:
-                print(f"监控循环出错: {e}")
+                logger.info(f"监控循环出错: {e}")
             
             # 等待下一次检查
             time.sleep(interval)

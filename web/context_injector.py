@@ -16,7 +16,10 @@ import re
 from typing import Dict, List, Set, Optional, Tuple
 from enum import Enum
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class TaskType(Enum):
     """任务类型枚举"""
@@ -217,7 +220,7 @@ class ContextBuilder:
 - **内存**: {mem_used:.1f}GB / {mem_total:.1f}GB（{mem_percent:.1f}%）
 - **可用内存**: {mem_avail:.1f}GB"""
         except Exception as e:
-            print(f"[Debug] build_cpu_memory_context error: {type(e).__name__}: {e}")
+            logger.info(f"[Debug] build_cpu_memory_context error: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
             return ""
@@ -245,7 +248,7 @@ class ContextBuilder:
             
             return "\n".join(disk_lines)
         except Exception as e:
-            print(f"[Debug] build_disk_context error: {type(e).__name__}: {e}")
+            logger.info(f"[Debug] build_disk_context error: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
             return ""
@@ -270,7 +273,7 @@ class ContextBuilder:
             
             return "\n".join(lines)
         except Exception as e:
-            print(f"[Debug] build_processes_context error: {type(e).__name__}: {e}")
+            logger.info(f"[Debug] build_processes_context error: {type(e).__name__}: {e}")
             return ""
     
     @staticmethod
@@ -291,7 +294,7 @@ class ContextBuilder:
 - **虚拟环境**: {'✓ 已激活' if in_venv else '✗ 未激活'}
 - **已安装包**: {pkg_count} 个"""
         except Exception as e:
-            print(f"[Debug] build_python_env_context error: {type(e).__name__}: {e}")
+            logger.info(f"[Debug] build_python_env_context error: {type(e).__name__}: {e}")
             return ""
     
     @staticmethod

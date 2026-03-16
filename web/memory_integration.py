@@ -7,7 +7,10 @@
 
 import json
 from typing import Dict, List, Optional
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class MemoryIntegration:
     """记忆系统集成"""
@@ -118,7 +121,7 @@ AI：{ai_msg[:400]}
             # 更新用户画像
             if profile_updates:
                 memory_manager.user_profile.update_from_extraction(profile_updates)
-                print(f"[MemoryIntegration] 🧠 学习到新特征：{list(profile_updates.keys())}")
+                logger.info(f"[MemoryIntegration] 🧠 学习到新特征：{list(profile_updates.keys())}")
             
             # 保存显式记忆
             if extracted.get("memories_to_save"):
@@ -128,7 +131,7 @@ AI：{ai_msg[:400]}
                         category=mem.get("category", "general"),
                         source="extraction"
                     )
-                print(f"[MemoryIntegration] 💾 保存了 {len(extracted['memories_to_save'])} 条记忆")
+                logger.info(f"[MemoryIntegration] 💾 保存了 {len(extracted['memories_to_save'])} 条记忆")
             
             return {
                 "success": True,
@@ -137,12 +140,12 @@ AI：{ai_msg[:400]}
             }
             
         except json.JSONDecodeError as e:
-            print(f"[MemoryIntegration] ⚠️  JSON解析失败: {e}")
-            print(f"[MemoryIntegration] 原始响应: {response[:200]}...")
+            logger.warning(f"[MemoryIntegration] ⚠️  JSON解析失败: {e}")
+            logger.info(f"[MemoryIntegration] 原始响应: {response[:200]}...")
             return {"success": False, "error": "JSON解析失败"}
             
         except Exception as e:
-            print(f"[MemoryIntegration] ❌ 提取失败: {e}")
+            logger.error(f"[MemoryIntegration] ❌ 提取失败: {e}")
             return {"success": False, "error": str(e)}
     
     @staticmethod
@@ -227,16 +230,16 @@ def get_enhanced_memory_manager():
             return EnhancedMemoryManager()
         except ImportError:
             # 降级到基础版本
-            print("[MemoryIntegration] ⚠️  降级到基础记忆管理器")
+            logger.warning("[MemoryIntegration] ⚠️  降级到基础记忆管理器")
             from memory_manager import MemoryManager
             return MemoryManager()
 
 
 if __name__ == "__main__":
     # 测试
-    print("=" * 60)
-    print("  记忆集成模块测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("  记忆集成模块测试")
+    logger.info("=" * 60)
     
     # 测试提取判断
     test_cases = [
@@ -247,18 +250,18 @@ if __name__ == "__main__":
         ("我在开发一个AI项目，需要用到TensorFlow和PyTorch", True)
     ]
     
-    print("\n提取判断测试：")
+    logger.info("\n提取判断测试：")
     for msg, expected in test_cases:
         result = MemoryIntegration.should_extract(msg, "")
         status = "✅" if result == expected else "❌"
-        print(f"{status} '{msg}' -> {result} (期望: {expected})")
+        logger.info(f"{status} '{msg}' -> {result} (期望: {expected})")
     
     # 测试prompt生成
-    print("\n提取Prompt测试：")
+    logger.info("\n提取Prompt测试：")
     prompt = MemoryIntegration.create_extraction_prompt(
         "我喜欢简洁的Python代码",
         "好的，我会为你生成简洁的代码"
     )
-    print(prompt[:200] + "...")
+    logger.info(prompt[:200] + "...")
     
-    print("\n✅ 测试完成")
+    logger.info("\n✅ 测试完成")

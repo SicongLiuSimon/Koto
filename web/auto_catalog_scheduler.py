@@ -8,7 +8,10 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class AutoCatalogScheduler:
     """自动归纳调度器，负责定时执行文件夹归纳并验证备份"""
@@ -97,7 +100,7 @@ class AutoCatalogScheduler:
             self.config['auto_catalog']['source_directories'] = source_dirs
 
         self._save_config()
-        print(f"[自动归纳] 已启用，每日 {schedule_time} 执行")
+        logger.info(f"[自动归纳] 已启用，每日 {schedule_time} 执行")
 
         # 注册定时任务
         self._register_scheduled_task()
@@ -109,7 +112,7 @@ class AutoCatalogScheduler:
 
         self.config['auto_catalog']['enabled'] = False
         self._save_config()
-        print("[自动归纳] 已禁用")
+        logger.info("[自动归纳] 已禁用")
 
         # 取消定时任务
         self._cancel_scheduled_task()
@@ -136,13 +139,13 @@ class AutoCatalogScheduler:
             time_str=schedule_time
         )
 
-        print(f"[自动归纳] 任务已注册，ID: {self.catalog_task_id}")
+        logger.info(f"[自动归纳] 任务已注册，ID: {self.catalog_task_id}")
 
     def _cancel_scheduled_task(self):
         """取消定时任务"""
         if self.task_scheduler and self.catalog_task_id:
             self.task_scheduler.cancel_task(self.catalog_task_id)
-            print(f"[自动归纳] 任务已取消，ID: {self.catalog_task_id}")
+            logger.info(f"[自动归纳] 任务已取消，ID: {self.catalog_task_id}")
             self.catalog_task_id = None
 
     def execute_auto_catalog(self) -> Dict[str, Any]:
@@ -152,7 +155,7 @@ class AutoCatalogScheduler:
         Returns:
             执行结果字典
         """
-        print(f"\n[自动归纳] 开始执行 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"\n[自动归纳] 开始执行 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         source_dirs = self.get_source_directories()
 
@@ -188,7 +191,7 @@ class AutoCatalogScheduler:
         errors = []
 
         for source_dir in source_dirs:
-            print(f"[自动归纳] 处理目录: {source_dir}")
+            logger.info(f"[自动归纳] 处理目录: {source_dir}")
 
             try:
                 # 1. 执行归纳
@@ -204,7 +207,7 @@ class AutoCatalogScheduler:
                 total_files += files_count
                 total_organized += organized_count
 
-                print(f"[自动归纳] 归纳完成: {organized_count}/{files_count} 个文件")
+                logger.info(f"[自动归纳] 归纳完成: {organized_count}/{files_count} 个文件")
 
                 # 2. 备份验证
                 entries = result.get('entries', [])
@@ -217,7 +220,7 @@ class AutoCatalogScheduler:
 
             except Exception as e:
                 error_msg = f"处理 {source_dir} 时出错: {str(e)}"
-                print(f"[自动归纳] {error_msg}")
+                logger.info(f"[自动归纳] {error_msg}")
                 errors.append(error_msg)
 
         # 3. ★ 整合去重清理（合并相似文件夹，删除重复文件）
@@ -226,12 +229,12 @@ class AutoCatalogScheduler:
         # 4. 生成完成报告
         report = self._generate_completion_report(total_files, total_organized, total_backed_up, errors)
 
-        print(f"[自动归纳] 执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  总文件数: {total_files}")
-        print(f"  已归纳: {total_organized}")
-        print(f"  已备份: {total_backed_up}")
+        logger.info(f"[自动归纳] 执行完成 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"  总文件数: {total_files}")
+        logger.info(f"  已归纳: {total_organized}")
+        logger.info(f"  已备份: {total_backed_up}")
         if cleanup_result:
-            print(f"  去重合并: {cleanup_result.get('deduped_files', 0)} 文件, {cleanup_result.get('removed_folders', 0)} 文件夹")
+            logger.info(f"  去重合并: {cleanup_result.get('deduped_files', 0)} 文件, {cleanup_result.get('removed_folders', 0)} 文件夹")
 
         return {
             "success": len(errors) == 0,
@@ -286,7 +289,7 @@ class AutoCatalogScheduler:
             organized_exists = os.path.exists(organized_path)
 
             if not organized_exists:
-                print(f"[备份] 警告: 归纳文件不存在 {organized_path}")
+                logger.info(f"[备份] 警告: 归纳文件不存在 {organized_path}")
                 continue
 
             # 文件已成功归纳，记录备份信息
@@ -309,7 +312,7 @@ class AutoCatalogScheduler:
             with open(manifest_path, 'w', encoding='utf-8') as f:
                 json.dump(backup_manifest, f, ensure_ascii=False, indent=2)
 
-            print(f"[备份] 清单已保存: {manifest_path}")
+            logger.info(f"[备份] 清单已保存: {manifest_path}")
 
             return {
                 "success": True,
@@ -371,7 +374,7 @@ class AutoCatalogScheduler:
         with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report_content)
 
-        print(f"[报告] 已生成: {report_path}")
+        logger.info(f"[报告] 已生成: {report_path}")
         return report_path
 
     def manual_catalog_now(self) -> Dict[str, Any]:
@@ -393,14 +396,14 @@ class AutoCatalogScheduler:
 
             cleanup = OrganizeCleanup(organize_root=organize_root)
             report = cleanup.run(dry_run=False, ai_rename=False)
-            print(f"[自动归纳] 整合清理完成: 去重 {report.get('deduped_files', 0)} 文件, 合并 {report.get('removed_folders', 0)} 文件夹")
+            logger.info(f"[自动归纳] 整合清理完成: 去重 {report.get('deduped_files', 0)} 文件, 合并 {report.get('removed_folders', 0)} 文件夹")
             return {
                 "deduped_files": report.get("deduped_files", 0),
                 "removed_folders": report.get("removed_folders", 0),
                 "merged_files": report.get("merged_files", 0),
             }
         except Exception as e:
-            print(f"[自动归纳] 整合清理失败: {e}")
+            logger.info(f"[自动归纳] 整合清理失败: {e}")
             return None
 
 

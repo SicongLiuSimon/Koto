@@ -12,7 +12,10 @@ from datetime import datetime
 from typing import List, Dict
 import pyperclip  # pip install pyperclip
 import re
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class ClipboardManager:
     """剪贴板历史管理器"""
@@ -44,9 +47,9 @@ class ClipboardManager:
             try:
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     self.history = json.load(f)
-                print(f"[剪贴板] 已加载 {len(self.history)} 条历史")
+                logger.info(f"[剪贴板] 已加载 {len(self.history)} 条历史")
             except Exception as e:
-                print(f"[剪贴板] 历史加载失败: {e}")
+                logger.info(f"[剪贴板] 历史加载失败: {e}")
                 self.history = []
     
     def _save_history(self):
@@ -55,11 +58,11 @@ class ClipboardManager:
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(self.history, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[剪贴板] 历史保存失败: {e}")
+            logger.info(f"[剪贴板] 历史保存失败: {e}")
     
     def _monitor_clipboard(self):
         """监控剪贴板线程"""
-        print("[剪贴板] 监控已启动")
+        logger.info("[剪贴板] 监控已启动")
         
         while self.running:
             try:
@@ -73,7 +76,7 @@ class ClipboardManager:
                 time.sleep(0.5)  # 每0.5秒检查一次
                 
             except Exception as e:
-                print(f"[剪贴板] 监控错误: {e}")
+                logger.error(f"[剪贴板] 监控错误: {e}")
                 time.sleep(1)
     
     def _add_to_history(self, content: str):
@@ -111,12 +114,12 @@ class ClipboardManager:
             self.history = self.history[:self.max_items]
         
         self._save_history()
-        print(f"[剪贴板] 新记录: {item['preview'][:50]}...")
+        logger.info(f"[剪贴板] 新记录: {item['preview'][:50]}...")
     
     def start_monitoring(self):
         """启动监控"""
         if self.running:
-            print("[剪贴板] 监控已在运行")
+            logger.info("[剪贴板] 监控已在运行")
             return
         
         self.running = True
@@ -128,7 +131,7 @@ class ClipboardManager:
         self.running = False
         if self._thread:
             self._thread.join(timeout=2)
-        print("[剪贴板] 监控已停止")
+        logger.info("[剪贴板] 监控已停止")
     
     def get_history(self, limit: int = None) -> List[Dict]:
         """获取历史记录"""
@@ -162,7 +165,7 @@ class ClipboardManager:
                 content = self.history[index_or_content]['content']
                 pyperclip.copy(content)
                 self.last_content = content  # 防止重复添加
-                print(f"[剪贴板] 已复制历史记录 #{index_or_content}")
+                logger.info(f"[剪贴板] 已复制历史记录 #{index_or_content}")
                 return True
             return False
 
@@ -171,7 +174,7 @@ class ClipboardManager:
                 if item['content'] == index_or_content:
                     pyperclip.copy(item['content'])
                     self.last_content = item['content']
-                    print(f"[剪贴板] 已复制历史记录 #{idx}")
+                    logger.info(f"[剪贴板] 已复制历史记录 #{idx}")
                     return True
             return False
 
@@ -181,7 +184,7 @@ class ClipboardManager:
         """清空历史记录"""
         self.history = []
         self._save_history()
-        print("[剪贴板] 历史已清空")
+        logger.info("[剪贴板] 历史已清空")
 
     def _classify_content(self, content: str) -> str:
         """简单内容分类"""

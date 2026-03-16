@@ -7,7 +7,10 @@ Windows 本地通知封装
 import os
 import threading
 from typing import Optional
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 _toaster = None
 
@@ -20,7 +23,7 @@ def _get_toaster():
         from win10toast import ToastNotifier
         _toaster = ToastNotifier()
     except Exception as e:
-        print(f"⚠️ 无法初始化系统通知: {e}")
+        logger.warning(f"⚠️ 无法初始化系统通知: {e}")
         _toaster = None
     return _toaster
 
@@ -43,7 +46,7 @@ def show_toast(title: str, msg: str, duration: int = 5, icon_path: Optional[str]
                 threaded=True
             )
         except Exception as e:
-            print(f"⚠️ 系统通知发送失败: {e}")
+            logger.warning(f"⚠️ 系统通知发送失败: {e}")
 
     threading.Thread(target=_run, daemon=True).start()
     return True

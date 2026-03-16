@@ -10,7 +10,10 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 import mimetypes
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class FileAnalyzer:
     """文件内容分析器（规则 + AI 混合分析）"""
@@ -267,7 +270,7 @@ class FileAnalyzer:
                 )
                 raw = (resp.text or "").strip()
             except Exception as e:
-                print(f"[FileAnalyzer AI/Cloud] ❌ Gemini 分类失败: {e}")
+                logger.error(f"[FileAnalyzer AI/Cloud] ❌ Gemini 分类失败: {e}")
                 return None
         else:
             # ═══ 本地模式：使用 Ollama ═══
@@ -317,10 +320,10 @@ class FileAnalyzer:
                 
                 raw = (resp.json().get("message", {}) or {}).get("content", "")
             except requests.exceptions.Timeout:
-                print(f"[FileAnalyzer AI] ⏱️ 超时: {file_name[:30]}")
+                logger.info(f"[FileAnalyzer AI] ⏱️ 超时: {file_name[:30]}")
                 return None
             except Exception as e:
-                print(f"[FileAnalyzer AI] ❌ Ollama 错误: {e}")
+                logger.error(f"[FileAnalyzer AI] ❌ Ollama 错误: {e}")
                 return None
         
         # ═══ 解析 AI 返回的 JSON ═══
@@ -354,7 +357,7 @@ class FileAnalyzer:
                 confidence = 0.6  # AI 给出结果视为至少 0.6 置信度
             
             source = "Cloud/Gemini" if is_cloud else "Local/Ollama"
-            print(f"[FileAnalyzer AI] ✅ {file_name[:30]} → {industry}/{category} ({confidence:.2f}) entity={entity} [{source}]")
+            logger.info(f"[FileAnalyzer AI] ✅ {file_name[:30]} → {industry}/{category} ({confidence:.2f}) entity={entity} [{source}]")
             return {
                 "industry": industry,
                 "category": category,
@@ -362,7 +365,7 @@ class FileAnalyzer:
                 "confidence": confidence,
             }
         except Exception as e:
-            print(f"[FileAnalyzer AI] ❌ JSON 解析错误: {e}")
+            logger.error(f"[FileAnalyzer AI] ❌ JSON 解析错误: {e}")
             return None
 
     def _extract_content(self, file_path: str) -> str:
@@ -712,7 +715,7 @@ if __name__ == "__main__":
     for test_file in test_files:
         if os.path.exists(test_file):
             result = analyzer.analyze_file(test_file)
-            print(f"\n分析结果: {result['file_name']}")
-            print(f"  行业: {result.get('industry', 'N/A')}")
-            print(f"  类别: {result.get('category', 'N/A')}")
-            print(f"  建议文件夹: {result.get('suggested_folder', 'N/A')}")
+            logger.info(f"\n分析结果: {result['file_name']}")
+            logger.info(f"  行业: {result.get('industry', 'N/A')}")
+            logger.info(f"  类别: {result.get('category', 'N/A')}")
+            logger.info(f"  建议文件夹: {result.get('suggested_folder', 'N/A')}")

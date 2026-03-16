@@ -9,7 +9,10 @@ import os
 import re
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class CodeTemplate:
     """代码模板"""
@@ -197,7 +200,7 @@ def scrape_page(url: str) -> Dict:
 if __name__ == '__main__':
     url = '{url}'
     result = scrape_page(url)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    logger.info(json.dumps(result, ensure_ascii=False, indent=2))
 """,
             description="Python网页爬虫"
         )
@@ -379,9 +382,9 @@ if __name__ == "__main__":
     generator = CodeGenerator()
     
     # 列出所有模板
-    print("可用模板：")
+    logger.info("可用模板：")
     for template in generator.list_templates():
-        print(f"  - {template['name']} ({template['language']}): {template['description']}")
+        logger.info(f"  - {template['name']} ({template['language']}): {template['description']}")
     
     # 生成C语言链表代码
     result = generator.generate(
@@ -390,8 +393,8 @@ if __name__ == "__main__":
     )
     
     if result['success']:
-        print(f"\n✅ 代码已生成到: {result.get('output_path', '内存中')}")
-        print(f"语言: {result['language']}")
-        print(f"说明: {result['description']}")
+        logger.info(f"\n✅ 代码已生成到: {result.get('output_path', '内存中')}")
+        logger.info(f"语言: {result['language']}")
+        logger.info(f"说明: {result['description']}")
     else:
-        print(f"\n❌ 生成失败: {result['error']}")
+        logger.error(f"\n❌ 生成失败: {result['error']}")

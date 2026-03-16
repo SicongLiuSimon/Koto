@@ -12,6 +12,9 @@ import re
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     from pptx import Presentation
@@ -20,7 +23,7 @@ try:
     from pptx.enum.text import PP_ALIGN
     from pptx.enum.shapes import MSO_SHAPE
 except ImportError:
-    print("Warning: python-pptx not installed. PPT generation will fail.")
+    logger.warning("Warning: python-pptx not installed. PPT generation will fail.")
 
 from web.ppt_themes import get_theme, PPTTheme
 from web.image_generator import ImageGenerator
@@ -175,9 +178,9 @@ class PPTGenerator:
             try:
                 from web.image_generator import ImageGenerator
                 image_gen = ImageGenerator()
-                print("[PPT] 🖼️ AI Image Generator Initialized")
+                logger.info("[PPT] 🖼️ AI Image Generator Initialized")
             except ImportError:
-                print("[PPT] ⚠️ ImageGenerator not found, skipping AI images")
+                logger.warning("[PPT] ⚠️ ImageGenerator not found, skipping AI images")
 
         _type_name_map = {"detail": "详细页", "overview": "概览页", "highlight": "亮点页",
                           "divider": "过渡页", "comparison": "对比页", "image_full": "图片页"}
@@ -245,7 +248,7 @@ class PPTGenerator:
                  os.makedirs(os.path.dirname(local_img_path), exist_ok=True)
                  
                  # Call API (Blocking for now, but per-slide ensures progress updates)
-                 print(f"[PPT] 🎨 Generating image for slide {idx+1}: {s_title}")
+                 logger.info(f"[PPT] 🎨 Generating image for slide {idx+1}: {s_title}")
                  if image_gen.generate_image(img_prompt, local_img_path, aspect_ratio="16:9"):
                      generated_img_path = local_img_path
             
@@ -798,7 +801,7 @@ class PPTGenerator:
                 # Currently top-aligned at Inches(1.8), Left-aligned at Inches(7.5)
                 
             except Exception as e:
-                print(f"[PPT] 添加图片失败: {e}")
+                logger.info(f"[PPT] 添加图片失败: {e}")
     
     # ─── 概览页（多主题并列） ─────────────────────────
     
@@ -1326,7 +1329,7 @@ class PPTGenerator:
             shapes.add_picture(image_path, left, top, width=width, height=height)
             return True
         except Exception as e:
-            print(f"[PPT] 添加图片到幻灯片 {slide_index} 失败: {e}")
+            logger.info(f"[PPT] 添加图片到幻灯片 {slide_index} 失败: {e}")
             return False
 
 
@@ -1387,7 +1390,7 @@ class EnhancedPPTGenerator:
                 )
                 outline_text = response.text
             except Exception as e:
-                print(f"[PPT] 大纲生成失败: {e}")
+                logger.info(f"[PPT] 大纲生成失败: {e}")
                 outline_text = self._generate_fallback_outline(title, user_request)
         else:
             outline_text = self._generate_fallback_outline(title, user_request)
@@ -1583,4 +1586,4 @@ if __name__ == "__main__":
         output_path="workspace/documents/presentation.pptx"
     )
     
-    print(result)
+    logger.info(result)

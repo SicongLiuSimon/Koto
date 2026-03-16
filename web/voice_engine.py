@@ -26,8 +26,12 @@ import sys
 import threading
 import time
 from typing import Any, Dict, Generator, Optional
+import logging
 
 # ── 全局单例 ───────────────────────────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
+
 _model: Any = None
 _model_lock = threading.Lock()
 _stop_flag = False        # 请求停止当前识别流
@@ -83,22 +87,20 @@ def _load_model() -> Any:
             from vosk import Model, SetLogLevel  # type: ignore
             SetLogLevel(-1)           # 静默 Vosk 日志
         except ImportError:
-            print("[VoiceEngine] ❌ vosk 包未安装，请运行: pip install vosk")
+            logger.error("[VoiceEngine] ❌ vosk 包未安装，请运行: pip install vosk")
             return None
 
         path = _find_model_path()
         if not path:
-            print(
-                "[VoiceEngine] ❌ 未找到 Vosk 中文模型\n"
+            logger.error("[VoiceEngine] ❌ 未找到 Vosk 中文模型\n"
                 "  请将 vosk-model-small-cn-0.22 目录放入 models/ 文件夹。\n"
-                "  下载地址: https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
-            )
+                "  下载地址: https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip")
             return None
 
-        print(f"[VoiceEngine] 正在加载 Vosk 模型: {path}")
+        logger.info(f"[VoiceEngine] 正在加载 Vosk 模型: {path}")
         t0 = time.time()
         _model = Model(path)
-        print(f"[VoiceEngine] ✅ Vosk 模型加载完成（{time.time() - t0:.1f}s）")
+        logger.info(f"[VoiceEngine] ✅ Vosk 模型加载完成（{time.time() - t0:.1f}s）")
         return _model
 
 

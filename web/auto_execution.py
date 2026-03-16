@@ -18,7 +18,10 @@ import shutil
 from pathlib import Path
 import threading
 import time
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class AutoExecutionEngine:
     """自动执行任务引擎"""
@@ -522,14 +525,14 @@ class AutoExecutionEngine:
             daemon=True
         )
         self.check_thread.start()
-        print("✅ 自动执行引擎已启动")
+        logger.info("✅ 自动执行引擎已启动")
     
     def stop_queue_processor(self):
         """停止队列处理器"""
         self.running = False
         if self.check_thread:
             self.check_thread.join(timeout=5)
-        print("🛑 自动执行引擎已停止")
+        logger.info("🛑 自动执行引擎已停止")
     
     def _queue_processing_loop(self, interval: int):
         """队列处理循环"""
@@ -537,7 +540,7 @@ class AutoExecutionEngine:
             try:
                 self.process_queue()
             except Exception as e:
-                print(f"队列处理出错: {e}")
+                logger.info(f"队列处理出错: {e}")
             
             time.sleep(interval)
     

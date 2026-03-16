@@ -41,7 +41,7 @@ def _validate_jwt_secret() -> str:
         if os.environ.get("KOTO_DEPLOY_MODE", "local") == "cloud":
             raise RuntimeError(
                 "KOTO_JWT_SECRET environment variable must be set in cloud/production mode. "
-                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+                'Generate one with: python -c "import secrets; logger.info(secrets.token_hex(32))"'
             )
         # Local dev: generate ephemeral secret (tokens invalidate on restart — acceptable locally)
         logger.warning(
@@ -377,4 +377,4 @@ def register_auth_routes(app):
             }
         )
 
-    print(f"[Auth] {'✅ 认证系统已启用' if AUTH_ENABLED else '⚠️ 本地模式（无认证）'}")
+    logger.warning(f"[Auth] {'✅ 认证系统已启用' if AUTH_ENABLED else '⚠️ 本地模式（无认证）'}")

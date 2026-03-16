@@ -18,7 +18,10 @@ from typing import Dict, Callable, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 import queue
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class VoiceCommand:
@@ -246,7 +249,7 @@ class GlobalHotkeyListener:
         self.is_running = True
         self.listener_thread = threading.Thread(target=self._listen_loop, daemon=True)
         self.listener_thread.start()
-        print(f"✅ 全局快捷键监听已启动: {self.hotkey}")
+        logger.info(f"✅ 全局快捷键监听已启动: {self.hotkey}")
     
     def stop(self):
         """停止监听"""
@@ -270,11 +273,11 @@ class GlobalHotkeyListener:
                     
                     keyboard.remove_all_hotkeys()
                 except Exception as e:
-                    print(f"⚠️ 快捷键监听错误: {e}")
+                    logger.error(f"⚠️ 快捷键监听错误: {e}")
                     time.sleep(1)
         
         except ImportError:
-            print("❌ 未安装 keyboard 库，请运行: pip install keyboard")
+            logger.error("❌ 未安装 keyboard 库，请运行: pip install keyboard")
     
     def _on_hotkey_press(self):
         """快捷键被按下"""
@@ -376,18 +379,18 @@ def get_interaction_manager() -> VoiceInteractionManager:
 
 
 if __name__ == "__main__":
-    print("🎤 语音快捷交互系统\n")
+    logger.info("🎤 语音快捷交互系统\n")
     
     manager = get_interaction_manager()
     processor = manager.get_command_processor()
     
     # 显示可用命令
-    print("📋 可用命令:")
+    logger.info("📋 可用命令:")
     for cmd in processor.list_commands():
-        print(f"  • {cmd['name']}: {cmd['keywords']}")
+        logger.info(f"  • {cmd['name']}: {cmd['keywords']}")
     
     # 测试命令
-    print("\n🧪 测试命令匹配:")
+    logger.info("\n🧪 测试命令匹配:")
     test_texts = [
         "打开文档",
         "请为我批注这个文件",
@@ -397,15 +400,14 @@ if __name__ == "__main__":
     
     for text in test_texts:
         result = processor.execute_command(text)
-        print(f"  输入: {text}")
-        print(f"  结果: {result}")
-        print()
+        logger.info(f"  输入: {text}")
+        logger.info(f"  结果: {result}")
     
     # 显示配置
-    print("⚙️ 配置:")
+    logger.info("⚙️ 配置:")
     config = manager.get_config()
     for key, value in config.items():
-        print(f"  • {key}: {value}")
+        logger.info(f"  • {key}: {value}")
     
     # 清理
     manager.cleanup()

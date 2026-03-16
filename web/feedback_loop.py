@@ -8,7 +8,10 @@ AI反馈循环 - 根据质量评估结果，自动改进生成的内容
 import json
 from typing import Dict, List, Any, Optional, Callable
 import time
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class FeedbackLoopManager:
     """管理 AI 反馈循环，进行迭代改进"""
@@ -344,7 +347,7 @@ class FeedbackLoopManager:
             return None
         
         except Exception as e:
-            print(f"[AI反馈循环] Gemini 调用失败: {e}")
+            logger.info(f"[AI反馈循环] Gemini 调用失败: {e}")
             return None
 
 

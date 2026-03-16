@@ -15,7 +15,10 @@ from collections import Counter, defaultdict
 from behavior_monitor import BehaviorMonitor
 from knowledge_graph import KnowledgeGraph
 from suggestion_engine import SuggestionEngine
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class InsightReporter:
     """洞察报告生成器 - 生成周期性分析报告"""
@@ -616,17 +619,17 @@ if __name__ == "__main__":
     # 测试代码
     reporter = InsightReporter()
     
-    print("📊 洞察报告生成器测试")
-    print("=" * 50)
+    logger.info("📊 洞察报告生成器测试")
+    logger.info("=" * 50)
     
     # 生成周报
-    print("\n生成周报...")
+    logger.info("\n生成周报...")
     report = reporter.generate_weekly_report()
     
-    print(f"\n报告类型: {report['type']}")
-    print(f"报告周期: {report['period']['days']}天")
-    print(f"\n生成的Markdown摘要:\n")
-    print(report.get("summary_markdown", "暂无摘要")[:500] + "...\n")
+    logger.info(f"\n报告类型: {report['type']}")
+    logger.info(f"报告周期: {report['period']['days']}天")
+    logger.info(f"\n生成的Markdown摘要:\n")
+    logger.info(report.get("summary_markdown", "暂无摘要")[:500] + "...\n")
     
-    print("=" * 50)
-    print("✅ 洞察报告生成器已就绪")
+    logger.info("=" * 50)
+    logger.info("✅ 洞察报告生成器已就绪")

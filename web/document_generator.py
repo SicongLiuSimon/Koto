@@ -10,6 +10,9 @@ import os
 import re
 from datetime import datetime
 from typing import List, Tuple, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_DIR = None
 
@@ -611,7 +614,7 @@ def save_docx(text: str, title: str = None, output_dir: str = None, filename: st
                             run.font.italic = True
                             run.font.color.rgb = RGBColor(0x70, 0x70, 0x70)
                     except Exception as e:
-                        print(f"⚠️ 无法插入图片 {image_path}: {e}")
+                        logger.warning(f"⚠️ 无法插入图片 {image_path}: {e}")
                         # 添加占位文本
                         p = doc.add_paragraph(f"[图片: {alt_text or image_path}]")
                         p.paragraph_format.left_indent = Inches(0.5)
@@ -648,7 +651,7 @@ def save_docx(text: str, title: str = None, output_dir: str = None, filename: st
     
     full_path = os.path.join(output_dir, final_filename)
     doc.save(full_path)
-    print(f"[DocumentGenerator] ✅ DOCX saved: {full_path}")
+    logger.info(f"[DocumentGenerator] ✅ DOCX saved: {full_path}")
     return full_path
 
 
@@ -697,10 +700,10 @@ def save_pdf(text: str, title: str = None, output_dir: str = None, filename: str
                 pdfmetrics.registerFont(TTFont(name, path))
                 base_font = name
                 bold_font = name # In a pinch, use same font as bold if no bold variant found easily
-                print(f"[DocumentGenerator] PDF using font: {name}")
+                logger.info(f"[DocumentGenerator] PDF using font: {name}")
                 break
         except Exception as e:
-            print(f"[DocumentGenerator] Font load warning: {e}")
+            logger.info(f"[DocumentGenerator] Font load warning: {e}")
             continue
 
     # 2. Define Styles
@@ -907,7 +910,7 @@ def save_pdf(text: str, title: str = None, output_dir: str = None, filename: str
                         if alt:
                             story.append(Paragraph(f"图: {alt}", styles['CaptionCN']))
                     except Exception as e:
-                        print(f"Image load error: {e}")
+                        logger.info(f"Image load error: {e}")
                 else:
                     story.append(Paragraph(f"[Image Missing: {alt}]", styles['CaptionCN']))
         
@@ -1024,9 +1027,9 @@ def save_pdf(text: str, title: str = None, output_dir: str = None, filename: str
     
     try:
         doc.build(final_story)
-        print(f"[DocumentGenerator] ✅ PDF saved (ReportLab Enhanced): {full_path}")
+        logger.info(f"[DocumentGenerator] ✅ PDF saved (ReportLab Enhanced): {full_path}")
     except Exception as e:
-        print(f"[DocumentGenerator] ❌ PDF generation failed: {e}")
+        logger.error(f"[DocumentGenerator] ❌ PDF generation failed: {e}")
         import traceback
         traceback.print_exc()
         raise
@@ -1064,7 +1067,7 @@ def _save_pdf_reportlab(text: str, title: str = None, output_dir: str = None, fi
             if os.path.exists(path):
                 pdfmetrics.registerFont(TTFont(name, path))
                 base_font = name
-                print(f"[DocumentGenerator] PDF using font: {name}")
+                logger.info(f"[DocumentGenerator] PDF using font: {name}")
                 break
         except Exception:
             continue
@@ -1323,9 +1326,9 @@ def _save_pdf_reportlab(text: str, title: str = None, output_dir: str = None, fi
 
     try:
         doc.build(story)
-        print(f"[DocumentGenerator] ✅ PDF saved: {full_path}")
+        logger.info(f"[DocumentGenerator] ✅ PDF saved: {full_path}")
     except Exception as e:
-        print(f"[DocumentGenerator] ⚠️ PDF generation error: {e}")
+        logger.warning(f"[DocumentGenerator] ⚠️ PDF generation error: {e}")
         # 尝试简化版本
         try:
             simple_story = []
@@ -1335,9 +1338,9 @@ def _save_pdf_reportlab(text: str, title: str = None, output_dir: str = None, fi
                 if line.strip():
                     simple_story.append(Paragraph(escape_xml(line), styles['BodyCN']))
             doc.build(simple_story)
-            print(f"[DocumentGenerator] ✅ PDF saved (simplified): {full_path}")
+            logger.info(f"[DocumentGenerator] ✅ PDF saved (simplified): {full_path}")
         except Exception as e2:
-            print(f"[DocumentGenerator] ❌ PDF generation failed: {e2}")
+            logger.error(f"[DocumentGenerator] ❌ PDF generation failed: {e2}")
             raise
     
     return full_path

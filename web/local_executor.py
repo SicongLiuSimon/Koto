@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import os
 import sys
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class LocalExecutor:
     """
@@ -311,7 +314,7 @@ class LocalExecutor:
                         result["success"] = True
                         result["action"] = "open_app"
                         result["message"] = f"✅ 已打开 {app_name}"
-                        print(f"[LocalExecutor] ✅ 成功启动应用: {app_name} - 路径: {app_path}")
+                        logger.info(f"[LocalExecutor] ✅ 成功启动应用: {app_name} - 路径: {app_path}")
                         return result
                     except Exception as e:
                         result["message"] = f"❌ 打开 {app_name} 失败: {str(e)}"

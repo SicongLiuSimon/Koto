@@ -14,7 +14,10 @@ from pathlib import Path
 import math
 
 from concept_extractor import ConceptExtractor
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class KnowledgeGraph:
     """知识图谱 - 文件关系网络管理器"""
@@ -195,7 +198,7 @@ class KnowledgeGraph:
             file_paths: 文件路径列表
             force_rebuild: 是否强制重建图
         """
-        print(f"🔨 开始构建知识图谱... ({len(file_paths)} 个文件)")
+        logger.info(f"🔨 开始构建知识图谱... ({len(file_paths)} 个文件)")
         
         for i, file_path in enumerate(file_paths, 1):
             try:
@@ -231,10 +234,10 @@ class KnowledgeGraph:
                     )
                 
                 if i % 10 == 0:
-                    print(f"  ✓ 已处理 {i}/{len(file_paths)} 个文件")
+                    logger.info(f"  ✓ 已处理 {i}/{len(file_paths)} 个文件")
                     
             except Exception as e:
-                print(f"  ✗ 处理文件失败 {file_path}: {str(e)}")
+                logger.info(f"  ✗ 处理文件失败 {file_path}: {str(e)}")
         
         # 构建文件间关联
         self._build_file_relations()
@@ -242,11 +245,11 @@ class KnowledgeGraph:
         # 创建快照
         self._create_snapshot()
         
-        print(f"✅ 知识图谱构建完成")
+        logger.info(f"✅ 知识图谱构建完成")
     
     def _build_file_relations(self):
         """构建文件之间的关联边"""
-        print("🔗 构建文件关联...")
+        logger.info("🔗 构建文件关联...")
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -285,7 +288,7 @@ class KnowledgeGraph:
         
         conn.close()
         
-        print(f"  ✓ 创建了 {relation_count} 个文件关联")
+        logger.info(f"  ✓ 创建了 {relation_count} 个文件关联")
     
     def get_graph_data(self, max_nodes: int = 100) -> Dict:
         """
@@ -622,7 +625,7 @@ class KnowledgeGraph:
             conn.close()
             return True
         except Exception as e:
-            print(f"[KG] add_triple error: {e}")
+            logger.info(f"[KG] add_triple error: {e}")
             return False
 
     def search_triples(self, entity: str, limit: int = 20) -> List[Dict]:
@@ -657,7 +660,7 @@ class KnowledgeGraph:
                 for r in rows
             ]
         except Exception as e:
-            print(f"[KG] search_triples error: {e}")
+            logger.info(f"[KG] search_triples error: {e}")
             return []
 
     def search_triples_fuzzy(self, query: str, limit: int = 20) -> List[Dict]:
@@ -693,7 +696,7 @@ class KnowledgeGraph:
                 for r in rows
             ]
         except Exception as e:
-            print(f"[KG] search_triples_fuzzy error: {e}")
+            logger.info(f"[KG] search_triples_fuzzy error: {e}")
             return []
 
     def get_entity_neighbors(self, entity: str, depth: int = 1) -> Set[str]:
@@ -745,8 +748,8 @@ if __name__ == "__main__":
     # 测试代码
     kg = KnowledgeGraph()
     
-    print("📊 知识图谱测试")
-    print("=" * 50)
+    logger.info("📊 知识图谱测试")
+    logger.info("=" * 50)
     
     # 测试添加节点
     file_id = kg.add_file_node("test_doc.txt", {"size": 1024})
@@ -757,9 +760,9 @@ if __name__ == "__main__":
     
     # 获取统计信息
     stats = kg.get_statistics()
-    print("\n图统计信息：")
+    logger.info("\n图统计信息：")
     for key, value in stats.items():
-        print(f"  • {key}: {value}")
+        logger.info(f"  • {key}: {value}")
     
-    print("\n" + "=" * 50)
-    print("✅ 知识图谱模块已就绪")
+    logger.info("\n" + "=" * 50)
+    logger.info("✅ 知识图谱模块已就绪")

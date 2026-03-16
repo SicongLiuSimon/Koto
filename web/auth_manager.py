@@ -18,7 +18,10 @@ from typing import Dict, List, Set, Any, Optional
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta
 from enum import Enum
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class UserRole(Enum):
     """User roles"""
@@ -406,15 +409,15 @@ if __name__ == "__main__":
     user = auth.user_manager.create_user(
         "usr_001", "john_doe", "john@example.com", "hashed_pass", [UserRole.USER]
     )
-    print(f"User created: {user.username}")
+    logger.info(f"User created: {user.username}")
     
     # Create session
     session = auth.session_manager.create_session("sess_001", "usr_001", "192.168.1.1")
-    print(f"Session created: {session.session_id}")
+    logger.info(f"Session created: {session.session_id}")
     
     # Check permission
     has_perm = auth.user_manager.has_permission("usr_001", Permission.DATA_READ)
-    print(f"Has DATA_READ permission: {has_perm}")
+    logger.info(f"Has DATA_READ permission: {has_perm}")
     
     # Log action
     auth.audit_logger.log_action(
@@ -423,4 +426,4 @@ if __name__ == "__main__":
     )
     
     # Get status
-    print(json.dumps(auth.get_auth_status(), indent=2))
+    logger.info(json.dumps(auth.get_auth_status(), indent=2))

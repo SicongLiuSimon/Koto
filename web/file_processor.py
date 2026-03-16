@@ -8,7 +8,10 @@
 import os
 import mimetypes
 from typing import Dict, Any, Optional, Tuple
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class FileProcessor:
     """文件处理器 - 提取文件内容和元数据"""
@@ -87,7 +90,7 @@ class FileProcessor:
                 pass  # PIL未安装，跳过元数据
             
             result['success'] = True
-            print(f"[FileProcessor] 成功处理图片: {result['filename']}")
+            logger.info(f"[FileProcessor] 成功处理图片: {result['filename']}")
             return result
             
         except Exception as e:
@@ -145,18 +148,18 @@ class FileProcessor:
                     result['metadata']['pages'] = len(reader.pages)
                     result['metadata']['extracted_pages'] = max_pages
                     result['metadata']['text_quality'] = 'good'
-                    print(f"[FileProcessor] PDF 文本质量良好，文本+二进制双模式: {result['filename']}")
+                    logger.info(f"[FileProcessor] PDF 文本质量良好，文本+二进制双模式: {result['filename']}")
                 else:
                     result['metadata']['text_quality'] = 'garbled'
-                    print(f"[FileProcessor] PDF 文本乱码或为空，改用纯二进制模式: {result['filename']}")
+                    logger.info(f"[FileProcessor] PDF 文本乱码或为空，改用纯二进制模式: {result['filename']}")
 
             except Exception as e:
                 result['metadata']['text_quality'] = 'extract_failed'
-                print(f"[FileProcessor] PDF 文本提取失败，使用纯二进制模式: {e}")
+                logger.info(f"[FileProcessor] PDF 文本提取失败，使用纯二进制模式: {e}")
 
             result['metadata']['pages'] = result['metadata'].get('pages', '?')
             result['success'] = True
-            print(f"[FileProcessor] PDF 已加载二进制: {result['filename']} ({len(raw_bytes):,} bytes)")
+            logger.info(f"[FileProcessor] PDF 已加载二进制: {result['filename']} ({len(raw_bytes):,} bytes)")
             return result
 
         except Exception as e:
@@ -188,7 +191,7 @@ class FileProcessor:
                 result['metadata']['chars'] = len(result['text_content'])
                 
                 result['success'] = True
-                print(f"[FileProcessor] 成功提取Word文档: {result['filename']} ({len(result['text_content'])} 字符)")
+                logger.info(f"[FileProcessor] 成功提取Word文档: {result['filename']} ({len(result['text_content'])} 字符)")
                 return result
                 
             except ImportError:
@@ -228,11 +231,11 @@ class FileProcessor:
 
             if result['text_content'].strip():
                 result['success'] = True
-                print(f"[FileProcessor] 成功提取PowerPoint文档: {result['filename']} ({len(result['text_content'])} 字符)")
+                logger.info(f"[FileProcessor] 成功提取PowerPoint文档: {result['filename']} ({len(result['text_content'])} 字符)")
             else:
                 # 无文本时仍标记成功，避免后续把它当成错误文件
                 result['success'] = True
-                print(f"[FileProcessor] PowerPoint提取完成但无可读文本: {result['filename']}")
+                logger.info(f"[FileProcessor] PowerPoint提取完成但无可读文本: {result['filename']}")
 
             return result
 
@@ -263,7 +266,7 @@ class FileProcessor:
                 result['metadata']['extracted_sheets'] = min(3, len(xls.sheet_names))
                 
                 result['success'] = True
-                print(f"[FileProcessor] 成功提取Excel数据: {result['filename']} ({len(xls.sheet_names)} 个工作表)")
+                logger.info(f"[FileProcessor] 成功提取Excel数据: {result['filename']} ({len(xls.sheet_names)} 个工作表)")
                 return result
                 
             except ImportError:
@@ -289,7 +292,7 @@ class FileProcessor:
                 result['metadata']['chars'] = len(result['text_content'])
                 
                 result['success'] = True
-                print(f"[FileProcessor] 成功读取文本文件: {result['filename']} (编码: {encoding})")
+                logger.info(f"[FileProcessor] 成功读取文本文件: {result['filename']} (编码: {encoding})")
                 return result
                 
             except (UnicodeDecodeError, LookupError):

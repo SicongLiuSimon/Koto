@@ -10,7 +10,10 @@ import os
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from pathlib import Path
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class Workflow:
     """工作流定义"""
@@ -95,9 +98,9 @@ class WorkflowManager:
                         wf = Workflow.from_dict(data)
                         self.workflows[wf.id] = wf
                 except Exception as e:
-                    print(f"[WorkflowManager] 加载工作流失败: {file}: {e}")
+                    logger.info(f"[WorkflowManager] 加载工作流失败: {file}: {e}")
         except Exception as e:
-            print(f"[WorkflowManager] 加载工作流目录失败: {e}")
+            logger.info(f"[WorkflowManager] 加载工作流目录失败: {e}")
     
     def save_workflow(self, workflow: Workflow) -> bool:
         """保存工作流到磁盘"""
@@ -111,7 +114,7 @@ class WorkflowManager:
             self.workflows[workflow.id] = workflow
             return True
         except Exception as e:
-            print(f"[WorkflowManager] 保存工作流失败: {e}")
+            logger.info(f"[WorkflowManager] 保存工作流失败: {e}")
             return False
     
     def load_workflow(self, workflow_id: str) -> Optional[Workflow]:
@@ -128,7 +131,7 @@ class WorkflowManager:
                     self.workflows[workflow_id] = wf
                     return wf
             except Exception as e:
-                print(f"[WorkflowManager] 加载工作流失败: {e}")
+                logger.info(f"[WorkflowManager] 加载工作流失败: {e}")
         
         return None
     
@@ -142,7 +145,7 @@ class WorkflowManager:
             self.workflows.pop(workflow_id, None)
             return True
         except Exception as e:
-            print(f"[WorkflowManager] 删除工作流失败: {e}")
+            logger.info(f"[WorkflowManager] 删除工作流失败: {e}")
             return False
     
     def list_workflows(self, tags: List[str] = None, is_template: bool = None) -> List[Workflow]:

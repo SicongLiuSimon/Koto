@@ -12,7 +12,10 @@ import schedule  # pip install schedule
 from datetime import datetime
 from typing import Callable, List, Dict, Any
 from enum import Enum
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class TaskStatus(Enum):
     """任务状态"""
@@ -92,7 +95,7 @@ class Task:
             self.error = str(e)
             self.completed_at = datetime.now()
             
-            print(f"[任务] 执行失败 {self.name}: {e}")
+            logger.info(f"[任务] 执行失败 {self.name}: {e}")
             return False
     
     def to_dict(self):
@@ -140,9 +143,9 @@ class TaskScheduler:
             try:
                 with open(self.tasks_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                print(f"[调度器] 已加载 {len(data)} 个任务配置")
+                logger.info(f"[调度器] 已加载 {len(data)} 个任务配置")
             except Exception as e:
-                print(f"[调度器] 任务加载失败: {e}")
+                logger.info(f"[调度器] 任务加载失败: {e}")
     
     def _save_tasks(self):
         """保存任务配置"""
@@ -151,7 +154,7 @@ class TaskScheduler:
             with open(self.tasks_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[调度器] 任务保存失败: {e}")
+            logger.info(f"[调度器] 任务保存失败: {e}")
     
     def add_task(self, task: Task) -> str:
         """添加任务到队列"""
@@ -168,7 +171,7 @@ class TaskScheduler:
         if not inserted:
             self.task_queue.append(task)
         
-        print(f"[调度器] 任务已添加: {task.name} (优先级: {task.priority.name})")
+        logger.info(f"[调度器] 任务已添加: {task.name} (优先级: {task.priority.name})")
         self._save_tasks()
         
         return task.task_id
@@ -216,7 +219,7 @@ class TaskScheduler:
         self.tasks[task_id] = task
         self._save_tasks()
         
-        print(f"[调度器] 定时任务已注册: {name} ({schedule_type} at {time_str})")
+        logger.info(f"[调度器] 定时任务已注册: {name} ({schedule_type} at {time_str})")
         return task_id
     
     def cancel_task(self, task_id: str) -> bool:
@@ -228,10 +231,10 @@ class TaskScheduler:
             # 从队列中移除
             self.task_queue = [t for t in self.task_queue if t.task_id != task_id]
             
-            print(f"[调度器] 任务已取消: {task.name} (ID: {task_id})")
+            logger.info(f"[调度器] 任务已取消: {task.name} (ID: {task_id})")
             self._save_tasks()
             return True
-        print(f"[调度器] 未找到任务: {task_id}")
+        logger.info(f"[调度器] 未找到任务: {task_id}")
         return False
     
     def get_task(self, task_id: str) -> Task:
@@ -240,20 +243,20 @@ class TaskScheduler:
     
     def _worker_loop(self):
         """工作线程，执行队列中的任务"""
-        print("[调度器] 工作线程已启动")
+        logger.info("[调度器] 工作线程已启动")
         
         while self.running:
             if self.task_queue:
                 task = self.task_queue.pop(0)
                 
-                print(f"[调度器] 执行任务: {task.name}")
+                logger.info(f"[调度器] 执行任务: {task.name}")
                 success = task.execute()
                 
                 if not success and task.retry_count < task.max_retries:
                     task.retry_count += 1
                     task.status = TaskStatus.PENDING
                     self.task_queue.append(task)
-                    print(f"[调度器] 任务重试 ({task.retry_count}/{task.max_retries}): {task.name}")
+                    logger.info(f"[调度器] 任务重试 ({task.retry_count}/{task.max_retries}): {task.name}")
                 
                 self._save_tasks()
             
@@ -261,7 +264,7 @@ class TaskScheduler:
     
     def _scheduler_loop(self):
         """调度线程，处理定时任务"""
-        print("[调度器] 调度线程已启动")
+        logger.info("[调度器] 调度线程已启动")
         
         while self.running:
             schedule.run_pending()
@@ -270,7 +273,7 @@ class TaskScheduler:
     def start(self):
         """启动调度器"""
         if self.running:
-            print("[调度器] 已在运行")
+            logger.info("[调度器] 已在运行")
             return
         
         self.running = True
@@ -283,7 +286,7 @@ class TaskScheduler:
         self._scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
         self._scheduler_thread.start()
         
-        print("[调度器] 已启动")
+        logger.info("[调度器] 已启动")
     
     def stop(self):
         """停止调度器"""
@@ -294,7 +297,7 @@ class TaskScheduler:
         if self._scheduler_thread:
             self._scheduler_thread.join(timeout=2)
         
-        print("[调度器] 已停止")
+        logger.info("[调度器] 已停止")
     
     def get_task_status(self, task_id: str) -> Dict:
         """获取任务状态"""

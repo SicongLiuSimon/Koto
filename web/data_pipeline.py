@@ -10,7 +10,10 @@ import re
 import json
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class DataExtractor:
     """数据提取器基类"""
@@ -276,4 +279,4 @@ if __name__ == "__main__":
         output_path='workspace/documents/联系人信息.xlsx'
     )
     
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    logger.info(json.dumps(result, ensure_ascii=False, indent=2))

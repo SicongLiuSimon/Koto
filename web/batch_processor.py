@@ -10,7 +10,10 @@ import shutil
 from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 from pathlib import Path
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class BatchFileProcessor:
     """文件批量处理器"""
@@ -247,7 +250,7 @@ class BatchFileProcessor:
                     try:
                         os.remove(file_path)
                     except Exception as e:
-                        print(f"删除失败 {file}: {e}")
+                        logger.info(f"删除失败 {file}: {e}")
             else:
                 seen[key] = file
         
@@ -343,27 +346,27 @@ class BatchFileProcessor:
 if __name__ == "__main__":
     processor = BatchFileProcessor()
     
-    print("=" * 60)
-    print("批量文件处理测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("批量文件处理测试")
+    logger.info("=" * 60)
     
     test_dir = os.path.join(processor.workspace_dir, "documents")
     
     # 测试批量重命名（预览）
-    print("\n1. 批量重命名预览（添加前缀'TEST_'）...")
+    logger.info("\n1. 批量重命名预览（添加前缀'TEST_'）...")
     result = processor.batch_rename(
         test_dir,
         prefix="TEST_",
         dry_run=True
     )
-    print(f"   将重命名 {result['renamed_count']} 个文件")
+    logger.info(f"   将重命名 {result['renamed_count']} 个文件")
     if result['renamed'][:3]:
         for r in result['renamed'][:3]:
-            print(f"   - {r['old']} -> {r['new']}")
+            logger.info(f"   - {r['old']} -> {r['new']}")
     
     # 测试重复文件检测
-    print("\n2. 重复文件检测...")
+    logger.info("\n2. 重复文件检测...")
     result = processor.clean_duplicates(test_dir, by_content=True, dry_run=True)
-    print(f"   找到 {result['duplicates_found']} 个重复文件")
+    logger.info(f"   找到 {result['duplicates_found']} 个重复文件")
     
-    print("\n✅ 批量处理器就绪")
+    logger.info("\n✅ 批量处理器就绪")

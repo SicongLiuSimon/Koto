@@ -9,7 +9,10 @@ import json
 import re
 from typing import List, Dict, Any
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class SearchEngine:
     """智能搜索引擎"""
@@ -44,7 +47,7 @@ class SearchEngine:
         }
         
         total = sum(len(v) for v in results.values())
-        print(f"[搜索] 全局搜索完成: '{query}' 找到 {total} 个结果")
+        logger.info(f"[搜索] 全局搜索完成: '{query}' 找到 {total} 个结果")
         
         return results
     
@@ -332,7 +335,7 @@ class SearchEngine:
                 )
             
         except Exception as e:
-            print(f"[搜索] 日期范围搜索失败: {e}")
+            logger.info(f"[搜索] 日期范围搜索失败: {e}")
         
         return results
     

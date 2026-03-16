@@ -27,7 +27,10 @@ from dataclasses import dataclass, asdict
 from collections import defaultdict
 import subprocess
 import platform
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class FileRecord:
@@ -764,7 +767,7 @@ class ProcessedFileNetwork:
             conn.close()
             
         except Exception as e:
-            print(f"[ProcessedFileNetwork] 片段提取失败: {e}")
+            logger.info(f"[ProcessedFileNetwork] 片段提取失败: {e}")
     
     def _extract_text(self, file_path: Path) -> str:
         """提取文件文本"""
@@ -798,7 +801,7 @@ class ProcessedFileNetwork:
             return ""
             
         except Exception as e:
-            print(f"[ProcessedFileNetwork] 文本提取失败 {file_path}: {e}")
+            logger.info(f"[ProcessedFileNetwork] 文本提取失败 {file_path}: {e}")
             return ""
 
 

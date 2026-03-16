@@ -11,6 +11,9 @@ import os
 import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     from web.windows_notifier import show_toast
@@ -37,16 +40,16 @@ class ReminderManager:
                 with open(self.reminders_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.reminders = data if isinstance(data, dict) else {}
-                print(f"[提醒] 已加载 {len(self.reminders)} 条提醒")
+                logger.info(f"[提醒] 已加载 {len(self.reminders)} 条提醒")
             except Exception as e:
-                print(f"[提醒] 加载失败: {e}")
+                logger.info(f"[提醒] 加载失败: {e}")
 
     def _save(self):
         try:
             with open(self.reminders_file, 'w', encoding='utf-8') as f:
                 json.dump(self.reminders, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[提醒] 保存失败: {e}")
+            logger.info(f"[提醒] 保存失败: {e}")
 
     def _schedule_timer(self, reminder_id: str, delay: float):
         if delay <= 0:
@@ -103,7 +106,7 @@ class ReminderManager:
         self._save()
         delay = (remind_at - datetime.now()).total_seconds()
         self._schedule_timer(reminder_id, delay)
-        print(f"[提醒] 已创建提醒: {title} at {remind_at}")
+        logger.info(f"[提醒] 已创建提醒: {title} at {remind_at}")
         return reminder_id
 
     def add_reminder_in(self, title: str, message: str, seconds_from_now: int, icon: Optional[str] = None) -> str:

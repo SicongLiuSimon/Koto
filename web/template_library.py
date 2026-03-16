@@ -8,7 +8,10 @@ import os
 import json
 from typing import Dict, List, Any, Optional
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class TemplateLibrary:
     """模板库管理器"""
@@ -431,19 +434,19 @@ class TemplateLibrary:
 if __name__ == "__main__":
     lib = TemplateLibrary()
     
-    print("=" * 60)
-    print("模板库测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("模板库测试")
+    logger.info("=" * 60)
     
     # 列出所有模板
-    print("\n1. 可用模板:")
+    logger.info("\n1. 可用模板:")
     templates = lib.list_templates()
     for t in templates:
-        print(f"   [{t['id']}] {t['name']} ({t['type']})")
-        print(f"      {t['description']}")
+        logger.info(f"   [{t['id']}] {t['name']} ({t['type']})")
+        logger.info(f"      {t['description']}")
     
     # 测试生成商业报告
-    print("\n2. 生成商业报告测试...")
+    logger.info("\n2. 生成商业报告测试...")
     result = lib.generate_from_template(
         "business_report",
         {
@@ -457,8 +460,8 @@ if __name__ == "__main__":
     )
     
     if result["success"]:
-        print(f"   ✅ 生成成功: {result['output_file']}")
+        logger.info(f"   ✅ 生成成功: {result['output_file']}")
     else:
-        print(f"   ❌ 生成失败: {result.get('error')}")
+        logger.error(f"   ❌ 生成失败: {result.get('error')}")
     
-    print("\n✅ 模板库就绪")
+    logger.info("\n✅ 模板库就绪")

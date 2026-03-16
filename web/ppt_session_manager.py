@@ -11,7 +11,10 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, List
 import hashlib
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class PPTSessionManager:
     """PPT 生成会话管理（存储生成历史用于编辑）"""
@@ -118,7 +121,7 @@ class PPTSessionManager:
             
             return True
         except Exception as e:
-            print(f"[PPTSessionManager] 保存失败: {e}")
+            logger.info(f"[PPTSessionManager] 保存失败: {e}")
             return False
     
     def load_session(self, session_id: str) -> Optional[Dict]:
@@ -132,7 +135,7 @@ class PPTSessionManager:
             with open(session_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"[PPTSessionManager] 加载失败: {e}")
+            logger.info(f"[PPTSessionManager] 加载失败: {e}")
             return None
     
     def update_slide(self, 
@@ -168,7 +171,7 @@ class PPTSessionManager:
                     json.dump(session, f, ensure_ascii=False, indent=2)
                 return True
             except Exception as e:
-                print(f"[PPTSessionManager] 更新幻灯片失败: {e}")
+                logger.info(f"[PPTSessionManager] 更新幻灯片失败: {e}")
                 return False
         
         return False
@@ -211,7 +214,7 @@ class PPTSessionManager:
             
             return True
         except Exception as e:
-            print(f"[PPTSessionManager] 重排失败: {e}")
+            logger.info(f"[PPTSessionManager] 重排失败: {e}")
             return False
     
     def delete_slide(self, 
@@ -246,7 +249,7 @@ class PPTSessionManager:
                     json.dump(session, f, ensure_ascii=False, indent=2)
                 return True
             except Exception as e:
-                print(f"[PPTSessionManager] 删除幻灯片失败: {e}")
+                logger.info(f"[PPTSessionManager] 删除幻灯片失败: {e}")
                 return False
         
         return False
@@ -285,7 +288,7 @@ class PPTSessionManager:
                     json.dump(session, f, ensure_ascii=False, indent=2)
                 return True
             except Exception as e:
-                print(f"[PPTSessionManager] 插入幻灯片失败: {e}")
+                logger.info(f"[PPTSessionManager] 插入幻灯片失败: {e}")
                 return False
         
         return False
@@ -318,7 +321,7 @@ class PPTSessionManager:
             sessions.sort(key=lambda x: x.get('created_at', ''), reverse=True)
             return sessions[:limit]
         except Exception as e:
-            print(f"[PPTSessionManager] 列表获取失败: {e}")
+            logger.info(f"[PPTSessionManager] 列表获取失败: {e}")
             return []
 
 

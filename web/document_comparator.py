@@ -9,7 +9,10 @@ import re
 import difflib
 from typing import Dict, List, Any, Tuple
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class DocumentComparator:
     """文档对比与总结器"""
@@ -243,7 +246,7 @@ class DocumentComparator:
             else:
                 return ""
         except Exception as e:
-            print(f"读取文件失败: {e}")
+            logger.info(f"读取文件失败: {e}")
             return ""
     
     def generate_change_log(self, comparisons: List[Dict[str, Any]], output_file: str):
@@ -282,9 +285,9 @@ class DocumentComparator:
 if __name__ == "__main__":
     comparator = DocumentComparator()
     
-    print("=" * 60)
-    print("文档对比与总结器测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("文档对比与总结器测试")
+    logger.info("=" * 60)
     
     # 创建测试文档
     text_v1 = """# 产品介绍
@@ -336,14 +339,14 @@ if __name__ == "__main__":
     result = comparator.compare_documents(file_v1, file_v2, output_format="markdown")
     
     if result["success"]:
-        print("\n变更摘要:")
-        print(result["summary"])
+        logger.info("\n变更摘要:")
+        logger.info(result["summary"])
         
-        print("\n详细差异:")
-        print(result["diff"])
+        logger.info("\n详细差异:")
+        logger.info(result["diff"])
     
     # 清理测试文件
     os.remove(file_v1)
     os.remove(file_v2)
     
-    print("\n✅ 文档对比器就绪")
+    logger.info("\n✅ 文档对比器就绪")

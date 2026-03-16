@@ -17,7 +17,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class UserProfile:
     """用户画像：综合理解用户特征"""
@@ -76,7 +79,7 @@ class UserProfile:
                 # 深度合并：用已有数据覆盖默认值，但确保所有必需键都存在
                 return self._deep_merge(default, loaded)
             except Exception as e:
-                print(f"[UserProfile] 加载失败，使用默认画像: {e}")
+                logger.info(f"[UserProfile] 加载失败，使用默认画像: {e}")
         return default
 
     def save(self):
@@ -86,7 +89,7 @@ class UserProfile:
             with open(self.profile_path, "w", encoding="utf-8") as f:
                 json.dump(self.profile, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[UserProfile] 保存失败: {e}")
+            logger.info(f"[UserProfile] 保存失败: {e}")
 
     def update_from_extraction(self, extracted_info: Dict):
         """从LLM提取的信息更新画像"""
@@ -140,7 +143,7 @@ class UserProfile:
             self.save()
 
         except Exception as e:
-            print(f"[UserProfile] 更新失败: {e}")
+            logger.info(f"[UserProfile] 更新失败: {e}")
 
     def increment_topic(self, topic: str):
         """增加话题计数"""
@@ -222,10 +225,10 @@ class EnhancedMemoryManager:
         self._load_summaries()
         self._load_vectors()
 
-        print(f"[EnhancedMemory] ✅ 记庆系统已启动")
-        print(f"[EnhancedMemory] 📊 当前记庆数：{len(self.memories)}")
-        print(f"[EnhancedMemory] 🧠 向量记庆数：{len(self.vector_memories)}")
-        print(f"[EnhancedMemory] 👤 用户画像：{self.user_profile.get_brief_summary()}")
+        logger.info(f"[EnhancedMemory] ✅ 记庆系统已启动")
+        logger.info(f"[EnhancedMemory] 📊 当前记庆数：{len(self.memories)}")
+        logger.info(f"[EnhancedMemory] 🧠 向量记庆数：{len(self.vector_memories)}")
+        logger.info(f"[EnhancedMemory] 👤 用户画像：{self.user_profile.get_brief_summary()}")
         # 首次启动时如果 FAISS 记庆索引为空，自动从 memories.json 迁移建索
         self._rebuild_memory_rag_if_needed()
         # 异步执行记忆生命周期 GC（不阻塞启动）
@@ -238,7 +241,7 @@ class EnhancedMemoryManager:
                 with open(self.memory_path, "r", encoding="utf-8") as f:
                     self.memories = json.load(f)
             except Exception as e:
-                print(f"[EnhancedMemory] 加载失败: {e}")
+                logger.info(f"[EnhancedMemory] 加载失败: {e}")
                 self.memories = []
 
     def _save(self):
@@ -248,7 +251,7 @@ class EnhancedMemoryManager:
             with open(self.memory_path, "w", encoding="utf-8") as f:
                 json.dump(self.memories, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[EnhancedMemory] 保存失败: {e}")
+            logger.info(f"[EnhancedMemory] 保存失败: {e}")
 
     def _load_summaries(self):
         """加载对话摘要"""
@@ -257,7 +260,7 @@ class EnhancedMemoryManager:
                 with open(self.summary_path, "r", encoding="utf-8") as f:
                     self.summaries = json.load(f)
             except Exception as e:
-                print(f"[EnhancedMemory] 摘要加载失败: {e}")
+                logger.info(f"[EnhancedMemory] 摘要加载失败: {e}")
                 self.summaries = {}
 
     def _save_summaries(self):
@@ -267,7 +270,7 @@ class EnhancedMemoryManager:
             with open(self.summary_path, "w", encoding="utf-8") as f:
                 json.dump(self.summaries, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[EnhancedMemory] 摘要保存失败: {e}")
+            logger.info(f"[EnhancedMemory] 摘要保存失败: {e}")
 
     def _load_vectors(self):
         """加载向量记忆"""
@@ -276,7 +279,7 @@ class EnhancedMemoryManager:
                 with open(self.vector_path, "r", encoding="utf-8") as f:
                     self.vector_memories = json.load(f)
             except Exception as e:
-                print(f"[EnhancedMemory] 向量加载失败: {e}")
+                logger.info(f"[EnhancedMemory] 向量加载失败: {e}")
                 self.vector_memories = []
 
     def _save_vectors(self):
@@ -286,7 +289,7 @@ class EnhancedMemoryManager:
             with open(self.vector_path, "w", encoding="utf-8") as f:
                 json.dump(self.vector_memories, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[EnhancedMemory] 向量保存失败: {e}")
+            logger.info(f"[EnhancedMemory] 向量保存失败: {e}")
 
     def set_llm_adapters(self, generate_fn=None, embedding_fn=None):
         """设置LLM适配器（摘要与向量）"""
@@ -310,12 +313,10 @@ class EnhancedMemoryManager:
                     index_dir="config/memory_rag_index",
                     auto_load=True,
                 )
-                print(
-                    f"[EnhancedMemory] 🧠 记庆 FAISS 索引已加载 "
-                    f"({self._memory_rag.stats().get('doc_count', 0)} chunks)"
-                )
+                logger.info(f"[EnhancedMemory] 🧠 记庆 FAISS 索引已加载 "
+                    f"({self._memory_rag.stats().get('doc_count', 0)} chunks)")
             except Exception as e:
-                print(f"[EnhancedMemory] ⚠️  FAISS 记庆索引初始化失败: {e}")
+                logger.warning(f"[EnhancedMemory] ⚠️  FAISS 记庆索引初始化失败: {e}")
                 self._memory_rag = False  # 哨兵局量：不再重试
                 return None
         return self._memory_rag
@@ -337,17 +338,15 @@ class EnhancedMemoryManager:
                 stats = rag.stats()
                 if stats.get("initialized") and stats.get("doc_count", 0) > 0:
                     return  # 已有索引，无需重建
-                print(
-                    f"[EnhancedMemory] 🔨 首次构建记庆向量索引（{len(self.memories)} 条）..."
-                )
+                logger.info(f"[EnhancedMemory] 🔨 首次构建记庆向量索引（{len(self.memories)} 条）...")
                 for m in self.memories:
                     content = (m.get("content") or "").strip()
                     mem_id = m.get("id", 0)
                     if content:
                         rag.index_text(content, source=f"mem_{mem_id}")
-                print(f"[EnhancedMemory] ✅ 记庆向量索引构建完成")
+                logger.info(f"[EnhancedMemory] ✅ 记庆向量索引构建完成")
             except Exception as e:
-                print(f"[EnhancedMemory] ⚠️  记庆向量索引重建失败: {e}")
+                logger.warning(f"[EnhancedMemory] ⚠️  记庆向量索引重建失败: {e}")
 
         threading.Thread(target=_rebuild, daemon=True).start()
 
@@ -433,11 +432,9 @@ class EnhancedMemoryManager:
         total = removed_stale + removed_overflow
         if total:
             self._save()
-            print(
-                f"[EnhancedMemory] 🗑️  GC: 清理 {removed_stale} 条过期"
+            logger.info(f"[EnhancedMemory] 🗑️  GC: 清理 {removed_stale} 条过期"
                 f" + {removed_overflow} 条超限 = {total} 条，"
-                f"剩余 {len(self.memories)} 条"
-            )
+                f"剩余 {len(self.memories)} 条")
         return total
 
     def add_memory(self, content: str, category: str = "user_preference",
@@ -449,7 +446,7 @@ class EnhancedMemoryManager:
 
         # 去重：跳过与现有记忆高度相似的条目
         if self._is_duplicate(content):
-            print(f"[EnhancedMemory] ♻️  跳过重复记忆: {content[:40]}...")
+            logger.info(f"[EnhancedMemory] ♻️  跳过重复记忆: {content[:40]}...")
             return None
 
         item = {
@@ -479,7 +476,7 @@ class EnhancedMemoryManager:
             content=item["content"], metadata={"category": category, "source": source}
         )
 
-        print(f"[EnhancedMemory] ➕ 新记忆: {content[:50]}...")
+        logger.info(f"[EnhancedMemory] ➕ 新记忆: {content[:50]}...")
         return item
 
     def _build_extraction_prompt(self, user_msg: str, ai_msg: str) -> str:
@@ -540,9 +537,7 @@ class EnhancedMemoryManager:
 
         if extracted["profile_updates"]:
             self.user_profile.update_from_extraction(extracted["profile_updates"])
-            print(
-                f"[EnhancedMemory] 🔄 关键词学习：{list(extracted['profile_updates'].keys())}"
-            )
+            logger.info(f"[EnhancedMemory] 🔄 关键词学习：{list(extracted['profile_updates'].keys())}")
 
     def auto_extract_from_conversation(
         self, user_msg: str, ai_msg: str, history: Optional[List] = None
@@ -588,12 +583,10 @@ class EnhancedMemoryManager:
                     self.user_profile.update_from_extraction(
                         extracted["profile_updates"]
                     )
-                    print(
-                        f"[EnhancedMemory] 🔄 LLM学习：{list(extracted['profile_updates'].keys())}"
-                    )
+                    logger.info(f"[EnhancedMemory] 🔄 LLM学习：{list(extracted['profile_updates'].keys())}")
 
             except (json.JSONDecodeError, Exception) as e:
-                print(f"[EnhancedMemory] ⚠️  LLM提取失败，降级关键词: {e}")
+                logger.warning(f"[EnhancedMemory] ⚠️  LLM提取失败，降级关键词: {e}")
                 self._keyword_extract(user_msg, extracted)
         else:
             self._keyword_extract(user_msg, extracted)
@@ -658,7 +651,7 @@ class EnhancedMemoryManager:
                 self._index_summary(session_name, new_summary)
                 return new_summary
         except Exception as e:
-            print(f"[EnhancedMemory] 摘要更新失败: {e}")
+            logger.info(f"[EnhancedMemory] 摘要更新失败: {e}")
 
         return summary
 
@@ -691,7 +684,7 @@ class EnhancedMemoryManager:
             self._save_vectors()
             return item
         except Exception as e:
-            print(f"[EnhancedMemory] 向量写入失败: {e}")
+            logger.info(f"[EnhancedMemory] 向量写入失败: {e}")
             return None
 
     def _cosine_similarity(self, a: List[float], b: List[float]) -> float:
@@ -762,7 +755,7 @@ class EnhancedMemoryManager:
             results = [i for s, i in scored[:limit] if s > 0.2]
             return results
         except Exception as e:
-            print(f"[EnhancedMemory] 向量检索失败: {e}")
+            logger.info(f"[EnhancedMemory] 向量检索失败: {e}")
             return []
     
     def search_memories(self, query: str, limit: int = 5,
@@ -966,9 +959,9 @@ MemoryManager = EnhancedMemoryManager
 
 if __name__ == "__main__":
     # 测试
-    print("=" * 60)
-    print("  增强记忆管理器测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("  增强记忆管理器测试")
+    logger.info("=" * 60)
 
     mgr = EnhancedMemoryManager()
 
@@ -983,9 +976,9 @@ if __name__ == "__main__":
 
     # 测试搜索
     results = mgr.search_memories("代码")
-    print(f"\n搜索结果：{len(results)} 条")
+    logger.info(f"\n搜索结果：{len(results)} 条")
 
     # 显示用户画像
-    print(mgr.user_profile.to_context_string())
+    logger.info(mgr.user_profile.to_context_string())
 
-    print("\n✅ 测试完成")
+    logger.info("\n✅ 测试完成")

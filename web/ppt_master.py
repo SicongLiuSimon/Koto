@@ -22,7 +22,10 @@ from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass, field
 from pathlib import Path
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class SlideType(Enum):
     """幻灯片类型"""
@@ -285,13 +288,13 @@ class PPTContentPlanner:
                                         s['key_points'] = ["(Content missing, please expand)"]
                             except: pass
 
-                            print(f"[PPTContentPlanner] ✅ 初步内容规划成功 (model={model}, {mode_str})")
+                            logger.info(f"[PPTContentPlanner] ✅ 初步内容规划成功 (model={model}, {mode_str})")
                             
                             # [Phase 1: Critique Step]
                             # Run critique synchronously here (or via thread if needed)
                             # ensuring valid context and preventing blocking for too long
                             try:
-                                print("[PPTContentPlanner] >>> 启动大纲优化 (Critique Phase)...")
+                                logger.info("[PPTContentPlanner] >>> 启动大纲优化 (Critique Phase)...")
                                 # Run critique in a separate thread to avoid blocking main loop
                                 refined_result = {"data": None}
                                 def _run_critique():
@@ -304,16 +307,16 @@ class PPTContentPlanner:
                                 if refined_result["data"]:
                                     result = refined_result["data"]
                             except Exception as critique_err:
-                                print(f"[PPTContentPlanner] ⚠️ 优化阶段跳过: {critique_err}")
+                                logger.warning(f"[PPTContentPlanner] ⚠️ 优化阶段跳过: {critique_err}")
 
                             return result
                     except Exception as model_err:
                         last_error = model_err
                         mode_str = "JSON模式" if use_json_mode else "文本模式"
-                        print(f"[PPTContentPlanner] 模型 {model} ({mode_str}) 失败: {model_err}")
+                        logger.info(f"[PPTContentPlanner] 模型 {model} ({mode_str}) 失败: {model_err}")
                         err_text = str(model_err)
                         if ("FAILED_PRECONDITION" in err_text and "location" in err_text.lower()) or "User location is not supported" in err_text:
-                            print("[PPTContentPlanner] 检测到地区限制，跳过AI规划并回退默认方案")
+                            logger.info("[PPTContentPlanner] 检测到地区限制，跳过AI规划并回退默认方案")
                             return self._generate_default_plan(user_request)
                         continue
             
@@ -321,7 +324,7 @@ class PPTContentPlanner:
             raise last_error or Exception("所有模型均失败")
         
         except Exception as e:
-            print(f"[PPTContentPlanner] 内容规划失败，使用默认方案: {e}")
+            logger.info(f"[PPTContentPlanner] 内容规划失败，使用默认方案: {e}")
             return self._generate_default_plan(user_request)
 
     def _run_critique_sync(self, initial_plan: Dict[str, Any], user_request: str) -> Dict[str, Any]:
@@ -372,11 +375,11 @@ class PPTContentPlanner:
             
             if response and response.text:
                 refined_plan = json.loads(response.text)
-                print("[PPTContentPlanner] ✅ 大纲优化完成")
+                logger.info("[PPTContentPlanner] ✅ 大纲优化完成")
                 return refined_plan
             
         except Exception as e:
-            print(f"[PPTContentPlanner] ⚠️ 大纲优化失败，使用初始大纲: {e}")
+            logger.warning(f"[PPTContentPlanner] ⚠️ 大纲优化失败，使用初始大纲: {e}")
             
         return initial_plan
 
@@ -435,7 +438,7 @@ class PPTContentPlanner:
                     return expanded
             return points
         except Exception as e:
-            print(f"[PPTContentPlanner] 扩充内容失败: {e}")
+            logger.info(f"[PPTContentPlanner] 扩充内容失败: {e}")
             return points
 
     def _generate_default_plan(self, user_request: str) -> Dict[str, Any]:
@@ -952,7 +955,7 @@ class PPTMasterOrchestrator:
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_msg = f"[{timestamp}] {message}"
         self.log.append(log_msg)
-        print(f"[PPTMasterOrchestrator] {log_msg}")
+        logger.info(f"[PPTMasterOrchestrator] {log_msg}")
     
     def get_blueprint_summary(self, blueprint: PPTBlueprint) -> Dict[str, Any]:
         """获取蓝图摘要"""

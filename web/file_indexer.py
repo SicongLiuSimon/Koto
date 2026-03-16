@@ -13,7 +13,10 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 from datetime import datetime
 import hashlib
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class FileIndexer:
     """文件索引与搜索引擎"""
@@ -279,7 +282,7 @@ class FileIndexer:
             return results
             
         except Exception as e:
-            print(f"[FileIndexer] 搜索失败: {e}")
+            logger.info(f"[FileIndexer] 搜索失败: {e}")
             return []
     
     def _generate_snippet(self, content: str, query: str, context_chars: int = 100) -> str:
@@ -363,7 +366,7 @@ class FileIndexer:
             return filtered_results
             
         except Exception as e:
-            print(f"[FileIndexer] 内容查找失败: {e}")
+            logger.info(f"[FileIndexer] 内容查找失败: {e}")
             return []
     
     def get_file_info(self, file_path: str) -> Optional[Dict[str, Any]]:
@@ -396,7 +399,7 @@ class FileIndexer:
             }
             
         except Exception as e:
-            print(f"[FileIndexer] 获取文件信息失败: {e}")
+            logger.info(f"[FileIndexer] 获取文件信息失败: {e}")
             return None
     
     def list_indexed_files(self, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
@@ -427,7 +430,7 @@ class FileIndexer:
             ]
             
         except Exception as e:
-            print(f"[FileIndexer] 列出文件失败: {e}")
+            logger.info(f"[FileIndexer] 列出文件失败: {e}")
             return []
     
     def remove_file(self, file_path: str) -> Dict[str, Any]:
@@ -475,33 +478,33 @@ def test_file_indexer():
     """测试文件索引器"""
     indexer = FileIndexer()
     
-    print("=== 测试文件索引器 ===\n")
+    logger.info("=== 测试文件索引器 ===\n")
     
     # 测试 1: 索引目录
-    print("1. 索引 workspace 目录...")
+    logger.info("1. 索引 workspace 目录...")
     result = indexer.index_directory(str(indexer.workspace_dir), recursive=True)
-    print(f"   结果: 总数={result.get('total')}, 已索引={result.get('indexed')}, 跳过={result.get('skipped')}\n")
+    logger.info(f"   结果: 总数={result.get('total')}, 已索引={result.get('indexed')}, 跳过={result.get('skipped')}\n")
     
     # 测试 2: 搜索
-    print("2. 搜索关键词 'python'...")
+    logger.info("2. 搜索关键词 'python'...")
     results = indexer.search("python", limit=5)
-    print(f"   找到 {len(results)} 个结果:")
+    logger.info(f"   找到 {len(results)} 个结果:")
     for i, r in enumerate(results, 1):
-        print(f"   {i}. {r['file_name']} - {r['match_snippet'][:50]}...\n")
+        logger.info(f"   {i}. {r['file_name']} - {r['match_snippet'][:50]}...\n")
     
     # 测试 3: 内容查找
-    print("3. 根据内容查找文件...")
+    logger.info("3. 根据内容查找文件...")
     sample = "import os\nimport sys"
     results = indexer.find_by_content(sample)
-    print(f"   找到 {len(results)} 个相似文件:")
+    logger.info(f"   找到 {len(results)} 个相似文件:")
     for i, r in enumerate(results[:3], 1):
-        print(f"   {i}. {r['file_name']} (相似度: {r.get('similarity', 0):.2f})\n")
+        logger.info(f"   {i}. {r['file_name']} (相似度: {r.get('similarity', 0):.2f})\n")
     
     # 测试 4: 列出所有文件
-    print("4. 列出前 10 个索引文件...")
+    logger.info("4. 列出前 10 个索引文件...")
     files = indexer.list_indexed_files(limit=10)
     for i, f in enumerate(files, 1):
-        print(f"   {i}. {f['file_name']} ({f['file_size']} bytes)")
+        logger.info(f"   {i}. {f['file_name']} ({f['file_size']} bytes)")
 
 
 if __name__ == "__main__":

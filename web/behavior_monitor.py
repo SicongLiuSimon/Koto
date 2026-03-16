@@ -11,7 +11,10 @@ from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import Counter, defaultdict
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class BehaviorMonitor:
     """用户行为监控器 - 追踪并分析用户操作"""
@@ -552,8 +555,8 @@ if __name__ == "__main__":
     # 测试代码
     monitor = BehaviorMonitor()
     
-    print("📊 行为监控测试")
-    print("=" * 50)
+    logger.info("📊 行为监控测试")
+    logger.info("=" * 50)
     
     # 记录一些测试事件
     monitor.log_event(
@@ -573,13 +576,13 @@ if __name__ == "__main__":
     
     # 获取统计信息
     stats = monitor.get_statistics()
-    print("\n统计信息：")
+    logger.info("\n统计信息：")
     for key, value in stats.items():
-        print(f"  • {key}: {value}")
+        logger.info(f"  • {key}: {value}")
     
     # 获取最近事件
     recent = monitor.get_recent_events(limit=5)
-    print(f"\n最近事件: {len(recent)} 条")
+    logger.info(f"\n最近事件: {len(recent)} 条")
     
-    print("\n" + "=" * 50)
-    print("✅ 行为监控模块已就绪")
+    logger.info("\n" + "=" * 50)
+    logger.info("✅ 行为监控模块已就绪")

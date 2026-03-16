@@ -2,6 +2,9 @@ import json
 import os
 import time
 from typing import List, Dict, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 class MemoryManager:
     """
@@ -21,7 +24,7 @@ class MemoryManager:
                 with open(self.memory_path, 'r', encoding='utf-8') as f:
                     self.memories = json.load(f)
             except Exception as e:
-                print(f"[MemoryManager] Failed to load memory: {e}")
+                logger.info(f"[MemoryManager] Failed to load memory: {e}")
                 self.memories = []
         else:
             self.memories = []
@@ -33,7 +36,7 @@ class MemoryManager:
             with open(self.memory_path, 'w', encoding='utf-8') as f:
                 json.dump(self.memories, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[MemoryManager] Failed to save memory: {e}")
+            logger.info(f"[MemoryManager] Failed to save memory: {e}")
 
     def add_memory(self, content: str, category: str = "user_preference", source: str = "user"):
         """
@@ -54,7 +57,7 @@ class MemoryManager:
         }
         self.memories.append(item)
         self._save()
-        print(f"[MemoryManager] Added memory: {content[:50]}...")
+        logger.info(f"[MemoryManager] Added memory: {content[:50]}...")
         return item
 
     def delete_memory(self, memory_id: int) -> bool:

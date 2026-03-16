@@ -9,7 +9,10 @@ import json
 import shutil
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class OperationHistory:
     """操作历史管理器"""
@@ -91,7 +94,7 @@ class OperationHistory:
             shutil.copy2(file_path, backup_path)
             return backup_path
         except Exception as e:
-            print(f"备份文件失败: {e}")
+            logger.info(f"备份文件失败: {e}")
             return None
     
     def rollback(self, op_id: str) -> Dict[str, Any]:
@@ -219,7 +222,7 @@ class OperationHistory:
                         operation["can_rollback"] = False
                         removed_count += 1
                     except Exception as e:
-                        print(f"删除备份失败: {e}")
+                        logger.info(f"删除备份失败: {e}")
         
         if removed_count > 0:
             self._save_history()
@@ -291,9 +294,9 @@ def track_operation(operation_type: str):
 if __name__ == "__main__":
     history = OperationHistory()
     
-    print("=" * 60)
-    print("操作历史与回滚系统测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("操作历史与回滚系统测试")
+    logger.info("=" * 60)
     
     # 创建测试文件
     test_file = "test_operation.txt"
@@ -302,36 +305,36 @@ if __name__ == "__main__":
     with open(test_file, 'w', encoding='utf-8') as f:
         f.write("初始内容")
     op_id1 = history.record_operation("create", test_file)
-    print(f"✅ 记录创建操作: {op_id1}")
+    logger.info(f"✅ 记录创建操作: {op_id1}")
     
     # 记录编辑操作
     with open(test_file, 'w', encoding='utf-8') as f:
         f.write("修改后的内容")
     op_id2 = history.record_operation("edit", test_file)
-    print(f"✅ 记录编辑操作: {op_id2}")
+    logger.info(f"✅ 记录编辑操作: {op_id2}")
     
     # 查看当前内容
     with open(test_file, 'r', encoding='utf-8') as f:
-        print(f"当前内容: {f.read()}")
+        logger.info(f"当前内容: {f.read()}")
     
     # 回滚编辑
-    print("\n执行回滚...")
+    logger.info("\n执行回滚...")
     rollback_result = history.rollback(op_id2)
     if rollback_result["success"]:
-        print(f"✅ 回滚成功: {rollback_result['action']}")
+        logger.info(f"✅ 回滚成功: {rollback_result['action']}")
         
         # 查看回滚后的内容
         with open(test_file, 'r', encoding='utf-8') as f:
-            print(f"回滚后内容: {f.read()}")
+            logger.info(f"回滚后内容: {f.read()}")
     
     # 查看统计信息
     stats = history.get_statistics()
-    print(f"\n统计信息:")
-    print(f"- 总操作数: {stats['total_operations']}")
-    print(f"- 可回滚: {stats['can_rollback']}")
-    print(f"- 已回滚: {stats['rolled_back']}")
+    logger.info(f"\n统计信息:")
+    logger.info(f"- 总操作数: {stats['total_operations']}")
+    logger.info(f"- 可回滚: {stats['can_rollback']}")
+    logger.info(f"- 已回滚: {stats['rolled_back']}")
     
     # 清理测试文件
     os.remove(test_file)
     
-    print("\n✅ 操作历史系统就绪")
+    logger.info("\n✅ 操作历史系统就绪")

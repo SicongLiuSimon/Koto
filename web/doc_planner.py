@@ -30,11 +30,14 @@ import json
 import re
 from typing import Optional
 from dataclasses import dataclass, field, asdict
+import logging
 
 
 # ═══════════════════════════════════════════════════════
 #  数据结构
 # ═══════════════════════════════════════════════════════
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class SectionPlan:
@@ -185,13 +188,13 @@ class DocumentPlanner:
         # 提取 JSON 块
         json_str = self._extract_json(raw_text)
         if not json_str:
-            print(f"[DocPlanner] ⚠️ 无法从输出中提取 JSON，使用 fallback")
+            logger.warning(f"[DocPlanner] ⚠️ 无法从输出中提取 JSON，使用 fallback")
             return self._fallback_plan(user_request, raw_plan_text=raw_text)
 
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError as e:
-            print(f"[DocPlanner] ⚠️ JSON 解析失败: {e}")
+            logger.warning(f"[DocPlanner] ⚠️ JSON 解析失败: {e}")
             return self._fallback_plan(user_request, raw_plan_text=raw_text)
 
         # 转换 sections
@@ -218,7 +221,7 @@ class DocumentPlanner:
             raw_plan_text=raw_text,
             success=True,
         )
-        print(f"[DocPlanner] ✅ 规划完成: {plan.doc_type} | {len(plan.sections)} 节 | {plan.title}")
+        logger.info(f"[DocPlanner] ✅ 规划完成: {plan.doc_type} | {len(plan.sections)} 节 | {plan.title}")
         return plan
 
     def _extract_json(self, text: str) -> Optional[str]:

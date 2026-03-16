@@ -11,7 +11,10 @@ import shutil
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class FileEditor:
     """本地文件编辑器"""
@@ -105,7 +108,7 @@ class FileEditor:
             shutil.copy2(path, backup_path)
             return str(backup_path)
         except Exception as e:
-            print(f"[FileEditor] 备份失败: {e}")
+            logger.info(f"[FileEditor] 备份失败: {e}")
             return None
     
     def write_file(self, file_path: str, content: str, encoding: str = "utf-8", create_backup: bool = True) -> Dict[str, Any]:
@@ -409,33 +412,33 @@ Line 4: Another line
 Line 5: End"""
     
     test_file.write_text(test_content, encoding="utf-8")
-    print(f"✅ 创建测试文件: {test_file}")
+    logger.info(f"✅ 创建测试文件: {test_file}")
     
     # 测试 1: 读取
-    print("\n=== 测试读取 ===")
+    logger.info("\n=== 测试读取 ===")
     result = editor.read_file(str(test_file))
-    print(f"成功: {result['success']}, 行数: {result.get('lines')}")
+    logger.info(f"成功: {result['success']}, 行数: {result.get('lines')}")
     
     # 测试 2: 替换
-    print("\n=== 测试替换 ===")
+    logger.info("\n=== 测试替换 ===")
     result = editor.replace_text(str(test_file), "TODO", "DONE")
-    print(f"成功: {result['success']}, 替换次数: {result.get('replacements')}")
-    print(f"预览: {result.get('preview')}")
+    logger.info(f"成功: {result['success']}, 替换次数: {result.get('replacements')}")
+    logger.info(f"预览: {result.get('preview')}")
     
     # 测试 3: 插入
-    print("\n=== 测试插入 ===")
+    logger.info("\n=== 测试插入 ===")
     result = editor.insert_line(str(test_file), 3, "Line 2.5: Inserted line", mode="after")
-    print(f"成功: {result['success']}, 消息: {result.get('message')}")
+    logger.info(f"成功: {result['success']}, 消息: {result.get('message')}")
     
     # 测试 4: 智能编辑
-    print("\n=== 测试智能编辑 ===")
+    logger.info("\n=== 测试智能编辑 ===")
     result = editor.smart_edit(str(test_file), "把 'World' 改成 '世界'")
-    print(f"操作: {result.get('operation')}, 结果: {result.get('result', {}).get('replacements')} 次替换")
+    logger.info(f"操作: {result.get('operation')}, 结果: {result.get('result', {}).get('replacements')} 次替换")
     
     # 显示最终内容
-    print(f"\n=== 最终内容 ===")
+    logger.info(f"\n=== 最终内容 ===")
     final = editor.read_file(str(test_file))
-    print(final['content'])
+    logger.info(final['content'])
 
 
 if __name__ == "__main__":

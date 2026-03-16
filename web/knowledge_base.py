@@ -15,6 +15,9 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime
 from pathlib import Path
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     import google.genai as genai  # New SDK
@@ -87,7 +90,7 @@ class KnowledgeBase:
                     self.client = OldSDKShim(genai)
 
             except Exception as e:
-                print(f"[KnowledgeBase] API initialization error: {e}")
+                logger.info(f"[KnowledgeBase] API initialization error: {e}")
         
         # Load data
         self.index = self._load_index()
@@ -101,7 +104,7 @@ class KnowledgeBase:
                 with open(self.index_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[KnowledgeBase] 索引加载失败: {e}")
+                logger.info(f"[KnowledgeBase] 索引加载失败: {e}")
         return {"documents": {}, "last_updated": None}
     
     def _save_index(self):
@@ -117,7 +120,7 @@ class KnowledgeBase:
                 with open(self.chunks_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[KnowledgeBase] 块文件加载失败: {e}")
+                logger.info(f"[KnowledgeBase] 块文件加载失败: {e}")
         return {"chunks": {}, "last_updated": None}
     
     def _save_chunks(self):
@@ -170,7 +173,7 @@ class KnowledgeBase:
                     for text in batch:
                         embeddings.append([0.0] * 768)
             except Exception as e:
-                print(f"[KnowledgeBase] Embedding error: {e}")
+                logger.info(f"[KnowledgeBase] Embedding error: {e}")
                 # Return zero vectors on failure
                 embeddings.extend([[0.0] * 768 for _ in batch])
         
@@ -229,11 +232,11 @@ class KnowledgeBase:
                 elif hasattr(resp, 'embedding'):
                      q_vec = resp.embedding
                 else:
-                    print("[KB] Unexpected embedding response format")
+                    logger.info("[KB] Unexpected embedding response format")
                     return []
             except Exception as embed_err:
                  # Fallback for old SDK structure?
-                 print(f"[KB] Embedding error: {embed_err}")
+                 logger.info(f"[KB] Embedding error: {embed_err}")
                  return []
             
             query_vec = np.array(q_vec)
@@ -277,7 +280,7 @@ class KnowledgeBase:
             return results
             
         except Exception as e:
-            print(f"[KnowledgeBase] Search failed: {e}")
+            logger.info(f"[KnowledgeBase] Search failed: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -547,29 +550,29 @@ class KnowledgeBase:
 if __name__ == "__main__":
     kb = KnowledgeBase()
     
-    print("=" * 50)
-    print("Koto 向量化知识库测试")
-    print("=" * 50)
+    logger.info("=" * 50)
+    logger.info("Koto 向量化知识库测试")
+    logger.info("=" * 50)
     
     # 1. 扫描目录
-    print("\n1. 扫描文档目录...")
+    logger.info("\n1. 扫描文档目录...")
     result = kb.scan_directory()
-    print(f"   添加: {result['added']} 个")
-    print(f"   跳过: {result['skipped']} 个")
-    print(f"   错误: {result['errors']} 个")
+    logger.info(f"   添加: {result['added']} 个")
+    logger.info(f"   跳过: {result['skipped']} 个")
+    logger.error(f"   错误: {result['errors']} 个")
     
     # 2. 统计信息
-    print("\n2. 知识库统计...")
+    logger.info("\n2. 知识库统计...")
     stats = kb.get_stats()
-    print(f"   文档总数: {stats['total_documents']}")
-    print(f"   块总数: {stats['total_chunks']}")
-    print(f"   总大小: {stats['total_size_mb']} MB")
-    print(f"   文件类型: {stats['file_types']}")
+    logger.info(f"   文档总数: {stats['total_documents']}")
+    logger.info(f"   块总数: {stats['total_chunks']}")
+    logger.info(f"   总大小: {stats['total_size_mb']} MB")
+    logger.info(f"   文件类型: {stats['file_types']}")
     
     # 3. 语义搜索测试
-    print("\n3. 语义搜索测试 (查询: 'Koto')...")
+    logger.info("\n3. 语义搜索测试 (查询: 'Koto')...")
     results = kb.search("Koto", top_k=3)
-    print(f"   找到 {len(results)} 个相关块")
+    logger.info(f"   找到 {len(results)} 个相关块")
     for r in results:
-        print(f"   - {r['file_name']} (相似度: {r['similarity']:.3f})")
-        print(f"     {r['text'][:80]}...")
+        logger.info(f"   - {r['file_name']} (相似度: {r['similarity']:.3f})")
+        logger.info(f"     {r['text'][:80]}...")

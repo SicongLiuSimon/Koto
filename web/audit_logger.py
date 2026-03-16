@@ -23,7 +23,10 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from pathlib import Path
 import hashlib
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class AuditActionType(Enum):
     """审计操作类型"""
@@ -266,7 +269,7 @@ class AuditLogger:
             return log_id
             
         except Exception as e:
-            print(f"Error logging audit: {e}")
+            logger.info(f"Error logging audit: {e}")
             return ""
         finally:
             conn.close()

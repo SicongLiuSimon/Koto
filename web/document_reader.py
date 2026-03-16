@@ -8,7 +8,10 @@
 import os
 from typing import Dict, List, Any, Optional
 from pathlib import Path
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class DocumentReader:
     """文档内容读取器"""
@@ -478,13 +481,13 @@ if __name__ == "__main__":
     # 测试读取PPT
     test_ppt = r"workspace\documents\MicroLED技术全景解析_20260201_194320.pptx"
     if os.path.exists(test_ppt):
-        print("=" * 60)
-        print("测试读取PPT")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("测试读取PPT")
+        logger.info("=" * 60)
         result = reader.read_ppt(test_ppt)
-        print(f"成功: {result.get('success')}")
-        print(f"幻灯片数: {result.get('slide_count')}")
+        logger.info(f"成功: {result.get('success')}")
+        logger.info(f"幻灯片数: {result.get('slide_count')}")
         
         formatted = reader.format_for_ai(result)
-        print("\n格式化输出:")
-        print(formatted[:500] + "..." if len(formatted) > 500 else formatted)
+        logger.info("\n格式化输出:")
+        logger.info(formatted[:500] + "..." if len(formatted) > 500 else formatted)

@@ -10,7 +10,10 @@ import json
 import time
 from typing import Dict, Any, Optional, List, Callable
 from datetime import datetime
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class DocumentFeedbackSystem:
     """文档智能反馈系统"""
@@ -56,7 +59,7 @@ class DocumentFeedbackSystem:
             }
         """
         # 第1步：读取文档
-        print(f"[DocumentFeedback] 📖 读取文档: {os.path.basename(file_path)}")
+        logger.info(f"[DocumentFeedback] 📖 读取文档: {os.path.basename(file_path)}")
         doc_data = self.reader.read_document(file_path)
         
         if not doc_data.get("success"):
@@ -83,7 +86,7 @@ class DocumentFeedbackSystem:
             }
         
         selected_model, _ = self._select_best_model(model_id)
-        print(f"[DocumentFeedback] 🤖 AI分析中...")
+        logger.info(f"[DocumentFeedback] 🤖 AI分析中...")
         
         try:
             from google.genai import types
@@ -119,7 +122,7 @@ class DocumentFeedbackSystem:
             }
         
         # 第5步：解析AI建议
-        print(f"[DocumentFeedback] 📋 解析AI建议...")
+        logger.info(f"[DocumentFeedback] 📋 解析AI建议...")
         modifications = self.editor.parse_ai_suggestions(ai_response)
         
         # 提取摘要（AI响应中的文字说明部分）
@@ -155,7 +158,7 @@ class DocumentFeedbackSystem:
                 "applied_count": 5
             }
         """
-        print(f"[DocumentFeedback] ✏️ 应用修改...")
+        logger.info(f"[DocumentFeedback] ✏️ 应用修改...")
         
         # 根据文件类型调用对应的编辑器
         ext = os.path.splitext(file_path)[1].lower()
@@ -173,7 +176,7 @@ class DocumentFeedbackSystem:
             }
         
         if result.get("success"):
-            print(f"[DocumentFeedback] ✅ 修改完成: {os.path.basename(result['file_path'])}")
+            logger.info(f"[DocumentFeedback] ✅ 修改完成: {os.path.basename(result['file_path'])}")
         
         return result
     
@@ -194,9 +197,9 @@ class DocumentFeedbackSystem:
         Returns:
             完整的处理结果
         """
-        print("=" * 60)
-        print("🔄 启动文档智能反馈系统")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("🔄 启动文档智能反馈系统")
+        logger.info("=" * 60)
         
         # 第1步：分析并获取建议
         analysis_result = self.analyze_and_suggest(file_path, user_requirement)
@@ -204,9 +207,9 @@ class DocumentFeedbackSystem:
         if not analysis_result.get("success"):
             return analysis_result
         
-        print(f"\n📊 分析结果:")
-        print(f"   修改建议数: {analysis_result['modification_count']}")
-        print(f"   摘要: {analysis_result['summary'][:100]}...")
+        logger.info(f"\n📊 分析结果:")
+        logger.info(f"   修改建议数: {analysis_result['modification_count']}")
+        logger.info(f"   摘要: {analysis_result['summary'][:100]}...")
         
         # 第2步：应用修改（如果启用）
         if auto_apply and analysis_result['modification_count'] > 0:
@@ -450,7 +453,7 @@ class DocumentFeedbackSystem:
             t.join(timeout=10)  # models.list() 最多等 10s，防止慢网络卡死分析线程
             models = result_holder["models"]
             if models is None:  # timeout
-                print("[DocumentFeedback] ⚠️ models.list() 超时（>10s），使用空列表降级", flush=True)
+                logger.warning("[DocumentFeedback] ⚠️ models.list() 超时（>10s），使用空列表降级")
                 models = []
             self._model_cache = models
             return models
@@ -485,11 +488,11 @@ class DocumentFeedbackSystem:
         for name in priority:
             if name in available:
                 if name != preferred:
-                    print(f"[DocumentFeedback] 🔄 模型降级: {preferred} → {name}", flush=True)
+                    logger.info(f"[DocumentFeedback] 🔄 模型降级: {preferred} → {name}")
                 return name, models
 
         # 若列表中没有任何匹配，使用 safe_preferred 硬降级
-        print(f"[DocumentFeedback] ⚠️ 无可用匹配模型，强制使用: {safe_preferred}", flush=True)
+        logger.warning(f"[DocumentFeedback] ⚠️ 无可用匹配模型，强制使用: {safe_preferred}")
         return safe_preferred, models
 
     def _format_model_table(self, models: List[Dict[str, str]]) -> str:
@@ -541,22 +544,22 @@ class DocumentFeedbackSystem:
             t.start()
             t.join(timeout)
             if t.is_alive():
-                print(f"[DocumentFeedback] ⏱️ 探测 {candidate} 超时，跳过", flush=True)
+                logger.info(f"[DocumentFeedback] ⏱️ 探测 {candidate} 超时，跳过")
                 continue
             if _result["ok"]:
-                print(f"[DocumentFeedback] ✅ 探测成功: {candidate}", flush=True)
+                logger.info(f"[DocumentFeedback] ✅ 探测成功: {candidate}")
                 return candidate
             err = _result["err"]
             _is_503 = ("503" in err or "UNAVAILABLE" in err
                        or "overloaded" in err.lower() or "high demand" in err.lower())
             if _is_503:
-                print(f"[DocumentFeedback] ⚠️ {candidate} 过载(503)，尝试下一个模型", flush=True)
+                logger.warning(f"[DocumentFeedback] ⚠️ {candidate} 过载(503)，尝试下一个模型")
                 continue
             # 非 503 错误（认证失败/配额超限等）—— 不再往下尝试
-            print(f"[DocumentFeedback] ❌ {candidate} 探测失败(非503): {err[:100]}", flush=True)
+            logger.error(f"[DocumentFeedback] ❌ {candidate} 探测失败(非503): {err[:100]}")
             break
 
-        print(f"[DocumentFeedback] ⚠️ 所有探测候选模型均不可用", flush=True)
+        logger.warning(f"[DocumentFeedback] ⚠️ 所有探测候选模型均不可用")
         return None
 
     # ==================== 文档自动标注功能 ====================
@@ -597,18 +600,18 @@ class DocumentFeedbackSystem:
 
             def _runner():
                 try:
-                    print(f"[DocumentFeedback] 🌐 调用AI API (超时: {timeout_seconds}s)...")
+                    logger.info(f"[DocumentFeedback] 🌐 调用AI API (超时: {timeout_seconds}s)...")
                     result_holder["response"] = _call_model(contents)
-                    print(f"[DocumentFeedback] ✅ AI响应成功")
+                    logger.info(f"[DocumentFeedback] ✅ AI响应成功")
                 except Exception as e:
-                    print(f"[DocumentFeedback] ❌ AI调用异常: {e}")
+                    logger.error(f"[DocumentFeedback] ❌ AI调用异常: {e}")
                     result_holder["error"] = e
 
             t = threading.Thread(target=_runner, daemon=True)
             t.start()
             t.join(timeout_seconds)
             if t.is_alive():
-                print(f"[DocumentFeedback] ⏱️ AI调用超时 ({timeout_seconds}s)")
+                logger.info(f"[DocumentFeedback] ⏱️ AI调用超时 ({timeout_seconds}s)")
                 return None, TimeoutError(f"Chunk timeout after {timeout_seconds}s")
             if result_holder["error"]:
                 return None, result_holder["error"]
@@ -625,7 +628,7 @@ class DocumentFeedbackSystem:
         min_new_per_round = 3
 
         for round_idx in range(1, max_rounds + 1):
-            print(f"[DocumentFeedback] 🔁 第{chunk_index}段进入第{round_idx}/{max_rounds}轮审阅")
+            logger.info(f"[DocumentFeedback] 🔁 第{chunk_index}段进入第{round_idx}/{max_rounds}轮审阅")
             # 第一轮注重全面扫描，如果只有一轮，则直接要求全面
             current_focus_prompt = ""
             if round_idx == 1:
@@ -651,7 +654,7 @@ class DocumentFeedbackSystem:
                     # 断线重试：首次立即，后续等待 3s / 6s 再试
                     if retry > 0:
                         _wait = 3 * retry
-                        print(f"[DocumentFeedback] ⏳ 等待{_wait}s后重试 (第{retry+1}/{max_retries}次)...")
+                        logger.info(f"[DocumentFeedback] ⏳ 等待{_wait}s后重试 (第{retry+1}/{max_retries}次)...")
                         import time as _time_mod
                         _time_mod.sleep(_wait)
                     response, err = _call_with_timeout(prompt)  # 默认180秒超时
@@ -676,9 +679,9 @@ class DocumentFeedbackSystem:
                                     if rejected_indices:
                                         before = len(annotations)
                                         annotations = [a for i, a in enumerate(annotations) if i not in rejected_indices]
-                                        print(f"[DocumentFeedback] 🛡️ 二次检测: 过滤 {before - len(annotations)} 条幻觉项，保留 {len(annotations)} 条")
+                                        logger.info(f"[DocumentFeedback] 🛡️ 二次检测: 过滤 {before - len(annotations)} 条幻觉项，保留 {len(annotations)} 条")
                             except Exception as e:
-                                print(f"[DocumentFeedback] ⚠️ 二次检测跳过: {e}")
+                                logger.warning(f"[DocumentFeedback] ⚠️ 二次检测跳过: {e}")
                             
                             new_items = []
                             for item in annotations:
@@ -689,7 +692,7 @@ class DocumentFeedbackSystem:
                             all_annotations.extend(new_items)
                             if len(new_items) < min_new_per_round:
                                 if round_idx < max_rounds:
-                                    print(f"[DocumentFeedback] ℹ️ 第{chunk_index}段第{round_idx}轮新增较少({len(new_items)}条)，继续下一轮查漏")
+                                    logger.info(f"[DocumentFeedback] ℹ️ 第{chunk_index}段第{round_idx}轮新增较少({len(new_items)}条)，继续下一轮查漏")
                                     break
                                 return all_annotations
                             break
@@ -707,7 +710,7 @@ class DocumentFeedbackSystem:
                                or "overloaded" in error_msg.lower()
                                or "high demand" in error_msg.lower())
                     if _is_503:
-                        print(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载，跳过重试: {error_msg[:80]}", flush=True)
+                        logger.info(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载，跳过重试: {error_msg[:80]}")
                         fallback = self._fallback_annotations_from_chunk(chunk)
                         for ann in fallback:
                             ann["_koto_fallback_error"] = error_msg
@@ -721,12 +724,12 @@ class DocumentFeedbackSystem:
                                       or "RemoteDisconnected" in error_msg
                                       or "without sending a response" in error_msg)
                     if _is_disconnect and retry < max_retries - 1:
-                        print(f"[DocumentFeedback] 🔌 第{chunk_index}段连接断开，将重试: {error_msg[:80]}")
+                        logger.info(f"[DocumentFeedback] 🔌 第{chunk_index}段连接断开，将重试: {error_msg[:80]}")
                         continue
                     if retry < max_retries - 1:
-                        print(f"[DocumentFeedback] ⚠️ 第{chunk_index}段第{round_idx}轮失败，准备重试: {error_msg}")
+                        logger.warning(f"[DocumentFeedback] ⚠️ 第{chunk_index}段第{round_idx}轮失败，准备重试: {error_msg}")
                         continue
-                    print(f"[DocumentFeedback] ❌ 第{chunk_index}段第{round_idx}轮失败（已重试{max_retries}次）: {error_msg}")
+                    logger.error(f"[DocumentFeedback] ❌ 第{chunk_index}段第{round_idx}轮失败（已重试{max_retries}次）: {error_msg}")
                     fallback = self._fallback_annotations_from_chunk(chunk)
                     # 给每条标注打上兜底标记，供调用层感知（内部键，最终不暴露给用户）
                     for ann in fallback:
@@ -1185,7 +1188,7 @@ class DocumentFeedbackSystem:
             合并后的标注结果
         """
         effective_model_id = model_id or self.default_model_id
-        print(f"[DocumentFeedback] 📖 读取大文档: {os.path.basename(file_path)}")
+        logger.info(f"[DocumentFeedback] 📖 读取大文档: {os.path.basename(file_path)}")
         
         # 读取文档
         doc_data = self.reader.read_document(file_path)
@@ -1206,7 +1209,7 @@ class DocumentFeedbackSystem:
 
         # 如果文档不大（含头部信息后仍在阈值内），直接单段AI标注（避免多段时连接不稳定导致部分失败）
         if total_length <= chunk_size:
-            print(f"[DocumentFeedback] 📄 文档较小({total_length}字符)，单段AI标注")
+            logger.info(f"[DocumentFeedback] 📄 文档较小({total_length}字符)，单段AI标注")
             selected_model, _ = self._select_best_model(effective_model_id)
             raw_annotations = self._analyze_chunk_for_annotations(
                 chunk=formatted_content,  # 用完整格式化文本（含元数据头），与老多段路径 chunk1 行为一致
@@ -1233,18 +1236,18 @@ class DocumentFeedbackSystem:
             }
 
         # 分段处理（按段落切分，保证不打断句子）
-        print(f"[DocumentFeedback] 📚 文档较大({total_length}字符)，分段处理")
+        logger.info(f"[DocumentFeedback] 📚 文档较大({total_length}字符)，分段处理")
         chunks = self._split_into_chunks_by_paragraphs(content_for_chunking, chunk_size)
         
         # AI禁用时，对每个chunk应用本地兜底
         if os.getenv("KOTO_DISABLE_AI") == "1":
-            print(f"[DocumentFeedback] ⚠️ KOTO_DISABLE_AI=1，使用本地兜底标注（{len(chunks)}段）")
+            logger.warning(f"[DocumentFeedback] ⚠️ KOTO_DISABLE_AI=1，使用本地兜底标注（{len(chunks)}段）")
             
             # 第一轮：收集所有候选标注，同时统计每段的信息密度
             all_candidates = []  # [(原文片段, 修改建议, chunk_index, 优先级)]
             chunk_densities = []  # 记录每段的词汇密度
             
-            print(f"\n[DocumentFeedback] 📋 第一阶段：收集标注候选...\n")
+            logger.info(f"\n[DocumentFeedback] 📋 第一阶段：收集标注候选...\n")
             for i, chunk in enumerate(chunks):
                 chunk_fallback = self._fallback_annotations_from_chunk(chunk)
                 density = len(chunk_fallback) / max(1, len(chunk) / 1000)  # 每1000字的标注密度
@@ -1263,16 +1266,14 @@ class DocumentFeedbackSystem:
                 progress = ((i + 1) / len(chunks)) * 100
                 bar_filled = int(10 * (i + 1) / len(chunks))
                 bar = '█' * bar_filled + '░' * (10 - bar_filled)
-                print(f"\r[DocumentFeedback] 🔍 [{bar}] {i+1}/{len(chunks)} | 密度: {density:.1f}/千字", end="")
-            
-            print()  # 换行
+                logger.info(f"[DocumentFeedback] 🔍 [{bar}] {i+1}/{len(chunks)} | 密度: {density:.1f}/千字")
             
             # 计算平均密度和目标标注数
             avg_density = sum(chunk_densities) / len(chunk_densities) if chunk_densities else 0
             target_count = len(formatted_content) // 1000 * 10
             
             # 第二轮：按密度均衡选择标注
-            print(f"\n[DocumentFeedback] ⚖️ 第二阶段：均衡分布（目标{target_count}条）...\n")
+            logger.info(f"\n[DocumentFeedback] ⚖️ 第二阶段：均衡分布（目标{target_count}条）...\n")
             
             # 分chunk选择，确保每段都有适当数量
             target_per_chunk = max(1, target_count // len(chunks))
@@ -1321,10 +1322,8 @@ class DocumentFeedbackSystem:
                 progress = ((chunk_idx + 1) / len(chunks)) * 100
                 bar_filled = int(20 * (chunk_idx + 1) / len(chunks))
                 bar = '█' * bar_filled + '░' * (20 - bar_filled)
-                print(f"\r[DocumentFeedback] 📊 [{bar}] {chunk_idx+1}/{len(chunks)} ({progress:.0f}%) | " +
-                      f"本段{len(chunk_selection)}条 | 累计{len(selected_annotations)}条", end="")
-            
-            print()  # 换行
+                logger.info(f"[DocumentFeedback] 📊 [{bar}] {chunk_idx+1}/{len(chunks)} ({progress:.0f}%) | " +
+                      f"本段{len(chunk_selection)}条 | 累计{len(selected_annotations)}条")
             
             # 如果标注数不足目标，补充
             if len(selected_annotations) < target_count:
@@ -1369,14 +1368,14 @@ class DocumentFeedbackSystem:
         if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
             _probed = self._probe_working_model(selected_model)
             if _probed is None:
-                print(f"[DocumentFeedback] ⚠️ 模型探测：所有候选均不可用，将全局使用本地兜底", flush=True)
+                logger.warning(f"[DocumentFeedback] ⚠️ 模型探测：所有候选均不可用，将全局使用本地兜底")
             elif _probed != selected_model:
-                print(f"[DocumentFeedback] 🔄 模型探测切换: {selected_model} → {_probed}", flush=True)
+                logger.info(f"[DocumentFeedback] 🔄 模型探测切换: {selected_model} → {_probed}")
                 selected_model = _probed
                 model_note = f"模型: {selected_model}（首选 {effective_model_id} 不可用，已自动降级）"
 
-        print(f"[DocumentFeedback] 📦 文档较大({total_length}字符)，分{len(chunks)}段处理")
-        print(f"[DocumentFeedback] 🎯 目标标注数: 约{total_length//1000*10}条（每1000字10条）\n")
+        logger.info(f"[DocumentFeedback] 📦 文档较大({total_length}字符)，分{len(chunks)}段处理")
+        logger.info(f"[DocumentFeedback] 🎯 目标标注数: 约{total_length//1000*10}条（每1000字10条）\n")
 
         # 处理每一段（严格顺序执行，失败自动拆分重试）
         from collections import deque
@@ -1404,8 +1403,8 @@ class DocumentFeedbackSystem:
             bar_filled = int(bar_length * processed / max(1, current_total))
             progress_bar = '█' * bar_filled + '░' * (bar_length - bar_filled)
 
-            print(f"\n[DocumentFeedback] 📊 [{progress_bar}] {processed}/{current_total} ({progress_pct:.0f}%)")
-            print(f"[DocumentFeedback] ⏱️ 已用时: {elapsed:.1f}s | 累计{len(all_annotations)}条标注 | 剩余{len(queue)}段")
+            logger.info(f"\n[DocumentFeedback] 📊 [{progress_bar}] {processed}/{current_total} ({progress_pct:.0f}%)")
+            logger.info(f"[DocumentFeedback] ⏱️ 已用时: {elapsed:.1f}s | 累计{len(all_annotations)}条标注 | 剩余{len(queue)}段")
 
             annotations = self._analyze_chunk_for_annotations(
                 chunk=chunk,
@@ -1434,7 +1433,7 @@ class DocumentFeedbackSystem:
                     }
                 for sc in reversed(sub_chunks):
                     queue.appendleft(sc)
-                print(f"[DocumentFeedback] 🔁 分段失败，已拆分为{len(sub_chunks)}段重试")
+                logger.info(f"[DocumentFeedback] 🔁 分段失败，已拆分为{len(sub_chunks)}段重试")
                 continue
 
             new_count = 0
@@ -1446,7 +1445,7 @@ class DocumentFeedbackSystem:
                     last_api_error = api_err
                 if len(fb_items) == len(annotations):
                     fallback_chunk_count += 1
-                    print(f"[DocumentFeedback] ⚠️ 第{processed}段全部使用本地兜底（API错误: {api_err[:60]}）")
+                    logger.error(f"[DocumentFeedback] ⚠️ 第{processed}段全部使用本地兜底（API错误: {api_err[:60]}）")
                 else:
                     # 部分兜底（理论上不会出现，保留以防万一）
                     fallback_chunk_count += 1
@@ -1456,7 +1455,7 @@ class DocumentFeedbackSystem:
                         and any(a.get("_koto_503") for a in annotations)):
                     _probed_switch = self._probe_working_model(selected_model)
                     if _probed_switch and _probed_switch != selected_model:
-                        print(f"[DocumentFeedback] 🔄 503触发切换: {selected_model} → {_probed_switch}", flush=True)
+                        logger.info(f"[DocumentFeedback] 🔄 503触发切换: {selected_model} → {_probed_switch}")
                         selected_model = _probed_switch
                         model_note = f"模型: {selected_model}（运行中自动从503过载模型切换）"
                     _model_switched = True  # 无论成功与否只切换一次
@@ -1477,15 +1476,15 @@ class DocumentFeedbackSystem:
                     new_count += 1
 
             msg = f"已完成 {processed}/{current_total} 段 (本段+{new_count}条，累计{len(all_annotations)}条)"
-            print(f"[DocumentFeedback] ✅ 第 {processed} 段完成: 新增 {new_count} 条标注")
+            logger.info(f"[DocumentFeedback] ✅ 第 {processed} 段完成: 新增 {new_count} 条标注")
             if progress_callback:
                 progress_callback(processed, current_total, msg)
 
         elapsed_total = time.time() - start_time
 
-        print(f"\n[DocumentFeedback] 🎉 分段处理完成")
-        print(f"[DocumentFeedback] ⏱️ 总耗时: {elapsed_total:.1f}s")
-        print(f"[DocumentFeedback] 📊 共生成{len(all_annotations)}条标注（目标: 约{total_length//1000*10}条）\n")
+        logger.info(f"\n[DocumentFeedback] 🎉 分段处理完成")
+        logger.info(f"[DocumentFeedback] ⏱️ 总耗时: {elapsed_total:.1f}s")
+        logger.info(f"[DocumentFeedback] 📊 共生成{len(all_annotations)}条标注（目标: 约{total_length//1000*10}条）\n")
         
         return {
             "success": True,
@@ -1516,7 +1515,7 @@ class DocumentFeedbackSystem:
         分析文档，生成标注格式的建议
         改进版：逐段标注，确保覆盖全文
         """
-        print(f"[DocumentFeedback] 📖 读取文档: {os.path.basename(file_path)}")
+        logger.info(f"[DocumentFeedback] 📖 读取文档: {os.path.basename(file_path)}")
         
         # 第1步：读取文档
         doc_data = self.reader.read_document(file_path)
@@ -1531,7 +1530,7 @@ class DocumentFeedbackSystem:
         
         # 第3步：按段落切分
         paragraphs = [p.strip() for p in formatted_content.split("\n\n") if p.strip()]
-        print(f"[DocumentFeedback] 📝 文档共 {len(paragraphs)} 段，使用 AI({model_id}) 逐段分析...")
+        logger.info(f"[DocumentFeedback] 📝 文档共 {len(paragraphs)} 段，使用 AI({model_id}) 逐段分析...")
         # 注意：此函数仅处理小文档（由 analyze_for_annotation_chunked 路由而来）
         # 大文档已在 analyze_for_annotation_chunked 中按 chunk_size 分段，不应走此函数
         
@@ -1541,7 +1540,7 @@ class DocumentFeedbackSystem:
         
         # 如果没有AI客户端，直接用本地标注
         if not self.client:
-            print(f"[DocumentFeedback] ⚠️ 未配置AI客户端，使用本地兜底标注")
+            logger.warning(f"[DocumentFeedback] ⚠️ 未配置AI客户端，使用本地兜底标注")
             for idx, para in enumerate(paragraphs):
                 if para:
                     annotations = self._fallback_annotations_from_chunk(para)
@@ -1571,7 +1570,7 @@ class DocumentFeedbackSystem:
             if not paragraph or len(paragraph) < 20:
                 continue  # 跳过太短的段落
             
-            print(f"[DocumentFeedback] 🔄 分析第 {para_idx + 1}/{len(paragraphs)} 段...")
+            logger.info(f"[DocumentFeedback] 🔄 分析第 {para_idx + 1}/{len(paragraphs)} 段...")
             
             # 为每段构建Prompt
             para_prompt = self._build_annotation_prompt(
@@ -1615,7 +1614,7 @@ class DocumentFeedbackSystem:
                 if not _para_last_err:
                     _para_last_err = _err_s
                 _para_fb_count += 1
-                print(f"[DocumentFeedback] ⚠️ 第 {para_idx + 1} 段分析失败，使用本地标注: {_err_s}")
+                logger.warning(f"[DocumentFeedback] ⚠️ 第 {para_idx + 1} 段分析失败，使用本地标注: {_err_s}")
                 fallback = self._fallback_annotations_from_chunk(paragraph)
                 for ann in fallback[:5]:  # 本地标注最多加5条
                     text = (ann.get("原文片段") or "").strip()
@@ -1625,7 +1624,7 @@ class DocumentFeedbackSystem:
         
         # 第6步：返回结果
         summary = f"共标注 {len(all_annotations)} 处需要改进"
-        print(f"[DocumentFeedback] ✅ 分析完成，{summary}")
+        logger.info(f"[DocumentFeedback] ✅ 分析完成，{summary}")
         
         return {
             "success": True,
@@ -1663,12 +1662,12 @@ class DocumentFeedbackSystem:
                 "failed": 失败数
             }
         """
-        print(f"[DocumentFeedback] ✏️ 应用标注...")
+        logger.info(f"[DocumentFeedback] ✏️ 应用标注...")
         
         result = self.annotator.annotate_document(file_path, annotations)
         
         if result.get("success"):
-            print(f"[DocumentFeedback] ✅ 标注完成: {os.path.basename(result.get('revised_file', ''))}")
+            logger.info(f"[DocumentFeedback] ✅ 标注完成: {os.path.basename(result.get('revised_file', ''))}")
         
         return result
     
@@ -1704,9 +1703,9 @@ class DocumentFeedbackSystem:
                 pass
             return bool(task_id and check_task_cancelled(task_id))
         
-        print("=" * 60)
-        print("🔄 启动文档自动标注系统（完整闭环-流式）")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("🔄 启动文档自动标注系统（完整闭环-流式）")
+        logger.info("=" * 60)
         
         # ===== Stage 1: 读取文档 =====
         if _is_cancelled():
@@ -1780,7 +1779,7 @@ class DocumentFeedbackSystem:
             if _probed_model is None:
                 # 所有候选模型均不可用
                 _preflight_error = "所有可用模型当前均不可用（503或其他错误）"
-                print(f"[DocumentFeedback] ❌ AI 预检：所有模型不可用，将使用本地规则兜底")
+                logger.error(f"[DocumentFeedback] ❌ AI 预检：所有模型不可用，将使用本地规则兜底")
                 yield {
                     'stage': 'warning',
                     'progress': 16,
@@ -1788,7 +1787,7 @@ class DocumentFeedbackSystem:
                     'detail': '建议稍后重试'
                 }
             elif _probed_model != effective_model_id:
-                print(f"[DocumentFeedback] 🔄 预检：{effective_model_id} 过载，切换为 {_probed_model}", flush=True)
+                logger.info(f"[DocumentFeedback] 🔄 预检：{effective_model_id} 过载，切换为 {_probed_model}")
                 yield {
                     'stage': 'info',
                     'progress': 16,
@@ -1797,7 +1796,7 @@ class DocumentFeedbackSystem:
                 }
                 effective_model_id = _probed_model
             else:
-                print(f"[DocumentFeedback] ✅ AI 预检通过: {effective_model_id}", flush=True)
+                logger.info(f"[DocumentFeedback] ✅ AI 预检通过: {effective_model_id}")
         # ───────────────────────────────────────────────────────────────────────
         
         # ===== 使用线程 + Queue 实现真正实时进度推送 =====
@@ -1919,7 +1918,7 @@ class DocumentFeedbackSystem:
                     'message': f'⚠️ AI 分析未成功（{_fb_label}分段使用本地规则兜底）',
                     'detail': f'API 错误:{_err_hint}'
                 }
-                print(f"[DocumentFeedback] ⚠️ 兜底警告已推送: {_fb_label}分段，最近错误: {_last_api_error[:60]}")
+                logger.error(f"[DocumentFeedback] ⚠️ 兜底警告已推送: {_fb_label}分段，最近错误: {_last_api_error[:60]}")
 
             yield {
                 'stage': 'analysis_complete',
@@ -1989,7 +1988,7 @@ class DocumentFeedbackSystem:
                     revised_file = simple_revised
             except (PermissionError, IOError):
                 revised_file = f"{base_name}_revised_{timestamp}.docx"
-                print(f"[DocumentFeedback] ⚠️ 原修改版被占用，创建新版本: {os.path.basename(revised_file)}")
+                logger.warning(f"[DocumentFeedback] ⚠️ 原修改版被占用，创建新版本: {os.path.basename(revised_file)}")
             
             # 复制文件
             shutil.copy2(file_path, revised_file)
@@ -2106,7 +2105,7 @@ class DocumentFeedbackSystem:
                 }
             )
         except Exception as e:
-            print(f"[DocumentFeedback] 文件网络索引记录失败: {e}")
+            logger.info(f"[DocumentFeedback] 文件网络索引记录失败: {e}")
         
         yield {
             'stage': 'complete',
@@ -2152,9 +2151,9 @@ class DocumentFeedbackSystem:
                 "failed": 1
             }
         """
-        print("=" * 60)
-        print("🔄 启动文档自动标注系统（完整闭环）")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("🔄 启动文档自动标注系统（完整闭环）")
+        logger.info("=" * 60)
         
         effective_model_id = model_id or self.default_model_id
 
@@ -2172,7 +2171,7 @@ class DocumentFeedbackSystem:
             return analysis_result
         
         annotations = analysis_result.get("annotations", [])
-        print(f"\n📊 分析结果: 生成 {len(annotations)} 个标注建议")
+        logger.info(f"\n📊 分析结果: 生成 {len(annotations)} 个标注建议")
         
         if len(annotations) == 0:
             return {
@@ -2182,7 +2181,7 @@ class DocumentFeedbackSystem:
             }
         
         # 第2步：应用标注到文档（使用Track Changes修订模式）
-        print(f"\n[DocumentFeedback] � 以右侧批注气泡添加修改建议...")
+        logger.info(f"\n[DocumentFeedback] � 以右侧批注气泡添加修改建议...")
         
         # 使用批注方式 — 原文不变，修改建议以右侧气泡显示
         from web.track_changes_editor import TrackChangesEditor
@@ -2208,7 +2207,7 @@ class DocumentFeedbackSystem:
         except (PermissionError, IOError):
             # 文件被占用，使用时间戳版本
             revised_file = f"{base_name}_revised_{timestamp}.docx"
-            print(f"[DocumentFeedback] ⚠️ 原修改版被占用，创建新版本: {os.path.basename(revised_file)}")
+            logger.warning(f"[DocumentFeedback] ⚠️ 原修改版被占用，创建新版本: {os.path.basename(revised_file)}")
         
         # 复制文件
         shutil.copy2(file_path, revised_file)
@@ -2234,7 +2233,7 @@ class DocumentFeedbackSystem:
                 }
             )
         except Exception as e:
-            print(f"[DocumentFeedback] 文件网络索引记录失败: {e}")
+            logger.info(f"[DocumentFeedback] 文件网络索引记录失败: {e}")
         
         return {
             "success": edit_result.get("success", False),
@@ -2435,9 +2434,9 @@ class DocumentFeedbackSystem:
             return []
         
         except Exception as e:
-            print(f"[DocumentFeedback] 解析标注失败: {e}")
+            logger.info(f"[DocumentFeedback] 解析标注失败: {e}")
             return []
 
 
 if __name__ == "__main__":
-    print("文档智能反馈系统准备就绪")
+    logger.info("文档智能反馈系统准备就绪")

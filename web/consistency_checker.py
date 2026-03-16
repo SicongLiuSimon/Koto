@@ -8,7 +8,10 @@ import os
 import re
 from typing import Dict, List, Any, Tuple
 from collections import Counter
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class ConsistencyChecker:
     """文档一致性检查器"""
@@ -259,7 +262,7 @@ class ConsistencyChecker:
             else:
                 return ""
         except Exception as e:
-            print(f"读取文件失败: {e}")
+            logger.info(f"读取文件失败: {e}")
             return ""
     
     def generate_report(self, check_result: Dict[str, Any]) -> str:
@@ -315,9 +318,9 @@ class ConsistencyChecker:
 if __name__ == "__main__":
     checker = ConsistencyChecker()
     
-    print("=" * 60)
-    print("文档一致性检查器测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("文档一致性检查器测试")
+    logger.info("=" * 60)
     
     # 创建测试文档
     test_content = """# AI技术概览
@@ -356,9 +359,9 @@ ML技术包括深度学习(DL)等。
     
     # 生成报告
     report = checker.generate_report(result)
-    print(report)
+    logger.info(report)
     
     # 清理测试文件
     os.remove(test_file)
     
-    print("\n✅ 一致性检查器就绪")
+    logger.info("\n✅ 一致性检查器就绪")

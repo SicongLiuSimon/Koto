@@ -8,7 +8,10 @@ import os
 import json
 from datetime import datetime
 from typing import List, Dict
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class QuickNoteManager:
     """快速笔记管理器"""
@@ -33,7 +36,7 @@ class QuickNoteManager:
                 with open(self.index_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                print(f"[笔记] 索引加载失败: {e}")
+                logger.info(f"[笔记] 索引加载失败: {e}")
                 return []
         return []
     
@@ -43,7 +46,7 @@ class QuickNoteManager:
             with open(self.index_file, 'w', encoding='utf-8') as f:
                 json.dump(self.notes, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[笔记] 索引保存失败: {e}")
+            logger.info(f"[笔记] 索引保存失败: {e}")
     
     def add_note(self, content: str, tags: List[str] = None, category: str = "general") -> Dict:
         """
@@ -75,7 +78,7 @@ class QuickNoteManager:
             with open(note_file, 'w', encoding='utf-8') as f:
                 json.dump(note, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[笔记] 保存失败: {e}")
+            logger.info(f"[笔记] 保存失败: {e}")
             return None
         
         # 更新索引
@@ -88,7 +91,7 @@ class QuickNoteManager:
         })
         self._save_index()
         
-        print(f"[笔记] 已添加: {note_id}")
+        logger.info(f"[笔记] 已添加: {note_id}")
         return note
     
     def get_note(self, note_id: str) -> Dict:
@@ -101,7 +104,7 @@ class QuickNoteManager:
             with open(note_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"[笔记] 读取失败 {note_id}: {e}")
+            logger.info(f"[笔记] 读取失败 {note_id}: {e}")
             return None
     
     def search_notes(self, query: str = None, tags: List[str] = None, category: str = None) -> List[Dict]:
@@ -151,10 +154,10 @@ class QuickNoteManager:
             self.notes = [n for n in self.notes if n['id'] != note_id]
             self._save_index()
             
-            print(f"[笔记] 已删除: {note_id}")
+            logger.info(f"[笔记] 已删除: {note_id}")
             return True
         except Exception as e:
-            print(f"[笔记] 删除失败 {note_id}: {e}")
+            logger.info(f"[笔记] 删除失败 {note_id}: {e}")
             return False
     
     def get_recent_notes(self, limit: int = 10) -> List[Dict]:

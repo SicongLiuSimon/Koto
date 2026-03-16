@@ -9,9 +9,13 @@ import os
 import sys
 import threading
 from pathlib import Path
+import logging
 
 # 默认设置文件位置
 # 打包模式：config/ 紧邻 Koto.exe；开发模式：config/ 在 web/ 的父级
+
+logger = logging.getLogger(__name__)
+
 if getattr(sys, "frozen", False):
     PROJECT_ROOT = os.path.dirname(sys.executable)
 else:
@@ -93,7 +97,7 @@ class SettingsManager:
                 # 合并默认设置（处理新增的设置项）
                 self._settings = self._merge_settings(DEFAULT_SETTINGS, self._settings)
             except Exception as e:
-                print(f"加载设置失败: {e}")
+                logger.info(f"加载设置失败: {e}")
                 self._settings = DEFAULT_SETTINGS.copy()
         else:
             self._settings = DEFAULT_SETTINGS.copy()
@@ -118,7 +122,7 @@ class SettingsManager:
                 json.dump(self._settings, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
-            print(f"保存设置失败: {e}")
+            logger.info(f"保存设置失败: {e}")
             return False
 
     def get(self, category, key=None):
@@ -170,7 +174,7 @@ class SettingsManager:
                 try:
                     os.makedirs(path, exist_ok=True)
                 except Exception as e:
-                    print(f"创建目录失败 {path}: {e}")
+                    logger.info(f"创建目录失败 {path}: {e}")
 
     # 便捷方法
     @property

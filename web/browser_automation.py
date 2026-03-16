@@ -7,6 +7,10 @@
 import os
 import time
 from typing import List, Dict, Optional
+import logging
+
+logger = logging.getLogger(__name__)
+
 try:
     from selenium import webdriver
     from selenium.webdriver.common.by import By
@@ -49,11 +53,11 @@ class BrowserAutomation:
             
             # 尝试使用系统 Chrome
             self.driver = webdriver.Chrome(options=options)
-            print("[浏览器] WebDriver 已初始化")
+            logger.info("[浏览器] WebDriver 已初始化")
             
         except Exception as e:
-            print(f"[浏览器] WebDriver 初始化失败: {e}")
-            print("[浏览器] 请确保已安装 Chrome 和 ChromeDriver")
+            logger.info(f"[浏览器] WebDriver 初始化失败: {e}")
+            logger.info("[浏览器] 请确保已安装 Chrome 和 ChromeDriver")
     
     def open_url(self, url: str, wait_time: int = 3) -> bool:
         """
@@ -69,10 +73,10 @@ class BrowserAutomation:
         try:
             self.driver.get(url)
             time.sleep(wait_time)
-            print(f"[浏览器] 已打开: {url}")
+            logger.info(f"[浏览器] 已打开: {url}")
             return True
         except Exception as e:
-            print(f"[浏览器] 打开 URL 失败: {e}")
+            logger.info(f"[浏览器] 打开 URL 失败: {e}")
             return False
     
     def find_element(self, selector: str, by: str = 'css') -> Optional[any]:
@@ -98,7 +102,7 @@ class BrowserAutomation:
             element = self.driver.find_element(by_map.get(by, By.CSS_SELECTOR), selector)
             return element
         except Exception as e:
-            print(f"[浏览器] 元素查找失败: {e}")
+            logger.info(f"[浏览器] 元素查找失败: {e}")
             return None
     
     def find_elements(self, selector: str, by: str = 'css') -> List:
@@ -124,7 +128,7 @@ class BrowserAutomation:
             elements = self.driver.find_elements(by_map.get(by, By.CSS_SELECTOR), selector)
             return elements
         except Exception as e:
-            print(f"[浏览器] 元素查找失败: {e}")
+            logger.info(f"[浏览器] 元素查找失败: {e}")
             return []
     
     def click(self, selector: str, by: str = 'css') -> bool:
@@ -133,10 +137,10 @@ class BrowserAutomation:
         if element:
             try:
                 element.click()
-                print(f"[浏览器] 已点击: {selector}")
+                logger.info(f"[浏览器] 已点击: {selector}")
                 return True
             except Exception as e:
-                print(f"[浏览器] 点击失败: {e}")
+                logger.info(f"[浏览器] 点击失败: {e}")
         return False
     
     def input_text(self, selector: str, text: str, by: str = 'css', clear_first: bool = True) -> bool:
@@ -155,10 +159,10 @@ class BrowserAutomation:
                 if clear_first:
                     element.clear()
                 element.send_keys(text)
-                print(f"[浏览器] 已输入文本: {selector}")
+                logger.info(f"[浏览器] 已输入文本: {selector}")
                 return True
             except Exception as e:
-                print(f"[浏览器] 输入文本失败: {e}")
+                logger.info(f"[浏览器] 输入文本失败: {e}")
         return False
     
     def get_text(self, selector: str, by: str = 'css') -> Optional[str]:
@@ -201,7 +205,7 @@ class BrowserAutomation:
             )
             return element
         except Exception as e:
-            print(f"[浏览器] 等待元素超时: {e}")
+            logger.info(f"[浏览器] 等待元素超时: {e}")
             return None
     
     def execute_script(self, script: str) -> any:
@@ -218,7 +222,7 @@ class BrowserAutomation:
             result = self.driver.execute_script(script)
             return result
         except Exception as e:
-            print(f"[浏览器] 脚本执行失败: {e}")
+            logger.info(f"[浏览器] 脚本执行失败: {e}")
             return None
     
     def scroll_to_bottom(self):
@@ -241,10 +245,10 @@ class BrowserAutomation:
         
         try:
             self.driver.save_screenshot(file_path)
-            print(f"[浏览器] 截图已保存: {file_path}")
+            logger.info(f"[浏览器] 截图已保存: {file_path}")
             return True
         except Exception as e:
-            print(f"[浏览器] 截图失败: {e}")
+            logger.info(f"[浏览器] 截图失败: {e}")
             return False
     
     def get_page_source(self) -> Optional[str]:
@@ -284,7 +288,7 @@ class BrowserAutomation:
         if self.driver:
             self.driver.quit()
             self.driver = None
-            print("[浏览器] 已退出")
+            logger.info("[浏览器] 已退出")
     
     # === 高级功能 ===
     
@@ -323,11 +327,11 @@ class BrowserAutomation:
                 except:
                     continue
             
-            print(f"[浏览器] Google 搜索完成: {len(results)} 个结果")
+            logger.info(f"[浏览器] Google 搜索完成: {len(results)} 个结果")
             return results
             
         except Exception as e:
-            print(f"[浏览器] Google 搜索失败: {e}")
+            logger.info(f"[浏览器] Google 搜索失败: {e}")
             return []
     
     def fill_form(self, form_data: Dict[str, str]):

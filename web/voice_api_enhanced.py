@@ -15,8 +15,12 @@ import threading
 from flask import Blueprint, request, jsonify, Response
 from datetime import datetime
 import time
+import logging
 
 # 创建蓝图
+
+logger = logging.getLogger(__name__)
+
 voice_bp = Blueprint('voice', __name__, url_prefix='/api/voice')
 
 # 全局状态管理
@@ -190,7 +194,7 @@ def recognize_enhanced():
     
     except Exception as e:
         import traceback
-        print(f"[VOICE_API] 增强识别错误: {e}")
+        logger.error(f"[VOICE_API] 增强识别错误: {e}")
         traceback.print_exc()
         
         return jsonify({
@@ -309,7 +313,7 @@ def execute_command():
     
     except Exception as e:
         import traceback
-        print(f"[VOICE_API] 命令执行错误: {e}")
+        logger.error(f"[VOICE_API] 命令执行错误: {e}")
         traceback.print_exc()
         
         return jsonify({

@@ -10,7 +10,10 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from PIL import Image, ImageGrab
 import io
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class ClipboardOCRAssistant:
     """剪贴板与截图助手"""
@@ -34,8 +37,8 @@ class ClipboardOCRAssistant:
                 import pytesseract
                 return "tesseract"
             except ImportError:
-                print("⚠️ 未安装OCR引擎，OCR功能不可用")
-                print("安装方法: pip install paddleocr 或 pip install pytesseract")
+                logger.warning("⚠️ 未安装OCR引擎，OCR功能不可用")
+                logger.info("安装方法: pip install paddleocr 或 pip install pytesseract")
                 return None
     
     def capture_screenshot(self, save_image: bool = True) -> Dict[str, Any]:
@@ -266,7 +269,7 @@ class ClipboardOCRAssistant:
             duration: 监控时长（秒）
             auto_ocr: 是否自动OCR
         """
-        print(f"🔍 开始监控剪贴板（{duration}秒）...")
+        logger.info(f"🔍 开始监控剪贴板（{duration}秒）...")
         
         last_image = None
         start_time = time.time()
@@ -279,56 +282,56 @@ class ClipboardOCRAssistant:
                 if isinstance(current_image, Image.Image):
                     # 简单对比（可以优化为图片哈希）
                     if last_image is None or current_image.tobytes() != last_image.tobytes():
-                        print("📋 检测到新图片！")
+                        logger.info("📋 检测到新图片！")
                         
                         result = self.capture_clipboard_image(save_image=True)
                         
                         if auto_ocr and result["success"]:
                             ocr_result = self.ocr_image(result["image"])
                             if ocr_result["success"]:
-                                print(f"✅ OCR识别成功: {len(ocr_result['text'])} 字符")
-                                print(f"内容预览: {ocr_result['text'][:100]}...")
+                                logger.info(f"✅ OCR识别成功: {len(ocr_result['text'])} 字符")
+                                logger.info(f"内容预览: {ocr_result['text'][:100]}...")
                         
                         last_image = current_image
                 
                 time.sleep(interval)
         
         except KeyboardInterrupt:
-            print("\n⏹️ 监控已停止")
+            logger.info("\n⏹️ 监控已停止")
 
 
 if __name__ == "__main__":
     assistant = ClipboardOCRAssistant()
     
-    print("=" * 60)
-    print("剪贴板与截图助手测试")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("剪贴板与截图助手测试")
+    logger.info("=" * 60)
     
     # 测试截图功能
-    print("\n1. 测试截图功能...")
+    logger.info("\n1. 测试截图功能...")
     screenshot_result = assistant.capture_screenshot(save_image=True)
     if screenshot_result["success"]:
-        print(f"✅ 截图成功: {screenshot_result['filepath']}")
-        print(f"   尺寸: {screenshot_result['size']}")
+        logger.info(f"✅ 截图成功: {screenshot_result['filepath']}")
+        logger.info(f"   尺寸: {screenshot_result['size']}")
     
     # 测试剪贴板图片
-    print("\n2. 测试剪贴板图片...")
+    logger.info("\n2. 测试剪贴板图片...")
     clipboard_result = assistant.capture_clipboard_image(save_image=False)
     if clipboard_result["success"]:
-        print(f"✅ 获取剪贴板图片成功")
+        logger.info(f"✅ 获取剪贴板图片成功")
     else:
-        print(f"ℹ️ {clipboard_result['error']}")
+        logger.info(f"ℹ️ {clipboard_result['error']}")
     
     # 测试OCR（如果有引擎）
     if assistant.ocr_engine:
-        print("\n3. 测试OCR功能...")
+        logger.info("\n3. 测试OCR功能...")
         if screenshot_result["success"]:
             ocr_result = assistant.ocr_image(screenshot_result["filepath"])
             if ocr_result["success"]:
-                print(f"✅ OCR识别成功")
-                print(f"   文本长度: {len(ocr_result['text'])} 字符")
-                print(f"   预览: {ocr_result['text'][:100]}...")
+                logger.info(f"✅ OCR识别成功")
+                logger.info(f"   文本长度: {len(ocr_result['text'])} 字符")
+                logger.info(f"   预览: {ocr_result['text'][:100]}...")
     else:
-        print("\n⚠️ OCR引擎未安装，跳过OCR测试")
+        logger.warning("\n⚠️ OCR引擎未安装，跳过OCR测试")
     
-    print("\n✅ 剪贴板与截图助手就绪")
+    logger.info("\n✅ 剪贴板与截图助手就绪")

@@ -87,12 +87,12 @@ def search_with_grounding(query: str, skill_prompt: str = None) -> dict:
             f"{skill_prompt}\n"
             "用中文回答，格式整洁清晰。"
         )
-        print(f"[web_searcher] 使用 skill_prompt: {skill_prompt[:60]}")
+        logger.info(f"[web_searcher] 使用 skill_prompt: {skill_prompt[:60]}")
     else:
         # 2. 回退：关键词检测 + 分类 system_instruction
         query_type = _detect_query_type(query)
         system_instruction = _build_system_instruction(query_type)
-        print(f"[web_searcher] 关键词检测备用: {query_type}")
+        logger.info(f"[web_searcher] 关键词检测备用: {query_type}")
 
     try:
         client = get_client()

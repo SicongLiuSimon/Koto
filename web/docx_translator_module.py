@@ -9,9 +9,13 @@ import os
 import re
 import json
 from typing import Optional, Callable, Generator
+import logging
 
 
 # 语言代码映射（用于文件名后缀和提示语）
+
+logger = logging.getLogger(__name__)
+
 LANG_MAP = {
     "en": "English", "english": "English", "英文": "English", "英语": "English",
     "ja": "Japanese", "japanese": "Japanese", "日文": "Japanese", "日语": "Japanese",
@@ -150,15 +154,15 @@ def _translate_batch_llm(texts: list, target_language: str, llm_client) -> list:
         parts = [p.strip() for p in raw.split(_SEP)]
 
         if len(parts) == len(texts):
-            print(f"[DocxTranslator] ✅ 批量翻译 {len(texts)} 段成功")
+            logger.info(f"[DocxTranslator] ✅ 批量翻译 {len(texts)} 段成功")
             return parts
 
         # 长度不匹配 → 逐条翻译作为兜底
-        print(f"[DocxTranslator] ⚠️ 长度不匹配 (返回{len(parts)}，期望{len(texts)})，改为逐条翻译")
+        logger.warning(f"[DocxTranslator] ⚠️ 长度不匹配 (返回{len(parts)}，期望{len(texts)})，改为逐条翻译")
         return _translate_one_by_one(texts, target_language, llm_client)
 
     except Exception as e:
-        print(f"[DocxTranslator] ❌ 批量翻译异常: {e}，改为逐条翻译")
+        logger.error(f"[DocxTranslator] ❌ 批量翻译异常: {e}，改为逐条翻译")
         return _translate_one_by_one(texts, target_language, llm_client)
 
 
@@ -181,7 +185,7 @@ def _translate_one_by_one(texts: list, target_language: str, llm_client) -> list
             translated = (resp.text or "").strip()
             results.append(translated if translated else text)
         except Exception as e:
-            print(f"[DocxTranslator] ⚠️ 单条翻译失败，保留原文: {e}")
+            logger.warning(f"[DocxTranslator] ⚠️ 单条翻译失败，保留原文: {e}")
             results.append(text)
     return results
 

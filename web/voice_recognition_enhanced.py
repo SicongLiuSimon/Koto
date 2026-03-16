@@ -22,7 +22,10 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 from enum import Enum
 import queue
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class RecognitionStatus(Enum):
     """识别状态枚举"""
@@ -157,7 +160,7 @@ class EnhancedVoiceRecognizer:
             import speech_recognition as sr
             return sr
         except ImportError:
-            print("❌ 未安装 SpeechRecognition，请运行: pip install SpeechRecognition pyaudio")
+            logger.error("❌ 未安装 SpeechRecognition，请运行: pip install SpeechRecognition pyaudio")
             return None
     
     def _get_cache_key(self, audio_hash: str) -> str:
@@ -241,7 +244,7 @@ class EnhancedVoiceRecognizer:
                     try:
                         recognizer.adjust_for_ambient_noise(source, duration=0.5)
                     except Exception as e:
-                        print(f"⚠️ 调整麦克风噪音失败: {e}")
+                        logger.warning(f"⚠️ 调整麦克风噪音失败: {e}")
                     
                     try:
                         # 监听语音
@@ -476,25 +479,25 @@ def get_enhanced_recognizer(
 
 if __name__ == "__main__":
     # 测试代码
-    print("🧪 测试增强的语音识别器\n")
+    logger.info("🧪 测试增强的语音识别器\n")
     
     class TestCallback(VoiceStatusCallback):
         def on_status_changed(self, status: RecognitionStatus, message: str = ""):
-            print(f"[状态] {status.value}: {message}")
+            logger.info(f"[状态] {status.value}: {message}")
         
         def on_partial_result(self, partial_text: str):
-            print(f"[部分结果] {partial_text}")
+            logger.info(f"[部分结果] {partial_text}")
         
         def on_result(self, result: RecognitionResult):
-            print(f"[结果] {result.text}")
+            logger.info(f"[结果] {result.text}")
         
         def on_error(self, error: str):
-            print(f"[错误] {error}")
+            logger.error(f"[错误] {error}")
     
     recognizer = get_enhanced_recognizer(callback=TestCallback())
     
-    print("🎤 准备录音，请说些什么...\n")
+    logger.info("🎤 准备录音，请说些什么...\n")
     result = recognizer.recognize_microphone(duration=10, language="zh-CN")
     
-    print(f"\n📊 结果: {result.to_dict()}")
-    print(f"\n📈 统计: {recognizer.get_stats()}")
+    logger.info(f"\n📊 结果: {result.to_dict()}")
+    logger.info(f"\n📈 统计: {recognizer.get_stats()}")
