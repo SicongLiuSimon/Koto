@@ -458,10 +458,7 @@ class LocalPlanner:
                 ),
             )
             raw = resp.text or ""
-            try:
-                check = json.loads(raw)
-            except (json.JSONDecodeError, ValueError):
-                check = None
+            check = json.loads(raw)
             if isinstance(check, dict):
                 result = {
                     "status": check.get("status", "partial"),

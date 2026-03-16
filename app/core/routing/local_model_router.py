@@ -187,9 +187,11 @@ class LocalModelRouter:
 【FILE_GEN vs CHAT】
 - "写一段/写一篇/帮我写个/给我写个" = 短文本输出 → CHAT
 - "生成一份.../做一个PPT/写一份Word文档" = 需要文件 → FILE_GEN
+- "你会做X么/你能做X吗/能不能做X/会不会X" = 能力询问 → CHAT（未明确下达任务指令，需先确认主题再生成）
 - "写一段自我介绍" → CHAT  |  "帮我制作一份Word版简历" → FILE_GEN
 - 关键信号：含 word/docx/pdf/ppt/excel/报告 等文件格式词 + "做一个/做一份/写一份/生成" 等动作词 → FILE_GEN
-- "介绍一下X" / "帮我讲讲X" → CHAT（无文件格式词）  
+- "介绍一下X" / "帮我讲讲X" → CHAT（无文件格式词）
+- "你会做ppt么/你能做excel吗" → CHAT（能力问句，无具体主题和明确动作词）
 - "做一个关于X的word介绍" / "写一份X的PDF报告" → FILE_GEN（有格式词+动作词）
 - 注意：含"表格/数据汇总"的生成请求 → FILE_GEN（不是CODER也不是PAINTER）
   - "生成一张表格汇总这些数据" → FILE_GEN  |  "帮我把数据整理成表格" → FILE_GEN

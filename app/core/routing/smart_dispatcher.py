@@ -35,6 +35,9 @@ def _get_local_planner():
 
     return LocalPlanner
 
+def _get_task_classifier():
+    from app.core.routing.task_classifier import TaskClassifier
+    return TaskClassifier
 
 class SmartDispatcher:
     """
@@ -971,14 +974,54 @@ class SmartDispatcher:
         except Exception as _pe:
             logger.info(f"[SmartDispatcher] ⚠️ 多步抢先规划异常（跳过）: {_pe}")
 
-        # === 云端 AI 路由（主要语义分类器：Gemini Flash 快速分类）===
-        # 架构：AIRouter 是主分类器，Ollama 仅作离线兜底。
-        # 快速规则通道已过滤了明显输入，到这里的都是需要语义理解的请求。
-        if client:
-            print(f"[SmartDispatcher] 🌐 云端 AI 路由分类...")
-            ai_task, ai_confidence, ai_source, ai_hint = _get_ai_router().classify_with_hint(client, user_input, timeout=3.0)
-            if ai_task:
-                latency = (time.time() - start_time) * 1000
+        # === 内置向量分类器（TaskClassifier）===
+        # 基于 Sentence-Transformer + LogisticRegression，<10ms，与用户安装的 Ollama 模型无关。
+        # 训练后优先使用；未训练或置信度 <0.72 时透明降级到下方的 LocalModelRouter。
+        try:
+            _TC = _get_task_classifier()
+            if _TC.is_available():
+                _tc_task, _tc_conf = _TC.classify(user_input)
+                _tc_accepted = _tc_conf >= 0.72
+                print(f"[SmartDispatcher] 🚀 TaskClassifier: {_tc_task} ({_tc_conf:.2f}) {'✅ 采纳' if _tc_accepted else '⚠️ 置信度不足，回退 Ollama'}")
+
+                if _tc_accepted:
+                    # 复用与 LocalModelRouter 分支相同的 override 安全网
+                    if _tc_task == "CHAT" and WebSearcher and WebSearcher.needs_web_search(user_input):
+                        _tc_task = "WEB_SEARCH"
+                    if LocalExecutor and LocalExecutor.is_system_command(user_input) and _tc_task != "SYSTEM":
+                        _tc_task = "SYSTEM"
+                    _agent_pat = [r"发微信", r"回微信", r"微信发", r"微信回",
+                                  r"给.{1,6}发消息", r"给.{1,6}发微信",
+                                  r"浏览器打开", r"点击.{1,6}按钮"]
+                    if any(re.search(p, user_lower) for p in _agent_pat):
+                        _tc_task = "AGENT"
+                    # DOC_ANNOTATE 必须有文件附件
+                    if _tc_task == "DOC_ANNOTATE":
+                        if not (file_context and file_context.get("has_file")):
+                            _tc_task = "CHAT"
+                    context_info = context_info or {}
+                    context_info["routing_list"] = cls._build_routing_list(
+                        similarity_scores,
+                        boosts={_tc_task: _tc_conf},
+                        reasons={_tc_task: ["task_classifier"]}
+                    )
+                    return _tc_task, f"🚀 TaskClassifier {_tc_conf:.2f}", context_info
+        except Exception as _tce:
+            print(f"[SmartDispatcher] ⚠️ TaskClassifier 异常（跳过）: {_tce}")
+
+        # === 本地 Ollama 路由（优先信号，低置信再回退规则） ===
+        # classify_with_hint() 同时返回任务分类 + skill_prompt + complexity，实现「本地理解意图 → 生成执行指令 → 云端模型执行」
+        local_task, local_confidence, local_source, local_hint, local_complexity = _get_local_model_router().classify_with_hint(user_input, timeout=4.5)
+        local_conf_value = 0.0
+        if isinstance(local_confidence, str):
+            m = re.search(r"(\d+\.\d+)", local_confidence)
+            if m:
+                try:
+                    local_conf_value = float(m.group(1))
+                except Exception:
+                    local_conf_value = 0.0
+        elif isinstance(local_confidence, (int, float)):
+            local_conf_value = float(local_confidence)
 
                 # ── 共用 override 检查（与旧版 Ollama 路由一致）────────────────
                 if ai_task == "CHAT" and WebSearcher and WebSearcher.needs_web_search(user_input):
@@ -1312,23 +1355,23 @@ class SmartDispatcher:
         if task_type == "FILE_GEN":
             base = MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
             if complexity == "complex":
-                base = MODEL_MAP.get("COMPLEX", "gemini-3.1-pro-preview")
-            return _avail(base)
-
+                return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+            return MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
+        
         if task_type == "DOC_ANNOTATE":
             if complexity == "complex":
-                return _avail(MODEL_MAP.get("COMPLEX", "gemini-3.1-pro-preview"))
-            return _avail(MODEL_MAP.get("DOC_ANNOTATE", "gemini-3.1-pro-preview"))
-
+                return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+            return MODEL_MAP.get("DOC_ANNOTATE", "gemini-3-flash-preview")
+            
         if task_type == "RESEARCH":
-            return _avail(MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025"))
-
+            return MODEL_MAP.get("RESEARCH", "gemini-3.1-pro-preview")
+        
         if task_type == "CODER":
-            return _avail(MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
+            return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
 
         # 多步复杂任务 → Pro 模型确保执行质量
         if task_type == "MULTI_STEP":
-            return _avail(MODEL_MAP.get("MULTI_STEP", "gemini-3.1-pro-preview"))
+            return MODEL_MAP.get("MULTI_STEP", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
 
         # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
         if task_type == "CHAT":
@@ -1336,7 +1379,7 @@ class SmartDispatcher:
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型
         if complexity == "complex":
-            return _avail(MODEL_MAP.get("COMPLEX", "gemini-2.5-flash"))
+            return MODEL_MAP.get("COMPLEX", "gemini-3.1-pro-preview")
 
         if has_image and task_type != "PAINTER":
             return _avail(MODEL_MAP.get("VISION", MODEL_MAP.get("CHAT", "gemini-2.5-flash")), "VISION")
@@ -1345,9 +1388,13 @@ class SmartDispatcher:
 
     # ── LangGraph 工作流集成 ────────────────────────────────────────────────
     @classmethod
-    def resolve_workflow(cls, task_type: str, user_input: str) -> str:
+    def resolve_workflow(cls, task_type: str, user_input: str, has_file: bool = False) -> str:
         """
         根据 dispatch() 返回的 task_type 决定是否使用 LangGraph 多步工作流。
+
+        Args:
+            has_file: 请求是否附带已上传文件。为 True 时跳过 LangGraph 工作流，
+                      因为工作流没有文件字节上下文，强制使用文件分析流（legacy）。
 
         返回值:
             "langgraph_react"          → 使用 LangGraphAgent（单 Agent ReAct）
@@ -1357,21 +1404,20 @@ class SmartDispatcher:
 
         集成方式（在 web/app.py 或对应处理函数中）:
             task_type, conf, ctx = SmartDispatcher.dispatch(user_input, ...)
-            wf = SmartDispatcher.resolve_workflow(task_type, user_input)
+            wf = SmartDispatcher.resolve_workflow(task_type, user_input, has_file=has_file)
             if wf.startswith("langgraph_"):
                 # 使用 LangGraph 路径
                 ...
         """
         try:
             from app.core.workflow.langgraph_workflow import WorkflowEngine
-
-            detected = WorkflowEngine.detect_workflow(task_type, user_input)
+            detected = WorkflowEngine.detect_workflow(task_type, user_input, has_file=has_file)
             if detected == "multi_agent_ppt":
                 return "langgraph_multi_agent_ppt"
             elif detected == "research_and_document":
                 return "langgraph_research_doc"
-            elif task_type == "MULTI_STEP":
-                # 通用多步任务 → LangGraphAgent ReAct
+            elif task_type == "MULTI_STEP" and not has_file:
+                # 通用多步任务 → LangGraphAgent ReAct（有文件时不走 LangGraph）
                 return "langgraph_react"
             else:
                 return "legacy"

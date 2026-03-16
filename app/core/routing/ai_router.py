@@ -75,6 +75,7 @@ class AIRouter:
 - 命令执行操作 → 对应类型
 - "了解/研究一下" → CHAT（日常"看看"之意）
 - "深入研究/系统分析/技术原理" → RESEARCH
+- "你会做X么/能否做X/你能X吗/会不会X" → CHAT（询问能力，未明确下达任务指令）
 - "做一个关于X的word介绍/帮我做一份XX报告/写一个XX的PDF" → FILE_GEN（含文件格式词+生成动作）
 - "介绍一下X/帮我讲讲X" → CHAT（无文件格式词，纯问答）
 - "作图"/"画图表"/"做一个图表"/"折线图"/"柱状图"/"饼图"/"散点图"/"数据可视化"/"plot"/"chart" → CODER（不是 PAINTER）
@@ -110,9 +111,39 @@ class AIRouter:
         - confidence: 置信度描述
         - source: "AI" 或 "Cache"
         """
+        
+        # 动态构建技能路由提示（根据当前启用的 skill）
+        _dynamic_instruction = cls.ROUTER_INSTRUCTION
+        _skill_hint_hash = ""
+        try:
+            from app.core.skills.skill_manager import SkillManager
+            SkillManager._ensure_init()
+            _hints = []
+            for s in SkillManager._registry.values():
+                if not s.get("enabled"):
+                    continue
+                _intent = s.get("intent_description", "")
+                _tts = s.get("task_types", [])
+                if _intent and _tts:
+                    _hints.append(
+                        f"- 若用户意图是「{_intent}」→ 优先路由到 {_tts[0]}"
+                    )
+            if _hints:
+                _skill_hint_hash = hashlib.md5(
+                    "\n".join(_hints).encode()
+                ).hexdigest()[:8]
+                _dynamic_instruction = (
+                    cls.ROUTER_INSTRUCTION
+                    + "\n\n当前用户启用的 Skill 路由提示（优先参考）:\n"
+                    + "\n".join(_hints)
+                )
+        except Exception:
+            pass
 
-        # Check cache (thread-safe)
-        cache_key = hashlib.md5(user_input.encode()).hexdigest()[:16]
+        # 检查缓存（加入 skill 状态哈希，技能启用变化时自动失效）
+        cache_key = hashlib.md5(
+            (user_input + _skill_hint_hash).encode()
+        ).hexdigest()[:16]
         if cache_key in cls._cache:
             cached = cls._cache[cache_key]
             print(f"[AIRouter] Cache hit: {cached}")
@@ -122,24 +153,15 @@ class AIRouter:
             result_holder = {"task": None, "error": None}
 
             def call_model():
-                from google.genai import types
-                valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
-                               "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
-                # 构建尝试顺序：当前模型优先，再按降级链补全
-                models_to_try = [cls._router_model]
-                for m in cls._ROUTER_MODEL_CHAIN:
-                    if m not in models_to_try:
-                        models_to_try.append(m)
-                for model_id in models_to_try:
-                    try:
-                        response = client.models.generate_content(
-                            model=model_id,
-                            contents=user_input,
-                            config=types.GenerateContentConfig(
-                                system_instruction=cls.ROUTER_INSTRUCTION,
-                                max_output_tokens=20,
-                                temperature=0.1,
-                            )
+                try:
+                    from google.genai import types
+                    response = client.models.generate_content(
+                        model="gemini-2.0-flash-lite",  # 最快的模型
+                        contents=user_input,
+                        config=types.GenerateContentConfig(
+                            system_instruction=_dynamic_instruction,
+                            max_output_tokens=20,  # 只需要一个词
+                            temperature=0.1,  # 低温度，更确定性
                         )
                         if response.candidates and response.candidates[0].content.parts:
                             text = response.candidates[0].content.parts[0].text.strip().upper()
