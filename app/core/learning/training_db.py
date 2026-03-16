@@ -148,7 +148,7 @@ def _hash(text: str) -> str:
 class TrainingDB:
     """SQLite 训练数据库管理器"""
 
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self, db_path: Path = _DB_PATH):
         self.db_path = db_path
@@ -327,18 +327,29 @@ class TrainingDB:
                     )
                     return True
                 else:
-                    # 新建一条人工标注样本
-                    s = DBSample(
-                        user_input=user_input,
-                        task_type=correct_task,
-                        confidence=0.99,
-                        source="manual",
-                        quality=0.99,
-                        corrected_task=correct_task,
-                        corrected_by=corrected_by,
-                        notes=notes,
+                    # 新建一条人工标注样本 (inline to avoid nested lock/connection)
+                    now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    conn.execute(
+                        """
+                        INSERT INTO samples
+                            (sample_hash, user_input, task_type, confidence, source,
+                             quality, corrected_task, corrected_by, notes, created_at, updated_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                        (
+                            h,
+                            user_input,
+                            correct_task,
+                            0.99,
+                            "manual",
+                            0.99,
+                            correct_task,
+                            corrected_by,
+                            notes,
+                            now,
+                            now_ts,
+                        ),
                     )
-                    self.upsert(s)
                     return True
 
     def log_prediction(
@@ -367,6 +378,8 @@ class TrainingDB:
         correct_task=X    表示正确分类是 X，写入 samples 表。
         """
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        user_input = None
+        predicted_task = None
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT user_input, predicted_task FROM pending_corrections WHERE id=?",
@@ -374,12 +387,15 @@ class TrainingDB:
             ).fetchone()
             if not row:
                 return
+            user_input = row["user_input"]
+            predicted_task = row["predicted_task"]
             conn.execute(
                 "UPDATE pending_corrections SET correct_task=?, resolved=1 WHERE id=?",
                 (correct_task, correction_id),
             )
-            if correct_task and correct_task != row["predicted_task"]:
-                self.correct_label(row["user_input"], correct_task, corrected_by="user")
+        # Call correct_label outside the connection context to avoid nested locking
+        if correct_task and correct_task != predicted_task:
+            self.correct_label(user_input, correct_task, corrected_by="user")
 
     # ── 查询 ─────────────────────────────────────────────────────────────────
 
