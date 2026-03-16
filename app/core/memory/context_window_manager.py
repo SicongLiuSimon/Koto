@@ -26,11 +26,12 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Threshold at which we summarize old turns (rough token estimate)
-_MAX_HISTORY_TOKENS: int = 20_000
+# Lowered to 12K so long sessions compress earlier, reducing prompt bloat
+_MAX_HISTORY_TOKENS: int = 12_000
 # How many recent turns to ALWAYS keep verbatim (model + user pairs)
-_RECENT_KEEP: int = 12
+_RECENT_KEEP: int = 10
 # Minimum turns before we even consider compressing
-_MIN_TURNS_BEFORE_COMPRESS: int = 16
+_MIN_TURNS_BEFORE_COMPRESS: int = 12
 
 
 def _estimate_tokens(text: str) -> int:
@@ -66,8 +67,11 @@ def _summarize_turns(turns: list, llm_callable: Optional[Callable]) -> str:
         return f"[早期对话摘要]\n{conversation_text[:1200]}"
 
     prompt = (
-        "请将以下对话摘要为简洁的几句话，保留关键事实、用户意图和重要结论。"
-        "不要包含问候语或客套话。用中文输出。\n\n"
+        "请将以下对话摘要为简洁的几句话（100字以内），保留：\n"
+        "- 用户最核心的意图/目标\n"
+        "- 已确认的关键信息和实体（如文件名、地点、产品名、数字）\n"
+        "- 已完成的操作及其结果\n"
+        "不要包含问候语、客套话或重复内容。用中文输出，格式：要点罗列。\n\n"
         f"{conversation_text}"
     )
     try:
@@ -156,15 +160,7 @@ class ContextWindowManager:
         try:
             mgr = get_memory_fn()
             if mgr is not None and query and len(query.strip()) > 4:
-                # 优先 FAISS 语义向量检索（不依赖 _embedding_fn），无结果再降级关键词
-                hits: List[Dict] = []
-                if hasattr(mgr, 'search_vector_memories'):
-                    try:
-                        hits = mgr.search_vector_memories(query, limit=4) or []
-                    except Exception:
-                        hits = []
-                if not hits:
-                    hits = mgr.search_memories(query, limit=4) or []
+                hits = mgr.search_memories(query, limit=4)
                 if hits:
                     lines: List[str] = []
                     for h in hits:
