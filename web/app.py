@@ -1512,33 +1512,47 @@ try:
 except ImportError:
     _app_logger.debug("prometheus-flask-exporter not installed; /metrics disabled")
 
-# ── Swagger / OpenAPI docs (gated by SWAGGER_ENABLED=true) ───────────────────
-if os.environ.get("SWAGGER_ENABLED", "false").lower() == "true":
-    try:
-        from flasgger import Swagger
-
-        _swagger_template = {
-            "swagger": "2.0",
-            "info": {
-                "title": "Koto API",
-                "description": "Koto AI assistant REST API",
-                "version": APP_VERSION,
-            },
-            "basePath": "/",
-            "schemes": ["http", "https"],
-            "securityDefinitions": {
-                "Bearer": {
-                    "type": "apiKey",
-                    "name": "Authorization",
-                    "in": "header",
-                    "description": "JWT token: `Bearer <token>`",
-                }
-            },
+# ── Swagger / OpenAPI docs ────────────────────────────────────────────────────
+_swagger_config = {
+    "headers": [],
+    "specs": [
+        {
+            "endpoint": "apispec",
+            "route": "/apispec.json",
+            "rule_filter": lambda rule: True,
+            "model_filter": lambda tag: True,
         }
-        Swagger(app, template=_swagger_template)
-        _app_logger.info("Swagger UI enabled at /apidocs/")
-    except ImportError:
-        _app_logger.debug("flasgger not installed; Swagger UI disabled")
+    ],
+    "static_url_path": "/flasgger_static",
+    "swagger_ui": True,
+    "specs_route": "/apidocs/",
+}
+
+_swagger_template = {
+    "info": {
+        "title": "Koto API",
+        "description": "API documentation for Koto AI Assistant",
+        "version": "1.0.0",
+    },
+    "basePath": "/",
+    "schemes": ["http", "https"],
+    "securityDefinitions": {
+        "Bearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "JWT token: `Bearer <token>`",
+        }
+    },
+}
+
+try:
+    from flasgger import Swagger
+
+    swagger = Swagger(app, config=_swagger_config, template=_swagger_template)
+    _app_logger.info("Swagger UI enabled at /apidocs/")
+except ImportError:
+    _app_logger.debug("flasgger not installed; Swagger UI disabled")
 
 
 # ── Request ID middleware ─────────────────────────────────────────────────────
@@ -7090,12 +7104,50 @@ def monitoring_dashboard():
 
 @app.route("/api/sessions", methods=["GET"])
 def get_sessions():
+    """List all chat sessions.
+    ---
+    tags:
+      - Sessions
+    responses:
+      200:
+        description: List of session names
+        schema:
+          type: object
+          properties:
+            sessions:
+              type: array
+              items:
+                type: string
+    """
     sessions = session_manager.list_sessions()
     return jsonify({"sessions": [s.replace(".json", "") for s in sessions]})
 
 
 @app.route("/api/sessions", methods=["POST"])
 def create_session():
+    """Create a new chat session.
+    ---
+    tags:
+      - Sessions
+    parameters:
+      - in: body
+        name: body
+        schema:
+          properties:
+            name:
+              type: string
+              description: Optional session name
+    responses:
+      200:
+        description: Session created
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            session:
+              type: string
+    """
     data = request.json
     name = data.get("name", f"chat_{int(time.time())}")
     filename = session_manager.create(name)
@@ -7104,6 +7156,28 @@ def create_session():
 
 @app.route("/api/sessions/<session_name>", methods=["GET"])
 def get_session(session_name):
+    """Get a specific chat session with full history.
+    ---
+    tags:
+      - Sessions
+    parameters:
+      - in: path
+        name: session_name
+        type: string
+        required: true
+    responses:
+      200:
+        description: Session data with conversation history
+        schema:
+          type: object
+          properties:
+            session:
+              type: string
+            history:
+              type: array
+              items:
+                type: object
+    """
     # 返回完整历史供前端渲染（不截断），截断仅用于模型上下文
     history = session_manager.load_full(f"{session_name}.json")
     return jsonify({"session": session_name, "history": history})
@@ -7111,6 +7185,24 @@ def get_session(session_name):
 
 @app.route("/api/sessions/<session_name>", methods=["DELETE"])
 def delete_session(session_name):
+    """Delete a chat session.
+    ---
+    tags:
+      - Sessions
+    parameters:
+      - in: path
+        name: session_name
+        type: string
+        required: true
+    responses:
+      200:
+        description: Deletion result
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+    """
     success = session_manager.delete(f"{session_name}.json")
     return jsonify({"success": success})
 
@@ -7223,7 +7315,29 @@ def chat():
 
 @app.route("/api/chat/stream", methods=["POST"])
 def chat_stream():
-    """流式聊天 API - 实时返回响应"""
+    """Stream a chat response via Server-Sent Events.
+    ---
+    tags:
+      - Chat
+    parameters:
+      - in: body
+        name: body
+        schema:
+          required: [session, message]
+          properties:
+            session:
+              type: string
+            message:
+              type: string
+            locked_model:
+              type: string
+              default: auto
+            locked_task:
+              type: string
+    responses:
+      200:
+        description: SSE stream of chat tokens
+    """
     data = request.json
     session_name = data.get("session")
     user_input = data.get("message", "")
@@ -15543,12 +15657,50 @@ def reset_skill_prompt(skill_id: str):
 
 @app.route("/api/settings", methods=["GET"])
 def get_settings():
+    """Get all application settings.
+    ---
+    tags:
+      - Settings
+    responses:
+      200:
+        description: All settings grouped by category
+        schema:
+          type: object
+    """
     # 合并 appearance 主题（如有 cookie/参数可在此合并）
     return jsonify(settings_manager.get_all())
 
 
 @app.route("/api/settings", methods=["POST"])
 def update_settings():
+    """Update an application setting.
+    ---
+    tags:
+      - Settings
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          required: [category, key, value]
+          properties:
+            category:
+              type: string
+              description: Settings category
+            key:
+              type: string
+              description: Setting key
+            value:
+              description: New value
+    responses:
+      200:
+        description: Update result
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+    """
     data = request.json
     category = data.get("category")
     key = data.get("key")

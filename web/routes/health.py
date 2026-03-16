@@ -81,6 +81,30 @@ def _overall_status(checks: dict) -> str:
 
 @health_bp.route("/api/health", methods=["GET"])
 def health():
+    """Detailed health check.
+    ---
+    tags:
+      - Health
+    responses:
+      200:
+        description: System is healthy or degraded
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            uptime_seconds:
+              type: number
+            version:
+              type: string
+            checks:
+              type: object
+            timestamp:
+              type: string
+      503:
+        description: System is unhealthy
+    """
     try:
         checks = {
             "ollama": _check_ollama(),
@@ -103,4 +127,18 @@ def health():
 
 @health_bp.route("/api/ping", methods=["GET"])
 def ping():
+    """Lightweight liveness probe.
+    ---
+    tags:
+      - Health
+    responses:
+      200:
+        description: Service is alive
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: ok
+    """
     return jsonify({"status": "ok"}), 200
