@@ -1,3 +1,12 @@
+# ===== Koto AI Assistant — Docker Compose (Production-Hardened) =====
+#
+# Usage:
+#   cp config/deploy/.env.example .env   # configure environment
+#   docker compose up -d                 # start in background
+#   docker compose logs -f koto          # tail logs
+#
+# See config/deploy/.env.example for all available environment variables.
+
 version: "3.9"
 
 services:
@@ -6,27 +15,84 @@ services:
       context: .
       dockerfile: config/deploy/Dockerfile
     ports:
-      - "5000:5000"
+      - "${KOTO_PORT:-5000}:5000"
+
+    # ── Environment variables ────────────────────────────────────────
+    # Required: KOTO_JWT_SECRET (set a strong random secret in .env)
+    # Required: At least one AI provider key (GOOGLE_API_KEY, etc.)
+    # See config/deploy/.env.example for full documentation.
     environment:
+      # Core / required
       - KOTO_DEPLOY_MODE=${KOTO_DEPLOY_MODE:-local}
       - KOTO_JWT_SECRET=${KOTO_JWT_SECRET:-}
+      # Logging
       - KOTO_LOG_LEVEL=${KOTO_LOG_LEVEL:-INFO}
       - KOTO_LOG_FORMAT=${KOTO_LOG_FORMAT:-text}
+      # AI provider keys (supply at least one)
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Observability (optional)
       - SENTRY_DSN=${SENTRY_DSN:-}
       - METRICS_TOKEN=${METRICS_TOKEN:-}
+      # Rate limiting (optional)
+      - KOTO_MAX_DAILY_REQUESTS=${KOTO_MAX_DAILY_REQUESTS:-100}
+      # Dev / debug (optional)
       - SWAGGER_ENABLED=${SWAGGER_ENABLED:-false}
+
+    # ── Persistent named volumes ─────────────────────────────────────
+    # Named volumes survive `docker compose down` and are easy to back up.
+    # The app writes to workspace/, chats/, and logs/; config/ is read-heavy
+    # but may be written to (e.g. users.json, checkpoint DB).
     volumes:
-      - ./workspace:/app/workspace
-      - ./chats:/app/chats
-      - ./config:/app/config
-      - ./logs:/app/logs
-    restart: unless-stopped
+      - koto_workspace:/app/workspace
+      - koto_chats:/app/chats
+      - koto_config:/app/config
+      - koto_logs:/app/logs
+
+    # ── Restart policy ───────────────────────────────────────────────
+    # Restart on crash but stop after 5 consecutive failures to avoid
+    # tight restart loops on misconfiguration.
+    restart: on-failure:5
+
+    # ── Health check ─────────────────────────────────────────────────
+    # Uses Python+requests (curl is not installed in the slim image).
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import requests; requests.get('http://localhost:5000/api/health').raise_for_status()",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 40s
+
+    # ── Resource limits ──────────────────────────────────────────────
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+
+    # ── Security hardening ───────────────────────────────────────────
+    # read_only: makes the container filesystem read-only.
+    # Writable paths are explicitly granted via named volumes above
+    # and a tmpfs mount for /tmp (used by Python, gunicorn, etc.).
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+# ── Named volume declarations ───────────────────────────────────────
+volumes:
+  koto_workspace:
+  koto_chats:
+  koto_config:
+  koto_logs:
