@@ -214,13 +214,6 @@ async function closeWindow() {
 // 这样可以支持多个对话并行，也能正确处理话题切换
 const sessionStates = new Map();  // sessionName -> { isGenerating, abortController }
 
-// DOM 缓存：当切换到另一个 session 时，将正在生成的 session 的 DOM 节点保存到 Fragment
-// 这样切换回来时能恢复实时流式内容，而不是从服务端加载已保存的历史
-const sessionDomCache = new Map(); // sessionName -> DocumentFragment
-
-// 智能滚动锁：用户上划时暂停自动滚动到底部，避免打断阅读
-let isScrollLocked = false;
-
 function getSessionState(sessionName) {
     if (!sessionStates.has(sessionName)) {
         sessionStates.set(sessionName, {
@@ -265,35 +258,57 @@ function getSessionTaskId(sessionName) {
 // 任务类型到模型的映射
 const TASK_MODELS = {
     'CHAT': 'gemini-3-flash-preview',
-    'CODER': 'gemini-3.1-pro-preview',
+    'CODER': 'gemini-3-pro-preview', 
     'VISION': 'gemini-3-flash-preview',
     'PAINTER': 'nano-banana-pro-preview',
     'VOICE': 'gemini-3-flash-preview',  // 语音模式使用快速模型
     'RESEARCH': 'deep-research-pro-preview-12-2025',
-    'FILE_GEN': 'gemini-3.1-pro-preview'
+    'FILE_GEN': 'gemini-3-pro-preview'
 };
 
 // ================= Notification =================
 function showNotification(message, type = 'info', duration = 3000) {
-    // 获取或懒创建通知堆叠容器（垂直排列，避免重叠）
-    let stack = document.getElementById('notificationStack');
-    if (!stack) {
-        stack = document.createElement('div');
-        stack.id = 'notificationStack';
-        document.body.appendChild(stack);
-    }
-
+    // 创建通知元素
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
-    notification.innerHTML = `<span>${message}</span><button class="notif-dismiss" onclick="this.parentElement.remove()" title="关闭">×</button>`;
-    stack.appendChild(notification);
-
-    // 自动消失
+    notification.innerHTML = `<span>${message}</span>`;
+    
+    // 根据类型设置颜色
+    let bgColor;
+    switch (type) {
+        case 'success':
+            bgColor = '#22c55e';
+            break;
+        case 'error':
+            bgColor = '#ef4444';
+            break;
+        case 'warning':
+            bgColor = '#f59e0b';
+            break;
+        default:
+            bgColor = '#3b82f6';
+    }
+    
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 8px;
+        background: ${bgColor};
+        color: white;
+        font-size: 14px;
+        z-index: 10000;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        animation: slideIn 0.3s ease;
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // 指定时间后自动消失
     setTimeout(() => {
-        if (notification.parentElement) {
-            notification.classList.add('notif-hiding');
-            setTimeout(() => notification.remove(), 300);
-        }
+        notification.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => notification.remove(), 300);
     }, duration);
 }
 
@@ -346,27 +361,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(initVoice, 500);
     initVoicePanel();
     initProactiveUI();
-
-    // 9. 智能滚动 + 全局快捷键
-    initScrollBehavior();
-    window.addEventListener('keydown', handleGlobalKeyDown);
-
-    // 10. 全局外部链接拦截：防止 webview 导航离开 Koto
-    //     在系统浏览器中打开，而不是在 webview 内跳转
-    document.addEventListener('click', (e) => {
-        const a = e.target.closest('a[data-ext="1"], a[href^="http://"], a[href^="https://"]');
-        if (!a) return;
-        // 忽略已设置 target="_blank" 以外页面打开的链接（保持原行为）
-        if (a.target === '_blank' && !window.pywebview) return;
-        e.preventDefault();
-        const url = a.href;
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
-            window.pywebview.api.open_url(url);
-        } else {
-            // 普通浏览器环境：新标签打开
-            window.open(url, '_blank', 'noopener,noreferrer');
-        }
-    });
 
     // 8. 影子追踪：启动时拉取一次待消息，之后每 5 分钟轮询
     setTimeout(() => {
@@ -550,25 +544,14 @@ function renderSessions(sessions) {
     
     container.innerHTML = sessions.map(session => `
         <div class="session-item ${currentSession === session ? 'active' : ''}" 
-             data-session="${escapeHtml(session)}">
+             onclick="selectSession('${session}')">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
             <span class="session-name">${escapeHtml(session)}</span>
-            <button class="session-del-btn" title="删除对话" tabindex="-1">×</button>
+            <button class="session-delete-btn" data-session="${escapeHtml(session)}" onclick="deleteSession(this.dataset.session, event)" title="删除对话">✕</button>
         </div>
     `).join('');
-
-    // 用 addEventListener 替代内联 onclick，避免 session 名含单引号/特殊字符时 JS 注入
-    container.querySelectorAll('.session-item').forEach(el => {
-        el.addEventListener('click', function() {
-            selectSession(this.dataset.session);
-        });
-        el.querySelector('.session-del-btn').addEventListener('click', function(e) {
-            e.stopPropagation();
-            deleteCurrentSession(el.dataset.session);
-        });
-    });
 }
 
 // ================= 返回欢迎页 =================
@@ -581,19 +564,9 @@ function goToWelcome() {
             controller.abort();
         }
         setSessionGenerating(currentSession, false);
-        sessionDomCache.delete(currentSession);
-    }
-
-    // 重置发送按钮状态
-    const _sendBtn = document.getElementById('sendBtn');
-    if (_sendBtn) {
-        _sendBtn.classList.remove('generating');
-        _sendBtn.disabled = false;
-        _sendBtn.title = '发送';
     }
     
     currentSession = null;
-    isScrollLocked = false;
     document.getElementById('chatTitle').textContent = '选择或创建对话';
     
     // 取消所有会话的选中状态
@@ -616,16 +589,8 @@ function goToWelcome() {
 }
 
 async function selectSession(sessionName) {
-    // 离开时：如果当前 session 正在生成，将其 DOM 节点移入 Fragment 缓存
-    // 这样后台流继续写入 bodyEl（引用仍有效），切回来时直接恢复，不会丢失流内容
-    if (currentSession && currentSession !== sessionName && isSessionGenerating(currentSession)) {
-        const _chatContainer = document.getElementById('chatMessages');
-        const _frag = document.createDocumentFragment();
-        while (_chatContainer.firstChild) _frag.appendChild(_chatContainer.firstChild);
-        sessionDomCache.set(currentSession, _frag);
-        console.log(`[SWITCH] DOM 已缓存 session: ${currentSession}`);
-    }
-
+    // ⭐ 改进：允许多个会话并行运行，不中止前一个会话的任务
+    // 只切换 currentSession 用于 UI 显示和新消息输入，但不中止前一个会话的生成
     console.log(`[SWITCH] 从 ${currentSession} 切换到 ${sessionName}（保持后台任务运行）`);
     
     currentSession = sessionName;
@@ -634,44 +599,18 @@ async function selectSession(sessionName) {
     // Update active state
     document.querySelectorAll('.session-item').forEach(item => {
         item.classList.remove('active');
-        if (item.dataset.session === sessionName) {
+        if (item.querySelector('.session-name').textContent === sessionName) {
             item.classList.add('active');
         }
     });
-
-    // 同步发送按钮状态：切换后立即反映新 session 的生成状态
-    const _sb = document.getElementById('sendBtn');
-    if (_sb) {
-        if (isSessionGenerating(sessionName)) {
-            _sb.classList.add('generating');
-            _sb.disabled = false;
-            _sb.title = '停止生成';
-        } else {
-            _sb.classList.remove('generating');
-            _sb.disabled = false;
-            _sb.title = '发送';
-        }
-    }
     
-    // 恢复或加载聊天内容
-    const _chatContainer = document.getElementById('chatMessages');
-    if (isSessionGenerating(sessionName) && sessionDomCache.has(sessionName)) {
-        // 从缓存恢复 DOM（stream 仍在向 bodyEl 写入，节点引用未变）
-        const _frag = sessionDomCache.get(sessionName);
-        sessionDomCache.delete(sessionName);
-        _chatContainer.innerHTML = '';
-        _chatContainer.appendChild(_frag);
-        scrollToBottomForce();
-        console.log(`[SWITCH] DOM 从缓存恢复 session: ${sessionName}`);
-    } else {
-        // Load chat history
-        try {
-            const response = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}`);
-            const data = await response.json();
-            renderChatHistory(data.history);
-        } catch (error) {
-            console.error('Failed to load session:', error);
-        }
+    // Load chat history
+    try {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}`);
+        const data = await response.json();
+        renderChatHistory(data.history);
+    } catch (error) {
+        console.error('Failed to load session:', error);
     }
 }
 
@@ -817,50 +756,53 @@ async function confirmNewSession() {
     }
 }
 
-async function deleteCurrentSession(targetSession = null) {
-    const deletingSession = targetSession || currentSession;
-    if (!deletingSession) return;
+async function deleteSession(sessionName, event) {
+    if (event) event.stopPropagation();
+    if (!sessionName) return;
     
-    if (!confirm(`Delete chat "${deletingSession}"?`)) return;
+    if (!confirm(`确认删除对话 "${sessionName}"？`)) return;
     
-    // ⭐ 改进：在删除前，如果有生成，先中止它
-    if (isSessionGenerating(deletingSession)) {
-        const controller = getSessionAbortController(deletingSession);
+    // 如果有生成任务，先中止
+    if (isSessionGenerating(sessionName)) {
+        const controller = getSessionAbortController(sessionName);
         if (controller) {
-            console.log(`[CLEANUP] Deleting session ${deletingSession}, aborting its generation`);
+            console.log(`[CLEANUP] Deleting session ${sessionName}, aborting its generation`);
             controller.abort();
         }
-        setSessionGenerating(deletingSession, false);
+        setSessionGenerating(sessionName, false);
     }
     
     try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(deletingSession)}`, {
+        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}`, {
             method: 'DELETE'
         });
         
         const data = await response.json();
         if (data.success) {
-            // ⭐ 改进：实时移除该话题的 DOM 元素
+            // 实时移除该话题的 DOM 元素
             document.querySelectorAll('.session-item').forEach(item => {
-                if (item.dataset.session === deletingSession) {
+                if (item.querySelector('.session-name').textContent === sessionName) {
                     item.remove();
                 }
             });
             
-            if (currentSession === deletingSession) {
+            // 只有删除的是当前打开的会话时才重置聊天区
+            if (currentSession === sessionName) {
                 currentSession = null;
                 document.getElementById('chatTitle').textContent = '选择或创建对话';
-                // 清除聊天消息
                 const container = document.getElementById('chatMessages');
                 container.innerHTML = document.getElementById('welcomeScreen').outerHTML;
             }
             
-            // ⭐ 不重新加载列表，而是使用上面的 DOM 移除方式
-            console.log(`[DELETE] 已删除话题 ${deletingSession}，UI 实时更新`);
+            console.log(`[DELETE] 已删除话题 ${sessionName}，UI 实时更新`);
         }
     } catch (error) {
         console.error('Failed to delete session:', error);
     }
+}
+
+async function deleteCurrentSession() {
+    return deleteSession(currentSession, null);
 }
 
 // ================= Chat =================
@@ -925,7 +867,7 @@ function renderChatHistory(history) {
         }
     }
     
-    scrollToBottomForce();
+    scrollToBottom();
     highlightCode();
     // 渲染 Mermaid 图表（历史消息中可能包含）
     setTimeout(() => renderMermaidBlocks(), 100);
@@ -999,11 +941,9 @@ function renderMessage(role, content, meta = {}) {
     const timestampText = formatMessageTimestamp(meta.timestamp);
 
     if (meta.task) {
-        const friendlyModel = modelDisplayName[meta.model] || meta.model || 'Auto';
-        const routeMethod = meta.route_method || '';
+        const showTaskBadge = currentSettings?.ai?.show_task_type === true;
         metaHtml = `
-            <span class="task-badge ${meta.task.toLowerCase()}">${meta.task}</span>
-            <span class="model-info" title="${meta.model}\n路由: ${routeMethod}">📦 ${friendlyModel}</span>
+            ${showTaskBadge ? `<span class="task-badge ${meta.task.toLowerCase()}">${meta.task}</span>` : ''}
             <span class="time-info">⏱️ ${meta.time || ''}</span>
         `;
     }
@@ -1115,18 +1055,6 @@ function renderMessage(role, content, meta = {}) {
         `;
     }
     
-    const actionBar = `
-        <div class="message-actions">
-            ${role === 'assistant' ? `<button class="msg-action-btn" onclick="copyMessageText(this)" title="复制回复">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                复制
-            </button>` : ''}
-            ${role === 'user' ? `<button class="msg-action-btn" onclick="resendMessage(this)" title="重新发送">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>
-                重发
-            </button>` : ''}
-        </div>
-    `;
     return `
         <div class="message ${role}">
             <div class="message-avatar">${avatar}</div>
@@ -1140,7 +1068,6 @@ function renderMessage(role, content, meta = {}) {
                 ${pptHtml}
                 ${imagesHtml}
                 ${filesHtml}
-                ${actionBar}
             </div>
         </div>
     `;
@@ -1151,29 +1078,6 @@ function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-}
-
-// 复制助手消息文本内容
-function copyMessageText(btn) {
-    const msgBody = btn.closest('.message').querySelector('.message-body');
-    const text = msgBody ? msgBody.innerText : '';
-    navigator.clipboard.writeText(text).then(() => {
-        showNotification('已复制到剪贴板', 'success', 1500);
-    }).catch(() => {
-        showNotification('复制失败，请手动选择', 'error', 2000);
-    });
-}
-
-// 将用户消息内容填回输入框（重发）
-function resendMessage(btn) {
-    const msgBody = btn.closest('.message').querySelector('.message-body');
-    if (!msgBody) return;
-    const text = msgBody.innerText.trim();
-    if (!text) return;
-    const input = document.getElementById('messageInput');
-    input.value = text;
-    autoResize(input);
-    input.focus();
 }
 
 async function sendMessage(event) {
@@ -1255,7 +1159,7 @@ async function sendMessage(event) {
     }
     
     container.innerHTML += renderMessage('user', message || '(附件)', { attachment: attachmentInfo, attachments: attachmentList });
-    scrollToBottomForce();
+    scrollToBottom();
     
     // === 确定任务类型和模型 ===
     let taskType = lockedTaskType;  // 用户锁定的任务类型
@@ -1290,10 +1194,8 @@ async function sendMessage(event) {
     }
     
     // === 第二步：发送请求获取流式响应 ===
-    // ⭐ 捕获此刻的 session，防止 async 过程中 currentSession 被切换导致 finally 清理错误 session
-    const thisSession = currentSession;
     try {
-        setSessionGenerating(thisSession, true);
+        setSessionGenerating(currentSession, true);
         
         // 切换发送按钮为停止状态
         const sendBtn = document.getElementById('sendBtn');
@@ -1306,14 +1208,14 @@ async function sendMessage(event) {
         const msgDiv = document.createElement('div');
         msgDiv.className = 'message assistant';
         msgDiv.id = msgId;
+        const _showTaskBadge = currentSettings?.ai?.show_task_type === true;
         msgDiv.innerHTML = `
             <div class="message-avatar">言</div>
             <div class="message-content">
                 <div class="message-header">
                     <span class="message-sender">Koto</span>
                     <div class="message-meta">
-                        <span class="task-badge ${(taskType || taskInfo?.task || 'chat').toLowerCase()}">${taskType || taskInfo?.task || 'CHAT'}</span>
-                        <span class="model-info">📦 ${taskInfo?.model_name || 'Loading...'}</span>
+                        ${_showTaskBadge ? `<span class="task-badge ${(taskType || taskInfo?.task || 'chat').toLowerCase()}">${taskType || taskInfo?.task || 'CHAT'}</span>` : ''}
                         <span class="time-info" id="${msgId}-time">⏱️ ...</span>
                     </div>
                 </div>
@@ -1334,7 +1236,7 @@ async function sendMessage(event) {
         if (selectedFiles.length > 0) {
             // Send with file
             const formData = new FormData();
-            formData.append('session', thisSession);
+            formData.append('session', currentSession);
             formData.append('message', message);
             selectedFiles.forEach(file => formData.append('file', file));
             formData.append('file_count', String(selectedFiles.length));
@@ -1342,7 +1244,7 @@ async function sendMessage(event) {
             formData.append('locked_model', modelToUse || 'auto');
 
             const abortController = new AbortController();
-            setSessionAbortController(thisSession, abortController);
+            setSessionAbortController(currentSession, abortController);
             
             response = await fetch('/api/chat/file', {
                 method: 'POST',
@@ -1500,24 +1402,20 @@ async function sendMessage(event) {
                                     } else if (data.type === 'classification') {
                                         console.log('[FILE STREAM] 任务分类:', data.task_type);
                                         if (data.task_id) {
-                                            setSessionTaskId(thisSession, data.task_id);
+                                            setSessionTaskId(currentSession, data.task_id);
                                         }
                                         // 更新任务徽章（初始占位是 CHAT，收到分类后替换为真实任务名）
-                                        const _msgContainer = document.getElementById(msgId);
-                                        if (_msgContainer && data.task_type) {
-                                            const _badgeEl = _msgContainer.querySelector('.task-badge');
-                                            if (_badgeEl) {
-                                                _badgeEl.textContent = data.task_type;
-                                                _badgeEl.className = `task-badge ${data.task_type.toLowerCase()}`;
+                                        if (currentSettings?.ai?.show_task_type === true) {
+                                            const _msgContainer = document.getElementById(msgId);
+                                            if (_msgContainer && data.task_type) {
+                                                const _badgeEl = _msgContainer.querySelector('.task-badge');
+                                                if (_badgeEl) {
+                                                    _badgeEl.textContent = data.task_type;
+                                                    _badgeEl.className = `task-badge ${data.task_type.toLowerCase()}`;
+                                                }
                                             }
                                         }
-                                        if (data.model) {
-                                            const _msgContainer2 = document.getElementById(msgId);
-                                            if (_msgContainer2) {
-                                                const _modelEl = _msgContainer2.querySelector('.model-info');
-                                                if (_modelEl) _modelEl.textContent = `📦 ${data.model}`;
-                                            }
-                                        }
+
                                     } else if (data.type === 'info') {
                                         fullText += `*${data.message}*\n\n`;
                                         bodyEl.innerHTML = parseMarkdown(fullText);
@@ -1646,7 +1544,7 @@ async function sendMessage(event) {
             // === 流式输出 ===
             // ⭐ 创建 AbortController 来支持取消请求
             const abortController = new AbortController();
-            setSessionAbortController(thisSession, abortController);
+            setSessionAbortController(currentSession, abortController);
 
             const effectiveTaskType = String(taskType || '').toUpperCase();
             const useUnifiedAgentStream = (effectiveTaskType === 'AGENT');
@@ -1655,11 +1553,11 @@ async function sendMessage(event) {
                 ? {
                     request: message,
                     context: { history: [] },
-                    session_id: thisSession,
+                    session_id: currentSession,
                     model: modelToUse || 'gemini-3-flash-preview'
                 }
                 : {
-                    session: thisSession,
+                    session: currentSession,
                     message: message,
                     locked_task: taskType,
                     locked_model: modelToUse
@@ -1687,6 +1585,7 @@ async function sendMessage(event) {
             let streamComplete = false;
             let hasReceivedData = false; // 追踪是否收到过数据
             let agentStepCounter = 0;
+            let agentStepTimer = null;  // 当前步骤计时器
 
             // ── 实时进度面板状态（新方案）──
             let progressCompletedSteps = [];   // {message, detail}[]
@@ -1736,6 +1635,83 @@ async function sendMessage(event) {
                     scrollToBottom();
                 }
             }, 3000);
+
+            // ─── 工具名 → 中文描述 ────────────────────────────────────────────
+            const describeAction = (toolName, toolArgs) => {
+                const n = (toolName || '').toLowerCase();
+                const a = toolArgs || {};
+                const q = String(a.query || a.q || a.search_query || a.keyword || a.text || '');
+                const path = String(a.path || a.file_path || a.filename || a.filepath || '');
+                const url = String(a.url || a.link || '');
+                const city = String(a.city || a.location || '');
+                const app = String(a.app_name || a.name || '');
+                const cmd = String(a.command || a.cmd || a.code || '');
+                const trunc = (s, len) => s.length > len ? s.substring(0, len) + '…' : s;
+                const fname = path ? path.split(/[\\/]/).pop() : '';
+
+                if (n.includes('weather')) return city ? `🌤 查询天气：${city}` : '🌤 查询天气';
+                if (n.includes('search') || n === 'web_search' || n.includes('google') || n.includes('bing'))
+                    return q ? `🔍 搜索：${trunc(q, 38)}` : '🔍 网络搜索';
+                if (n.includes('browse') || n.includes('open_url') || n.includes('visit'))
+                    return url ? `🌐 访问：${trunc(url, 38)}` : '🌐 浏览网页';
+                if (n.includes('read_file') || n.includes('file_read') || n === 'read')
+                    return fname ? `📄 读取：${fname}` : '📄 读取文件';
+                if (n.includes('write_file') || n.includes('file_write') || n.includes('save_file'))
+                    return fname ? `💾 写入：${fname}` : '💾 写入文件';
+                if (n.includes('list_dir') || n.includes('list_files') || n.includes('ls'))
+                    return path ? `📁 列出：${trunc(path, 30)}` : '📁 列出目录';
+                if (n.includes('exec') || n.includes('run_code') || n.includes('python') || n.includes('shell') || n.includes('terminal'))
+                    return cmd ? `⚡ 执行：${trunc(cmd, 35)}` : '⚡ 执行代码';
+                if (n.includes('memory') || n.includes('recall') || n.includes('remember'))
+                    return q ? `🧠 记忆：${trunc(q, 35)}` : '🧠 记忆操作';
+                if (n.includes('calendar') || n.includes('schedule') || n.includes('event'))
+                    return '📅 日历操作';
+                if (n.includes('email') || n.includes('mail')) return '✉️ 邮件操作';
+                if (n.includes('image') || n.includes('photo') || n.includes('screenshot')) return '🖼️ 图像操作';
+                if (n.includes('music') || n.includes('play') || n.includes('audio')) return '🎵 媒体控制';
+                if (n.includes('wechat') || n.includes('send_msg') || n.includes('message'))
+                    return '💬 发送消息';
+                if (n.includes('translate')) return `🌏 翻译${q ? '：' + trunc(q, 25) : ''}`;
+                if (n.includes('open') || n.includes('launch'))
+                    return app ? `🚀 打开：${app}` : '🚀 启动应用';
+                if (n.includes('delete') || n.includes('remove')) return '🗑️ 删除操作';
+                if (n.includes('analyze') || n.includes('summarize')) return '🔬 分析内容';
+                const pretty = (toolName || '').replace(/_/g, ' ');
+                return `⚙ ${trunc(pretty, 38)}`;
+            };
+
+            // ─── 工具结果 → 简短摘要 ────────────────────────────────────────────
+            const briefObsText = (raw) => {
+                if (!raw) return '';
+                const s = String(raw).trim();
+                if (s.startsWith('{') || s.startsWith('[')) {
+                    try {
+                        const obj = JSON.parse(s);
+                        if (obj.success === false) return obj.error ? `失败：${String(obj.error).substring(0,28)}` : '操作失败';
+                        if (typeof obj.result === 'string' && obj.result) return obj.result.substring(0, 48);
+                        if (typeof obj.content === 'string' && obj.content) return obj.content.substring(0, 48);
+                        if (Array.isArray(obj)) return `${obj.length} 条结果`;
+                        const keys = Object.keys(obj);
+                        if (keys.length === 1 && typeof obj[keys[0]] === 'string') return obj[keys[0]].substring(0, 48);
+                        return keys.length ? '已完成' : '';
+                    } catch(e) {}
+                }
+                if (s.startsWith('Error:') || s.startsWith('error:')) return s.substring(0, 38);
+                return s.length <= 55 ? s : s.substring(0, 52) + '…';
+            };
+
+            // ─── 获取或创建 .koto-steps 面板 ───────────────────────────────────
+            const ensureKotoSteps = (el) => {
+                let panel = el.querySelector('.koto-steps');
+                if (!panel) {
+                    panel = document.createElement('details');
+                    panel.className = 'koto-steps';
+                    panel.open = true;
+                    panel.innerHTML = `<summary class="koto-steps-summary"><span class="koto-steps-spinner"></span><span class="koto-steps-label">正在处理...</span><span class="koto-steps-skills"></span></summary><div class="koto-steps-list"></div>`;
+                    el.insertBefore(panel, el.firstChild);
+                }
+                return panel;
+            };
 
             const tryParseObservationJson = (raw) => {
                 if (!raw || typeof raw !== 'string') return null;
@@ -1854,6 +1830,14 @@ async function sendMessage(event) {
                     const stepType = String(step.step_type).toUpperCase();
 
                     if (stepType === 'THOUGHT') {
+                        const phase = step.metadata?.phase || '';
+                        if (phase === 'planning') {
+                            return {
+                                type: 'planning_status',
+                                message: step.content || '',
+                                skill_labels: step.metadata?.skill_labels || []
+                            };
+                        }
                         return { type: 'agent_thought', thought: step.content || '' };
                     }
 
@@ -1937,12 +1921,28 @@ async function sendMessage(event) {
                                     fullText += data.content;
                                     // 每50ms更新一次UI
                                     if (Date.now() - lastUpdateTime > 50) {
-                                        try {
-                                            bodyEl.innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
-                                        } catch (mdError) {
-                                            console.warn('[Markdown] Parsing failed (temp):', mdError);
-                                            // 降级渲染，防止UI卡死
-                                            bodyEl.innerHTML = `<div class="markdown-fallback" style="white-space: pre-wrap;">${escapeHtml(fullText)}</div><span class="typing-cursor">▊</span>`;
+                                        // Agent 模式：如有步骤/思考面板，只更新 .agent-answer 区，保留面板
+                                        const _hasAgentPanels = !!(bodyEl.querySelector('.koto-steps') || bodyEl.querySelector('.agent-steps-panel') || bodyEl.querySelector('.thinking-panel'));
+                                        if (_hasAgentPanels) {
+                                            let _answerDiv = bodyEl.querySelector('.agent-answer');
+                                            if (!_answerDiv) {
+                                                _answerDiv = document.createElement('div');
+                                                _answerDiv.className = 'agent-answer';
+                                                bodyEl.appendChild(_answerDiv);
+                                            }
+                                            try {
+                                                _answerDiv.innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
+                                            } catch (_mdErr) {
+                                                _answerDiv.innerHTML = `<div class="markdown-fallback" style="white-space: pre-wrap;">${escapeHtml(fullText)}</div><span class="typing-cursor">▊</span>`;
+                                            }
+                                        } else {
+                                            try {
+                                                bodyEl.innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
+                                            } catch (mdError) {
+                                                console.warn('[Markdown] Parsing failed (temp):', mdError);
+                                                // 降级渲染，防止UI卡死
+                                                bodyEl.innerHTML = `<div class="markdown-fallback" style="white-space: pre-wrap;">${escapeHtml(fullText)}</div><span class="typing-cursor">▊</span>`;
+                                            }
                                         }
                                         scrollToBottom();
                                         lastUpdateTime = Date.now();
@@ -2069,107 +2069,79 @@ async function sendMessage(event) {
                                         stepsList.appendChild(stepEl);
                                         scrollToBottom();
                                     }
-                                } else if (data.type === 'agent_step') {
-                                    // Agent步骤信息 - 在步骤面板中显示
-                                    console.log('[AGENT] Step:', data.step_number, '/', data.total_steps, '-', data.tool_name);
-                                    
-                                    // 初始化 agent 状态栏和步骤面板（首次）
-                                    if (!bodyEl.querySelector('.agent-status-bar')) {
-                                        const statusBar = document.createElement('div');
-                                        statusBar.className = 'agent-status-bar';
-                                        statusBar.innerHTML = '<div class="agent-spinner"></div><span class="agent-status-text">🤖 Agent 执行中…</span>';
-                                        bodyEl.insertBefore(statusBar, bodyEl.firstChild);
+                                } else if (data.type === 'planning_status') {
+                                    // ── 规划阶段：创建 .koto-steps 面板并填入技能信息 ──
+                                    const panel = ensureKotoSteps(bodyEl);
+                                    const label = panel.querySelector('.koto-steps-label');
+                                    if (label) label.textContent = data.message || '正在分析请求';
+                                    const skillsEl = panel.querySelector('.koto-steps-skills');
+                                    const labels = Array.isArray(data.skill_labels) ? data.skill_labels : [];
+                                    if (skillsEl && labels.length) {
+                                        skillsEl.innerHTML = labels.map(l => `<span class="skill-badge">${escapeHtml(l)}</span>`).join('');
                                     }
-                                    let stepsPanel = bodyEl.querySelector('.agent-steps-panel');
-                                    if (!stepsPanel) {
-                                        stepsPanel = document.createElement('details');
-                                        stepsPanel.className = 'agent-steps-panel';
-                                        stepsPanel.open = true;
-                                        stepsPanel.innerHTML = '<summary>📋 执行步骤</summary><div class="agent-steps-list"></div>';
-                                        // 在状态栏之后、正文之前插入
-                                        const statusBar = bodyEl.querySelector('.agent-status-bar');
-                                        if (statusBar && statusBar.nextSibling) {
-                                            bodyEl.insertBefore(stepsPanel, statusBar.nextSibling);
-                                        } else {
-                                            bodyEl.appendChild(stepsPanel);
-                                        }
-                                    }
-                                    
-                                    // 更新状态栏
-                                    const statusText = bodyEl.querySelector('.agent-status-text');
-                                    if (statusText) statusText.textContent = `🤖 步骤 ${data.step_number}/${data.total_steps} — ${data.tool_name}`;
-                                    
-                                    // 添加步骤卡片
-                                    const stepsList = stepsPanel.querySelector('.agent-steps-list');
-                                    const stepCard = document.createElement('div');
-                                    stepCard.className = 'agent-step-card step-pending';
-                                    stepCard.id = `agent-step-${data.step_number}`;
-                                    const argsStr = data.tool_args ? Object.entries(data.tool_args).map(([k,v]) => `${k}=${JSON.stringify(v)}`).join(', ') : '';
-                                    stepCard.innerHTML = `
-                                        <div class="agent-step-number">${data.step_number}</div>
-                                        <div class="agent-step-info">
-                                            <div class="agent-step-tool">${escapeHtml(data.tool_name)}</div>
-                                            <div class="agent-step-status">⏳ 执行中...${argsStr ? ' (' + escapeHtml(argsStr).substring(0, 60) + ')' : ''}</div>
-                                        </div>`;
-                                    stepsList.appendChild(stepCard);
                                     scrollToBottom();
 
-                                } else if (data.type === 'observation' && bodyEl.querySelector('.agent-steps-panel')) {
-                                    // Agent OBSERVATION: 结构化展示工具结果
-                                    const cards = bodyEl.querySelectorAll('.agent-step-card');
-                                    const lastCard = cards.length > 0 ? cards[cards.length - 1] : null;
-                                    if (lastCard) {
-                                        lastCard.className = 'agent-step-card step-success';
-                                        const statusEl = lastCard.querySelector('.agent-step-status');
-                                        if (statusEl) {
-                                            statusEl.textContent = '✅ 已完成';
-                                        }
-
-                                        const rawObs = data.observation || data.message || '';
-                                        const obsObj = tryParseObservationJson(rawObs);
-                                        let obsEl = lastCard.querySelector('.agent-step-observation');
-                                        if (!obsEl) {
-                                            obsEl = document.createElement('div');
-                                            obsEl.className = 'agent-step-observation';
-                                            lastCard.appendChild(obsEl);
-                                        }
-                                        obsEl.innerHTML = renderObservationHtml(obsObj, rawObs);
-                                    }
-                                    scrollToBottom();
-                                    
-                                } else if (data.type === 'progress' && bodyEl.querySelector('.agent-steps-panel')) {
-                                    // Agent 模式下的 progress: 更新最后一个步骤卡片的状态
-                                    const cards = bodyEl.querySelectorAll('.agent-step-card');
-                                    const lastCard = cards.length > 0 ? cards[cards.length - 1] : null;
-                                    if (lastCard) {
-                                        const statusEl = lastCard.querySelector('.agent-step-status');
-                                        const msg = data.message || '';
-                                        if (msg.startsWith('✅')) {
-                                            lastCard.className = 'agent-step-card step-success';
-                                            if (statusEl) statusEl.textContent = msg;
-                                        } else if (msg.startsWith('⚠️') || msg.startsWith('❌')) {
-                                            lastCard.className = 'agent-step-card step-fail';
-                                            if (statusEl) statusEl.textContent = msg;
-                                        } else {
-                                            if (statusEl) statusEl.textContent = msg;
-                                        }
-                                    }
-                                    scrollToBottom();
-                                    
                                 } else if (data.type === 'agent_thought') {
-                                    // Agent思考过程 - 仅在工具调用中间步骤显示
-                                    // 最终回复(token)会替代思考内容，避免重复
-                                    console.log('[AGENT] Thinking:', data.thought);
-                                    agentThoughtText = data.thought; // 记录思考文本，用于去重
-                                    fullText += `*💭 ${data.thought}*\n\n`;
-                                    // 更新正文区（跳过面板部分）
-                                    const textContainer = bodyEl.querySelector('.agent-answer') || bodyEl;
-                                    if (!bodyEl.querySelector('.agent-answer')) {
-                                        const answerDiv = document.createElement('div');
-                                        answerDiv.className = 'agent-answer';
-                                        bodyEl.appendChild(answerDiv);
+                                    // ── Agent 推理 → 在 .koto-steps 中追加思考行 ──
+                                    agentThoughtText = data.thought;
+                                    const panel = ensureKotoSteps(bodyEl);
+                                    const label = panel.querySelector('.koto-steps-label');
+                                    if (label) label.textContent = '分析中…';
+                                    const list = panel.querySelector('.koto-steps-list');
+                                    if (list && data.thought) {
+                                        const thoughtRow = document.createElement('div');
+                                        thoughtRow.className = 'koto-step thought';
+                                        const truncThought = String(data.thought).substring(0, 90);
+                                        thoughtRow.innerHTML = `<span class="koto-step-icon">💭</span><span class="koto-step-desc">${escapeHtml(truncThought)}</span>`;
+                                        list.appendChild(thoughtRow);
                                     }
-                                    bodyEl.querySelector('.agent-answer').innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
+                                    scrollToBottom();
+
+                                } else if (data.type === 'agent_step') {
+                                    // ── 工具调用开始 → 在 .koto-steps 中追加执行行 ──
+                                    console.log('[AGENT] Action:', data.tool_name, data.tool_args);
+                                    const panel = ensureKotoSteps(bodyEl);
+                                    const label = panel.querySelector('.koto-steps-label');
+                                    if (label) label.textContent = '执行中…';
+                                    const list = panel.querySelector('.koto-steps-list');
+                                    if (list) {
+                                        const desc = describeAction(data.tool_name, data.tool_args);
+                                        const stepRow = document.createElement('div');
+                                        stepRow.className = 'koto-step pending';
+                                        stepRow.dataset.stepStart = String(Date.now());
+                                        stepRow.dataset.stepDesc = desc;
+                                        stepRow.innerHTML = `<span class="koto-step-icon"><span class="koto-mini-spin"></span></span><span class="koto-step-desc">${escapeHtml(desc)}</span><span class="koto-step-time">…</span>`;
+                                        list.appendChild(stepRow);
+                                        // 启动/重置步骤计时
+                                        if (agentStepTimer) clearInterval(agentStepTimer);
+                                        agentStepTimer = setInterval(() => {
+                                            const pr = list.querySelectorAll('.koto-step.pending');
+                                            pr.forEach(r => {
+                                                const t = r.querySelector('.koto-step-time');
+                                                if (t && r.dataset.stepStart) t.textContent = `${Math.floor((Date.now() - Number(r.dataset.stepStart)) / 1000)}s`;
+                                            });
+                                        }, 500);
+                                    }
+                                    scrollToBottom();
+
+                                } else if (data.type === 'observation') {
+                                    // ── 工具结果 → 更新最后一个 pending 行 ──
+                                    const panel = bodyEl.querySelector('.koto-steps');
+                                    if (panel) {
+                                        const list = panel.querySelector('.koto-steps-list');
+                                        const pendingRows = list ? list.querySelectorAll('.koto-step.pending') : [];
+                                        const lastPending = pendingRows.length ? pendingRows[pendingRows.length - 1] : null;
+                                        if (lastPending) {
+                                            if (agentStepTimer) { clearInterval(agentStepTimer); agentStepTimer = null; }
+                                            const savedDesc = lastPending.dataset.stepDesc || lastPending.querySelector('.koto-step-desc')?.textContent || '';
+                                            const elapsed = lastPending.dataset.stepStart
+                                                ? `${((Date.now() - Number(lastPending.dataset.stepStart)) / 1000).toFixed(1)}s`
+                                                : '';
+                                            const brief = briefObsText(data.observation || data.message || '');
+                                            lastPending.className = 'koto-step done';
+                                            lastPending.innerHTML = `<span class="koto-step-icon koto-step-ok">✓</span><span class="koto-step-desc">${escapeHtml(savedDesc)}</span>${brief ? `<span class="koto-step-result">${escapeHtml(brief)}</span>` : ''}<span class="koto-step-time">${elapsed}</span>`;
+                                        }
+                                    }
                                     scrollToBottom();
                                     
                                 } else if (data.type === 'user_confirm') {
@@ -2182,7 +2154,7 @@ async function sendMessage(event) {
                                             await fetch('/api/agent/confirm', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ session: thisSession, confirmed: confirmResult.confirmed })
+                                                body: JSON.stringify({ session: currentSession, confirmed: confirmResult.confirmed })
                                             });
                                         } catch(e) { console.error('[AGENT] Confirm callback failed:', e); }
                                     }
@@ -2202,7 +2174,7 @@ async function sendMessage(event) {
                                             await fetch('/api/agent/choice', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ session: thisSession, selected: choiceResult.selected })
+                                                body: JSON.stringify({ session: currentSession, selected: choiceResult.selected })
                                             });
                                         } catch(e) { console.error('[AGENT] Choice callback failed:', e); }
                                     }
@@ -2289,22 +2261,51 @@ async function sendMessage(event) {
                                     
                                     streamComplete = true;
                                     const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
-                                    
-                                    // Agent 模式：保留步骤面板，只更新回复区
+                                    const backendTime = data.elapsed_time || elapsedTime;
+
+                                    // ── 停止步骤计时器 ──
+                                    if (agentStepTimer) { clearInterval(agentStepTimer); agentStepTimer = null; }
+
+                                    // ── 新版 .koto-steps 面板 ──
+                                    const kotoSteps = bodyEl.querySelector('.koto-steps');
+                                    // ── 旧版 .agent-steps-panel（向后兼容）──
                                     const agentStepsPanel = bodyEl.querySelector('.agent-steps-panel');
                                     const agentStatusBar = bodyEl.querySelector('.agent-status-bar');
-                                    if (agentStepsPanel) {
-                                        // 移除状态栏 spinner
+                                    // 提前保存思考面板引用（非 Agent 路径的 innerHTML 会清除它）
+                                    const savedThinkingPanel = bodyEl.querySelector('.thinking-panel');
+                                    if (savedThinkingPanel) savedThinkingPanel.remove();
+
+                                    if (kotoSteps) {
+                                        // 将所有仍然 pending 的行标记为 done（防止异常情况遗留）
+                                        kotoSteps.querySelectorAll('.koto-step.pending').forEach(r => {
+                                            const d2 = r.dataset.stepDesc || r.querySelector('.koto-step-desc')?.textContent || '';
+                                            r.className = 'koto-step done';
+                                            r.innerHTML = `<span class="koto-step-icon koto-step-ok">✓</span><span class="koto-step-desc">${escapeHtml(d2)}</span>`;
+                                        });
+                                        // 折叠面板，显示摘要
+                                        const realStepCount = kotoSteps.querySelectorAll('.koto-step:not(.thought)').length;
+                                        kotoSteps.open = false;
+                                        const ksSummary = kotoSteps.querySelector('.koto-steps-summary');
+                                        if (ksSummary) {
+                                            ksSummary.innerHTML = `<span class="koto-steps-done-icon">✓</span><span class="koto-steps-meta">${realStepCount > 0 ? realStepCount + ' 步 · ' : ''}${backendTime}s</span>`;
+                                        }
+                                        // 渲染回复区
+                                        let answerDiv = bodyEl.querySelector('.agent-answer');
+                                        if (!answerDiv) {
+                                            answerDiv = document.createElement('div');
+                                            answerDiv.className = 'agent-answer';
+                                            bodyEl.appendChild(answerDiv);
+                                        }
+                                        answerDiv.innerHTML = parseMarkdown(fullText);
+                                        renderMermaidBlocks();
+                                        timeEl.textContent = `⏱️ ${backendTime}s`;
+                                    } else if (agentStepsPanel) {
+                                        // 旧版兼容路径
                                         if (agentStatusBar) agentStatusBar.remove();
-                                        
-                                        // 折叠步骤面板
                                         agentStepsPanel.open = false;
                                         const summary = agentStepsPanel.querySelector('summary');
                                         const stepCount = data.steps || agentStepsPanel.querySelectorAll('.agent-step-card').length;
-                                        const backendTime = data.elapsed_time || elapsedTime;
                                         if (summary) summary.textContent = `📋 执行步骤 (${stepCount} 步, ${backendTime}s)`;
-                                        
-                                        // 更新或创建回复区
                                         let answerDiv = bodyEl.querySelector('.agent-answer');
                                         if (!answerDiv) {
                                             answerDiv = document.createElement('div');
@@ -2324,18 +2325,16 @@ async function sendMessage(event) {
                                         timeEl.textContent = `⏱️ ${elapsedTime}s`;
                                         if (existingPicker) bodyEl.appendChild(existingPicker);
                                     }
-                                    
-                                    // 折叠思考过程面板（如有）
-                                    const thinkingPanel = bodyEl.querySelector('.thinking-panel');
-                                    if (thinkingPanel) {
-                                        thinkingPanel.open = false;
-                                        const summary = thinkingPanel.querySelector('.thinking-summary');
-                                        const stepCount = thinkingPanel.querySelectorAll('.thinking-step').length;
-                                        if (summary) summary.textContent = `💭 思考过程 (${stepCount} 步, ${elapsedTime}s)`;
-                                        // 重新插到最前面（parseMarkdown 会重写 innerHTML）
-                                        bodyEl.insertBefore(thinkingPanel, bodyEl.firstChild);
+
+                                    // 折叠思考过程面板（如有）并重新插回最前面
+                                    if (savedThinkingPanel) {
+                                        savedThinkingPanel.open = false;
+                                        const tSummary = savedThinkingPanel.querySelector('.thinking-summary');
+                                        const tStepCount = savedThinkingPanel.querySelectorAll('.thinking-step').length;
+                                        if (tSummary) tSummary.textContent = `💭 思考过程 (${tStepCount} 步, ${elapsedTime}s)`;
+                                        bodyEl.insertBefore(savedThinkingPanel, bodyEl.firstChild);
                                     }
-                                    
+
                                     // 2. 添加图片 - 使用真实DOM元素
                                     if (data.images && Array.isArray(data.images) && data.images.length > 0) {
                                         console.log('[STREAM] Creating image container...');
@@ -2463,6 +2462,7 @@ async function sendMessage(event) {
                                     hideMiniGame();
                                     if (stuckWatchdogTimer) { clearInterval(stuckWatchdogTimer); stuckWatchdogTimer = null; }
                                     if (progressTickTimer) { clearInterval(progressTickTimer); progressTickTimer = null; }
+                                    if (agentStepTimer) { clearInterval(agentStepTimer); agentStepTimer = null; }
                                     progressPanelActive = false;
                                     bodyEl.innerHTML = `<span class="error-text">❌ ${data.message}</span>`;
                                     streamComplete = true;
@@ -2476,6 +2476,7 @@ async function sendMessage(event) {
                 } catch (e) {
                     // ⭐ 捕获 abort 错误 - 用户点击了中断
                     if (stuckWatchdogTimer) { clearInterval(stuckWatchdogTimer); stuckWatchdogTimer = null; }
+                    if (agentStepTimer) { clearInterval(agentStepTimer); agentStepTimer = null; }
                     if (e.name === 'AbortError') {
                         console.log('[INTERRUPT] Stream aborted by user');
                         bodyEl.innerHTML = '<span class="interrupt-msg">⏹️ 已中断</span>';
@@ -2549,27 +2550,24 @@ async function sendMessage(event) {
         }
         scrollToBottom();
     } finally {
-        setSessionGenerating(thisSession, false);
-        sessionDomCache.delete(thisSession); // 任务结束，清除 DOM 缓存
+        setSessionGenerating(currentSession, false);
         hideLoading();
         
-        // 仅当用户仍在查看本 session 时才重置发送按钮（避免覆盖其他 session 的生成状态）
-        if (currentSession === thisSession) {
-            const sendBtn = document.getElementById('sendBtn');
-            sendBtn.classList.remove('generating');
-            sendBtn.disabled = false;
-            sendBtn.title = '发送';
-        }
+        // 恢复发送按钮状态
+        const sendBtn = document.getElementById('sendBtn');
+        sendBtn.classList.remove('generating');
+        sendBtn.disabled = false;
+        sendBtn.title = '发送';
         
         // 清理 AbortController
-        setSessionAbortController(thisSession, null);
-        setSessionTaskId(thisSession, null);
+        setSessionAbortController(currentSession, null);
+        setSessionTaskId(currentSession, null);
         
         // 重置中断标志
         await fetch('/api/chat/reset-interrupt', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: thisSession })
+            body: JSON.stringify({ session: currentSession })
         }).catch(e => console.error('Reset interrupt failed:', e));
     }
 }
@@ -2914,60 +2912,7 @@ async function checkStatus() {
             // Jobs running pill
             const pill = document.getElementById('jobsRunningPill');
             if (pill) {
-                if (running > 0 || pending > 0) {
-                    const parts = [];
-                    if (running > 0) parts.push(`⏳ ${running} 运行中`);
-                    if (pending > 0) parts.push(`🕐 ${pending} 等待`);
-                    pill.textContent = parts.join('  ');
-                    pill.style.display = 'block';
-
-                    // 构建 tooltip 内容（挂在 body 上，避免 overflow:hidden 的 sidebar 裁剪）
-                    const runList = (m.jobs && m.jobs.running_list) || [];
-                    const pendList = (m.jobs && m.jobs.pending_list) || [];
-                    let tipHtml = '';
-                    if (runList.length) {
-                        tipHtml += '<div class="jrp-tip-section">⏳ 运行中</div>';
-                        runList.forEach(t => {
-                            tipHtml += `<div class="jrp-tip-row"><span class="jrp-tip-type">${escapeHtml(t.type)}</span><span class="jrp-tip-input">${escapeHtml(t.input || '(无标题)')}</span></div>`;
-                        });
-                    }
-                    if (pendList.length) {
-                        tipHtml += '<div class="jrp-tip-section">🕐 等待中</div>';
-                        pendList.forEach(t => {
-                            tipHtml += `<div class="jrp-tip-row"><span class="jrp-tip-type">${escapeHtml(t.type)}</span><span class="jrp-tip-input">${escapeHtml(t.input || '(无标题)')}</span></div>`;
-                        });
-                    }
-                    if (!tipHtml) tipHtml = '<div style="color:#7a8a9a;font-size:11px;">暂无详情</div>';
-
-                    // 获取或创建 body 级浮层
-                    let floatTip = document.getElementById('jrpFloatTip');
-                    if (!floatTip) {
-                        floatTip = document.createElement('div');
-                        floatTip.id = 'jrpFloatTip';
-                        document.body.appendChild(floatTip);
-                    }
-                    floatTip.innerHTML = tipHtml;
-
-                    pill._jrpContent = tipHtml;
-                    if (!pill._jrpBound) {
-                        pill._jrpBound = true;
-                        pill.addEventListener('mouseenter', () => {
-                            const tip = document.getElementById('jrpFloatTip');
-                            if (!tip) return;
-                            tip.innerHTML = pill._jrpContent || '';
-                            const r = pill.getBoundingClientRect();
-                            tip.style.display = 'block';
-                            tip.style.left = Math.max(4, r.left + r.width / 2 - tip.offsetWidth / 2) + 'px';
-                            tip.style.top = (r.top - tip.offsetHeight - 8) + 'px';
-                        });
-                        pill.addEventListener('mouseleave', () => {
-                            const tip = document.getElementById('jrpFloatTip');
-                            if (tip) tip.style.display = 'none';
-                        });
-                    }
-                } else {
-                    pill.style.display = 'none';
-                }
+                pill.style.display = 'none'; // hidden
             }
 
             // Trigger count badge in status info
@@ -2992,67 +2937,15 @@ function handleKeyDown(event) {
     }
 }
 
-// 全局快捷键：Esc 停止生成，Ctrl+K 新建对话
-function handleGlobalKeyDown(e) {
-    // 有模态框开着时不拦截
-    if (document.querySelector('.modal-overlay.active')) return;
-
-    if (e.key === 'Escape' && currentSession && isSessionGenerating(currentSession)) {
-        e.preventDefault();
-        document.getElementById('sendBtn')?.click();
-        return;
-    }
-
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        showNewSessionModal();
-        return;
-    }
-}
-
 function autoResize(textarea) {
     textarea.style.height = 'auto';
     const maxH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--input-max-height') || '220');
     textarea.style.height = Math.min(textarea.scrollHeight, maxH || 220) + 'px';
 }
 
-// 智能滚动：只在用户未上划时才滚到底部（流式输出时使用）
 function scrollToBottom() {
-    if (isScrollLocked) return;
     const container = document.getElementById('chatMessages');
-    if (container) container.scrollTop = container.scrollHeight;
-}
-
-// 强制滚到底部并重置锁（切换会话、加载历史、用户发消息时使用）
-function scrollToBottomForce() {
-    isScrollLocked = false;
-    const container = document.getElementById('chatMessages');
-    if (container) {
-        container.scrollTop = container.scrollHeight;
-        updateBackToBottomBtn();
-    }
-}
-
-// 初始化智能滚动：监听用户手动滚动，决定是否锁定自动滚动
-function initScrollBehavior() {
-    const container = document.getElementById('chatMessages');
-    if (!container) return;
-    container.addEventListener('scroll', () => {
-        const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-        isScrollLocked = distFromBottom > 80;
-        updateBackToBottomBtn();
-    });
-}
-
-// 更新「回到底部」浮动按钮的显示状态
-function updateBackToBottomBtn() {
-    const btn = document.getElementById('backToBottomBtn');
-    if (!btn) return;
-    const container = document.getElementById('chatMessages');
-    if (!container) return;
-    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    const isGenerating = currentSession && isSessionGenerating(currentSession);
-    btn.style.display = (distFromBottom > 80 && isGenerating) ? 'flex' : 'none';
+    container.scrollTop = container.scrollHeight;
 }
 
 function showLoading(text, model) {
@@ -3317,16 +3210,6 @@ function parseMarkdown(text) {
             }
         };
         
-        // 外部链接：加 data-ext 属性，由全局拦截器在系统浏览器打开
-        renderer.link = function(href, title, text) {
-            if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
-                const t = title ? ` title="${title}"` : '';
-                return `<a href="${href}" data-ext="1"${t} class="ext-link">${text}</a>`;
-            }
-            // 内部链接（锚点等）正常渲染
-            return `<a href="${href || '#'}">${text}</a>`;
-        };
-
         // Configure marked
         marked.setOptions({
             renderer: renderer,
@@ -3372,23 +3255,44 @@ function renderKaTeX(html) {
 /**
  * 在 parseMarkdown 后调用：初始化 Mermaid 图表
  */
+// 懒加载 mermaid：首次渲染时才加载 3.2MB 的库，不在启动时阻塞 DOMContentLoaded
+let _mermaidLoaded = false;
+let _mermaidLoading = null;
+
+function _ensureMermaid() {
+    if (typeof mermaid !== 'undefined') return Promise.resolve();
+    if (_mermaidLoading) return _mermaidLoading;
+    _mermaidLoading = new Promise((resolve) => {
+        const s = document.createElement('script');
+        s.src = '/static/vendor/mermaid/10.9.0/mermaid.min.js';
+        s.onload = () => { _mermaidLoaded = true; resolve(); };
+        s.onerror = () => resolve(); // 加载失败时静默忽略
+        document.head.appendChild(s);
+    });
+    return _mermaidLoading;
+}
+
 function renderMermaidBlocks() {
-    if (typeof mermaid === 'undefined') return;
-    try {
-        const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark';
-        mermaid.initialize({ startOnLoad: false, theme: theme, securityLevel: 'loose' });
-        document.querySelectorAll('.mermaid:not([data-processed])').forEach(async (el) => {
-            try {
-                el.setAttribute('data-processed', 'true');
-                const id = el.id || ('m-' + Math.random().toString(36).slice(2, 8));
-                const { svg } = await mermaid.render(id + '-svg', el.textContent.trim());
-                el.innerHTML = svg;
-            } catch (e) {
-                console.warn('Mermaid render error:', e);
-                el.innerHTML = `<pre style="color:var(--accent-warning);font-size:13px;">⚠️ 图表渲染失败: ${escapeHtml(e.message || '')}</pre>`;
-            }
-        });
-    } catch (e) { console.warn('Mermaid init error:', e); }
+    // 若页面中没有未处理的 mermaid 块，直接跳过（避免触发懒加载）
+    if (!document.querySelector('.mermaid:not([data-processed])')) return;
+    _ensureMermaid().then(() => {
+        if (typeof mermaid === 'undefined') return;
+        try {
+            const theme = document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark';
+            mermaid.initialize({ startOnLoad: false, theme: theme, securityLevel: 'loose' });
+            document.querySelectorAll('.mermaid:not([data-processed])').forEach(async (el) => {
+                try {
+                    el.setAttribute('data-processed', 'true');
+                    const id = el.id || ('m-' + Math.random().toString(36).slice(2, 8));
+                    const { svg } = await mermaid.render(id + '-svg', el.textContent.trim());
+                    el.innerHTML = svg;
+                } catch (e) {
+                    console.warn('Mermaid render error:', e);
+                    el.innerHTML = `<pre style="color:var(--accent-warning);font-size:13px;">⚠️ 图表渲染失败: ${escapeHtml(e.message || '')}</pre>`;
+                }
+            });
+        } catch (e) { console.warn('Mermaid init error:', e); }
+    });
 }
 
 function preprocessMarkdown(text) {
@@ -3559,6 +3463,12 @@ function applySettingsToUI() {
     const showThinkingCheckbox = document.getElementById('settingShowThinking');
     if (showThinkingCheckbox) {
         showThinkingCheckbox.checked = currentSettings.ai?.show_thinking === true;
+    }
+
+    // 任务分类标签开关
+    const showTaskTypeCheckbox = document.getElementById('settingShowTaskType');
+    if (showTaskTypeCheckbox) {
+        showTaskTypeCheckbox.checked = currentSettings.ai?.show_task_type === true;
     }
     
     // 语音自动模式设置
@@ -7140,15 +7050,22 @@ function _shadowUpdateBanner() {
         banner.style.display = 'none';
         return;
     }
-    banner.style.display = '';
-    const msg = _shadowPending[_shadowCurrentIdx] || _shadowPending[0];
+    banner.style.display = 'flex';
     const textEl = document.getElementById('shadowBannerText');
     if (textEl) textEl.textContent = msg.content;
     const countEl = document.getElementById('shadowBannerCount');
-    if (countEl) countEl.textContent = `消息 ${_shadowCurrentIdx + 1} / ${_shadowPending.length}`;
-    // Show nav only if >1
-    const navEl = document.getElementById('shadowBannerNav');
-    if (navEl) navEl.style.display = _shadowPending.length > 1 ? '' : 'none';
+    // 只有多条消息时才显示计数和翻页按钮
+    const hasMulti = _shadowPending.length > 1;
+    if (countEl) {
+        countEl.textContent = hasMulti ? `消息 ${_shadowCurrentIdx + 1} / ${_shadowPending.length}` : '';
+    }
+    // 翻页按钮：找 shadowBanner 内的两个箭头按钮（‹ ›）
+    const navBtns = banner.querySelectorAll('button');
+    navBtns.forEach(btn => {
+        if (btn.textContent === '‹' || btn.textContent === '›') {
+            btn.style.display = hasMulti ? '' : 'none';
+        }
+    });
 
     // Store current message id for dismiss
     banner.dataset.msgId = msg.id;

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Koto (言) - AI Assistant</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='assets/koto_icon.svg') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260315">
     <!-- Restore UI zoom before first paint to avoid flash -->
     <script>(function(){
         var z=parseFloat(localStorage.getItem('koto.uiZoom')||'1');
@@ -225,37 +225,7 @@
             padding: 3px 8px; border-radius: 8px;
             background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.2);
             margin-top: 4px; text-align: center; display: none;
-            cursor: default;
         }
-        /* jrp-tooltip is appended to <body> so it escapes overflow:hidden sidebar */
-        #jrpFloatTip {
-            position: fixed;
-            background: #1a2235;
-            border: 1px solid rgba(99,198,255,.3);
-            border-radius: 10px;
-            padding: 10px 12px;
-            min-width: 210px; max-width: 280px;
-            box-shadow: 0 10px 28px rgba(0,0,0,.55);
-            z-index: 99999;
-            text-align: left;
-            pointer-events: none;
-            display: none;
-        }
-        .jrp-tip-section {
-            font-size: 10px; font-weight: 700; color: var(--accent-primary);
-            margin-bottom: 5px; margin-top: 6px; letter-spacing: .04em;
-        }
-        .jrp-tip-section:first-child { margin-top: 0; }
-        .jrp-tip-row {
-            display: flex; gap: 6px; align-items: baseline;
-            font-size: 11px; color: #c8d8ee; margin-bottom: 4px;
-        }
-        .jrp-tip-type {
-            font-size: 10px; background: rgba(99,198,255,.15);
-            border-radius: 4px; padding: 1px 5px;
-            color: var(--accent-primary); flex-shrink: 0;
-        }
-        .jrp-tip-input { color: #a0b4cc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* ── Active Skills Pill Bar (above chat input) ──────────── */
         #chat-skill-bar {
@@ -697,8 +667,7 @@
         @keyframes tp-spin { to { transform: rotate(360deg); } }
     </style>
     <script defer src="{{ url_for('static', filename='vendor/katex/0.16.9/contrib/auto-render.min.js') }}"></script>
-    <!-- Mermaid 图表渲染 -->
-    <script defer src="{{ url_for('static', filename='vendor/mermaid/10.9.0/mermaid.min.js') }}"></script>
+    <!-- Mermaid 图表渲染：按需懒加载（3.2MB，不在启动时阻塞 DOMContentLoaded） -->
 </head>
 <body class="loading">
     <div id="startupSplash">
@@ -791,8 +760,8 @@
                         </div>
                     </div>
                     <button class="ghost-btn" onclick="openSettings()" title="设置">⚙️ 设置</button>
-                    <!-- 影子追踪主动交互按鈕（已移至设置） -->
-                    <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="display:none;position:relative">
+                    <!-- 影子追踪主动交互按鈕 -->
+                    <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="position:relative;display:none;">
                         👁️ 影子
                         <span class="badge" id="shadowBadge" style="display:none;">0</span>
                     </button>
@@ -802,28 +771,22 @@
 
 
             <div class="main-grid single-column">
-                <!-- 影子追踪：主动消息条带 -->
-                <div id="shadowBanner" style="display:none; background:var(--bg-card,#f0f4ff); border:1px solid var(--border,#dde3f0); border-radius:8px; padding:10px 14px; margin:6px 16px 0; font-size:13px; display:none;">
-                    <div style="display:flex;align-items:flex-start;gap:10px;">
-                        <span style="font-size:17px;">&#x1F441;&#xFE0F;</span>
-                        <div style="flex:1;" id="shadowBannerText">应用正在呀话中...</div>
-                        <div style="display:flex;gap:6px;flex-shrink:0;">
+                <section class="chat-pane">
+                <!-- 影子追踪：主动消息条带（紧凑单行，不挤压欢迎屏幕） -->
+                <div id="shadowBanner" style="display:none; border-bottom:1px solid var(--border-color); background:var(--bg-tertiary); padding:5px 12px; font-size:12px; flex-shrink:0;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span style="font-size:14px;flex-shrink:0;">&#x1F441;&#xFE0F;</span>
+                        <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="shadowBannerText">应用正在呀话中...</div>
+                        <div style="display:flex;gap:4px;flex-shrink:0;align-items:center;">
+                            <span id="shadowBannerCount" style="font-size:11px;color:var(--text-muted);white-space:nowrap;"></span>
+                            <button class="btn-secondary btn-sm" onclick="shadowPrevMsg()">&#8249;</button>
+                            <button class="btn-secondary btn-sm" onclick="shadowNextMsg()">&#8250;</button>
+                            <button class="btn-secondary btn-sm" onclick="shadowDismissAll()">全部关闭</button>
                             <button class="btn-secondary btn-sm" onclick="shadowReply()">回复</button>
                             <button class="btn-secondary btn-sm" onclick="shadowDismissCurrent()">&times; 关闭</button>
                         </div>
                     </div>
-                    <div id="shadowBannerNav" style="margin-top:6px;font-size:11px;color:var(--text-muted);display:flex;gap:8px;align-items:center;">
-                        <span id="shadowBannerCount"></span>
-                        <button class="btn-secondary btn-sm" onclick="shadowPrevMsg()">&#8249;</button>
-                        <button class="btn-secondary btn-sm" onclick="shadowNextMsg()">&#8250;</button>
-                        <button class="btn-secondary btn-sm" style="margin-left:auto" onclick="shadowDismissAll()">全部关闭</button>
-                    </div>
                 </div>
-                <section class="chat-pane">
-                    <button id="backToBottomBtn" class="back-to-bottom-btn" onclick="scrollToBottomForce()" title="回到底部 (正在生成中)" style="display:none;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                        回到底部
-                    </button>
                     <div class="chat-messages" id="chatMessages" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragleave="handleDragLeave(event)">
                         <div class="drag-overlay" id="dragOverlay" style="display: none;">
                             <div class="drag-content">
@@ -1130,6 +1093,16 @@
                     </div>
                     <div class="setting-item">
                         <div class="toggle-row">
+                            <span class="toggle-label">显示任务分类标签</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingShowTaskType" onchange="updateSetting('ai', 'show_task_type', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">开启后每条回复旁会显示任务类型（如 CHAT、CODER、RESEARCH 等）</p>
+                    </div>
+                    <div class="setting-item">
+                        <div class="toggle-row">
                             <span class="toggle-label">语音自动上传模式</span>
                             <label class="toggle">
                                 <input type="checkbox" id="settingVoiceAutoMode" checked onchange="updateSetting('ai', 'voice_auto_mode', this.checked)">
@@ -1173,6 +1146,22 @@
                         <input type="text" id="settingManualProxy" placeholder="http://127.0.0.1:7890" 
                                onchange="updateSetting('proxy', 'manual_proxy', this.value)">
                         <p class="setting-hint">留空则使用系统代理设置</p>
+                        <details class="proxy-help-details">
+                            <summary>常见 VPN/代理软件端口参考</summary>
+                            <table class="proxy-help-table">
+                                <thead>
+                                    <tr><th>软件</th><th>默认端口</th><th>协议</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td>Clash / Clash Verge / ClashX</td><td>7890 (HTTP)，7891 (SOCKS5)</td><td>HTTP / SOCKS5</td></tr>
+                                    <tr><td>v2rayN / v2rayNG</td><td>10809 (HTTP)，10808 (SOCKS5)</td><td>HTTP / SOCKS5</td></tr>
+                                    <tr><td>Surge</td><td>6152</td><td>HTTP</td></tr>
+                                    <tr><td>Shadowsocks</td><td>1080 (SOCKS5)</td><td>SOCKS5</td></tr>
+                                    <tr><td>Proxifier</td><td>自定义</td><td>—</td></tr>
+                                </tbody>
+                            </table>
+                            <p class="proxy-help-tip">填写示例：<code>http://127.0.0.1:7890</code> 或 <code>socks5://127.0.0.1:1080</code></p>
+                        </details>
                     </div>
                 </div>
 
@@ -2006,9 +1995,9 @@
     <!-- 应用容器 -->
     <div class="apps-container" id="appsContainer"></div>
 
-    <script src="{{ url_for('static', filename='js/auth.js') }}?v=20260615"></script>
-    <script defer src="{{ url_for('static', filename='js/app.js') }}?v=20260615"></script>
-    <script src="{{ url_for('static', filename='js/app-framework.js') }}?v=20260615"></script>
+    <script src="{{ url_for('static', filename='js/auth.js') }}?v=20260315"></script>
+    <script defer src="{{ url_for('static', filename='js/app.js') }}?v=20260316"></script>
+    <script src="{{ url_for('static', filename='js/app-framework.js') }}?v=20260315"></script>
 
     <!-- Token 监测移至顶栏 top-actions，此处保留空白占位 -->
 
@@ -2247,14 +2236,8 @@
                     body: JSON.stringify({enabled: false})
                 });
                 if (!res.ok) throw new Error('toggle failed');
-                // Use window.refreshActiveSkills (wrapped version) so the skills panel
-                // also re-renders if it's open
-                if (typeof window.refreshActiveSkills === 'function') {
-                    await window.refreshActiveSkills();
-                } else {
-                    await refreshActiveSkills();
-                }
-                // Reload skills panel data so stale "enabled" state is cleared
+                await refreshActiveSkills();
+                // Also sync the skills panel card if open
                 if (typeof window.spLoadSkills === 'function') window.spLoadSkills();
             } catch (e) {
                 console.warn('[Koto] csbDismissSkill error', e);
@@ -2570,7 +2553,6 @@
 
         window.getSpSkills = function() { return _spSkills; };
         window.spRenderCards = spRenderCards;
-        window.spLoadSkills = spLoadSkills;
 
     })();
     </script>
@@ -3053,5 +3035,25 @@
     })();
     </script>
     <!-- ══ /MacroRecorder UI ══════════════════════════════════════════════════ -->
+
+    <!-- 即刻隐藏 startup splash：HTML 解析完成后立即执行，不等任何 defer / async 脚本 -->
+    <script>
+    (function() {
+        var sp = document.getElementById('startupSplash');
+        if (!sp) return;
+        // 预应用系统深色模式，避免主题闪烁
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+        // 两帧延迟：确保浏览器先渲染 app shell，再移除 splash（视觉更平滑）
+        requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+                sp.classList.add('hidden');
+                document.body.classList.remove('loading');
+                setTimeout(function() { if (sp.parentNode) sp.parentNode.removeChild(sp); }, 350);
+            });
+        });
+    })();
+    </script>
 </body>
 </html>
