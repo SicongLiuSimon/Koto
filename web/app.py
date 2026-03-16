@@ -3,6 +3,7 @@ import asyncio
 import re
 import json
 import logging
+_app_logger = logging.getLogger("koto.app")
 import time
 import threading
 import subprocess
@@ -61,7 +62,7 @@ try:
 
     PARALLEL_SYSTEM_ENABLED = True
 except ImportError as e:
-    print(f"[WARNING] Failed to import parallel execution system: {e}")
+    _app_logger.warning(f"[WARNING] Failed to import parallel execution system: {e}")
     PARALLEL_SYSTEM_ENABLED = False
 
 try:
@@ -101,21 +102,21 @@ class _LazyModule:
 
 
 def _import_genai():
-    print("[LAZY_IMPORT] 加载 google.genai ...")
+    _app_logger.debug("[LAZY_IMPORT] 加载 google.genai ...")
     from google import genai as _genai
 
     return _genai
 
 
 def _import_types():
-    print("[LAZY_IMPORT] 加载 google.genai.types ...")
+    _app_logger.debug("[LAZY_IMPORT] 加载 google.genai.types ...")
     from google.genai import types as _types
 
     return _types
 
 
 def _import_requests():
-    print("[LAZY_IMPORT] 加载 requests ...")
+    _app_logger.debug("[LAZY_IMPORT] 加载 requests ...")
     import requests as _requests
 
     return _requests
@@ -135,7 +136,7 @@ _document_workflow_cache = {}
 def get_document_workflow_executor():
     """懒加载文档工作流执行器"""
     if "executor" not in _document_workflow_cache:
-        print("[LAZY_IMPORT] 加载文档工作流执行器...")
+        _app_logger.debug("[LAZY_IMPORT] 加载文档工作流执行器...")
         try:
             from web.document_workflow_executor import (
                 DocumentWorkflowExecutor,
@@ -150,7 +151,7 @@ def get_document_workflow_executor():
             except ImportError:
                 DocumentWorkflowExecutor = None
                 execute_document_workflow = None
-                print("[WARNING] 文档工作流执行器未安装")
+                _app_logger.warning("[WARNING] 文档工作流执行器未安装")
         _document_workflow_cache["executor"] = DocumentWorkflowExecutor
         _document_workflow_cache["execute"] = execute_document_workflow
     return _document_workflow_cache.get("executor"), _document_workflow_cache.get(
@@ -184,7 +185,7 @@ _ppt_system_cache = {}
 def get_ppt_system():
     """懒加载PPT生成系统"""
     if "loaded" not in _ppt_system_cache:
-        print("[LAZY_IMPORT] 加载PPT多模型生成系统...")
+        _app_logger.debug("[LAZY_IMPORT] 加载PPT多模型生成系统...")
         try:
             from web.ppt_master import PPTBlueprint, PPTMasterOrchestrator
             from web.ppt_pipeline import (
@@ -194,7 +195,7 @@ def get_ppt_system():
             )
             from web.ppt_synthesizer import PPTSynthesizer
 
-            print("[PPT_SYSTEM] ✅ 多模型PPT生成系统已加载")
+            _app_logger.info("[PPT_SYSTEM] ✅ 多模型PPT生成系统已加载")
         except ImportError:
             try:
                 from ppt_master import PPTBlueprint, PPTMasterOrchestrator
@@ -205,7 +206,7 @@ def get_ppt_system():
                 )
                 from ppt_synthesizer import PPTSynthesizer
 
-                print("[PPT_SYSTEM] ✅ 多模型PPT生成系统已加载（相对导入）")
+                _app_logger.info("[PPT_SYSTEM] ✅ 多模型PPT生成系统已加载（相对导入）")
             except ImportError:
                 PPTMasterOrchestrator = None
                 PPTBlueprint = None
@@ -213,7 +214,7 @@ def get_ppt_system():
                 PPTGenerationPipeline = None
                 PPTGenerationTaskHandler = None
                 format_ppt_generation_result = None
-                print("[WARNING] 多模型PPT生成系统未安装")
+                _app_logger.warning("[WARNING] 多模型PPT生成系统未安装")
         _ppt_system_cache["orchestrator"] = PPTMasterOrchestrator
         _ppt_system_cache["blueprint"] = PPTBlueprint
         _ppt_system_cache["synthesizer"] = PPTSynthesizer
@@ -289,7 +290,7 @@ class StreamInterruptManager:
             self.interrupts[session_name]["flag"] = True
             if self.interrupts[session_name]["event"]:
                 self.interrupts[session_name]["event"].set()
-        print(f"[INTERRUPT] Marked session {session_name} for interruption")
+        _app_logger.debug(f"[INTERRUPT] Marked session {session_name} for interruption")
 
     def is_interrupted(self, session_name):
         """检查是否被中断"""
@@ -307,7 +308,7 @@ class StreamInterruptManager:
             self.interrupts[session_name]["flag"] = False
             if self.interrupts[session_name]["event"]:
                 self.interrupts[session_name]["event"].clear()
-        print(f"[INTERRUPT] Reset interrupt flag for session {session_name}")
+        _app_logger.debug(f"[INTERRUPT] Reset interrupt flag for session {session_name}")
 
     def get_event(self, session_name):
         """获取/创建中断事件对象"""
@@ -404,13 +405,13 @@ def get_default_wechat_files_dir() -> str:
 
 
 if not API_KEY:
-    print("⚠️ Warning: GEMINI_API_KEY or API_KEY not found in gemini_config.env")
-    print("   请在 config/gemini_config.env 中配置 API 密钥")
-    print("   应用将继续启动，但 AI 功能不可用")
+    _app_logger.warning("⚠️ Warning: GEMINI_API_KEY or API_KEY not found in gemini_config.env")
+    _app_logger.info("   请在 config/gemini_config.env 中配置 API 密钥")
+    _app_logger.info("   应用将继续启动，但 AI 功能不可用")
     # 不再 sys.exit — 允许应用启动并在 UI 中提示用户配置
 
 if GEMINI_API_BASE:
-    print(f"📡 使用自定义 API 端点: {GEMINI_API_BASE}")
+    _app_logger.info(f"📡 使用自定义 API 端点: {GEMINI_API_BASE}")
 
 # 检测并设置代理
 PROXY_OPTIONS = [
@@ -507,7 +508,7 @@ def setup_proxy():
     if FORCE_PROXY and FORCE_PROXY.lower() not in ("auto", "system"):
         os.environ["HTTPS_PROXY"] = FORCE_PROXY
         os.environ["HTTP_PROXY"] = FORCE_PROXY
-        print(f"🔧 使用强制代理: {FORCE_PROXY}")
+        _app_logger.info(f"🔧 使用强制代理: {FORCE_PROXY}")
         return FORCE_PROXY
 
     # 用户明确禁用代理时，清除环境变量并退出
@@ -515,7 +516,7 @@ def setup_proxy():
         if settings_manager.get("proxy", "enabled") is False:
             os.environ.pop("HTTPS_PROXY", None)
             os.environ.pop("HTTP_PROXY", None)
-            print("🔧 用户已禁用代理")
+            _app_logger.info("🔧 用户已禁用代理")
             return None
     except Exception:
         pass
@@ -544,9 +545,9 @@ def setup_proxy():
             if result == 0:
                 os.environ["HTTPS_PROXY"] = proxy
                 os.environ["HTTP_PROXY"] = proxy
-                print(f"✅ 自动匹配系统代理: {proxy}")
+                _app_logger.info(f"✅ 自动匹配系统代理: {proxy}")
                 return proxy
-        except:
+        except Exception:
             continue
 
     return None
@@ -597,13 +598,13 @@ def create_client():
     # 自定义 API 端点（用于中转服务）
     if GEMINI_API_BASE:
         http_options["base_url"] = GEMINI_API_BASE
-        print(f"📡 API 端点: {GEMINI_API_BASE}")
+        _app_logger.info(f"📡 API 端点: {GEMINI_API_BASE}")
 
     # 配置代理 - 通过环境变量确保被使用
     if proxy:
         os.environ["HTTP_PROXY"] = proxy
         os.environ["HTTPS_PROXY"] = proxy
-        print(f"🔌 设置代理: {proxy}")
+        _app_logger.info(f"🔌 设置代理: {proxy}")
 
     # 使用 httpx with explicit proxy for genai
     # 注意：HttpOptions 字段名为 httpx_client (snake_case)，不是 httpxClient
@@ -614,7 +615,7 @@ def create_client():
     try:
         http_client = httpx.Client(timeout=timeout_config, verify=True)
     except Exception as e:
-        print(f"⚠️ 创建 HTTP 客户端出错: {e}")
+        _app_logger.warning(f"⚠️ 创建 HTTP 客户端出错: {e}")
         http_client = httpx.Client(timeout=timeout_config)
 
     # 构建 HttpOptions 对象
@@ -671,9 +672,9 @@ def get_client():
                 from app.core.llm.ollama_provider import OllamaClientProxy
 
                 _client = OllamaClientProxy(model_tag=local_model)
-                print(f"[Koto] 🦙 使用本地模型: {local_model}")
+                _app_logger.debug(f"[Koto] 🦙 使用本地模型: {local_model}")
             except Exception as _e:
-                print(f"[Koto] ⚠️ Ollama 初始化失败，回退到 Gemini: {_e}")
+                _app_logger.warning(f"[Koto] ⚠️ Ollama 初始化失败，回退到 Gemini: {_e}")
                 _client = create_client()
         else:
             _client = create_client()
@@ -1471,7 +1472,6 @@ if os.environ.get("KOTO_DEPLOY_MODE") == "cloud" and _cors_origins == "*":
     _cors_origins = os.environ.get("KOTO_SITE_URL", "*")
 CORS(app, origins=_cors_origins)
 
-_app_logger = logging.getLogger("koto.app")
 
 # ── Sentry error tracking (no-op if SENTRY_DSN not set) ──────────────────────
 _sentry_dsn = os.environ.get("SENTRY_DSN", "")
@@ -1591,17 +1591,17 @@ try:
 
     register_auth_routes(app)
 except Exception as e:
-    print(f"[Auth] ⚠️ 认证模块加载失败: {e}")
+    _app_logger.warning(f"[Auth] ⚠️ 认证模块加载失败: {e}")
 
 # ================= 并行执行系统初始化 =================
 if PARALLEL_SYSTEM_ENABLED:
-    print("[PARALLEL] 🚀 Initializing parallel execution system...")
+    _app_logger.debug("[PARALLEL] 🚀 Initializing parallel execution system...")
     try:
         register_parallel_api(app)
         start_dispatcher()
-        print("[PARALLEL] ✅ Parallel execution system initialized successfully")
+        _app_logger.info("[PARALLEL] ✅ Parallel execution system initialized successfully")
     except Exception as e:
-        print(f"[PARALLEL] ❌ Failed to initialize parallel execution system: {e}")
+        _app_logger.error(f"[PARALLEL] ❌ Failed to initialize parallel execution system: {e}")
         PARALLEL_SYSTEM_ENABLED = False
 
 # ================= WebSocket 支持（可选） =================
@@ -1609,7 +1609,7 @@ sock = None
 if Sock:
     sock = Sock(app)
 else:
-    print("[WebSocket] ⚠️ flask-sock 未安装，使用轮询作为通知兜底")
+    _app_logger.warning("[WebSocket] ⚠️ flask-sock 未安装，使用轮询作为通知兜底")
 
 if sock:
 
@@ -1642,16 +1642,27 @@ def _register_blueprints_deferred():
             return
         _blueprints_registered = True
 
+    # 注册健康检查 API（/api/health + /api/ping）
+    try:
+        from web.routes.health import health_bp
+
+        app.register_blueprint(health_bp)
+        _app_logger.info("[HealthAPI] ✅ 健康检查 API 已注册: /api/health, /api/ping")
+    except ImportError as e:
+        _app_logger.warning(f"[HealthAPI] ⚠️ 未能导入健康检查蓝图: {e}")
+    except Exception as e:
+        _app_logger.error(f"[HealthAPI] ❌ 健康检查 API 注册失败: {e}")
+
     # 注册任务管理 API（任务台账 + 进度总线 + 打断控制）
     try:
         from app.api.task_routes import task_bp as _task_bp
 
         app.register_blueprint(_task_bp, url_prefix="/api/tasks")
-        print("[TaskAPI] ✅ 任务管理 API 已注册: /api/tasks")
+        _app_logger.info("[TaskAPI] ✅ 任务管理 API 已注册: /api/tasks")
     except ImportError as e:
-        print(f"[TaskAPI] ⚠️ 未能导入任务管理 API 蓝图: {e}")
+        _app_logger.warning(f"[TaskAPI] ⚠️ 未能导入任务管理 API 蓝图: {e}")
     except Exception as e:
-        print(f"[TaskAPI] ❌ 任务管理 API 注册失败: {e}")
+        _app_logger.error(f"[TaskAPI] ❌ 任务管理 API 注册失败: {e}")
 
     # 注册统一 Agent API
     try:
@@ -1659,33 +1670,33 @@ def _register_blueprints_deferred():
 
         agent_bp = _agent_bp
         app.register_blueprint(agent_bp, url_prefix="/api/agent")
-        print("[UnifiedAgent] ✅ 统一 Agent API 已注册: /api/agent")
+        _app_logger.info("[UnifiedAgent] ✅ 统一 Agent API 已注册: /api/agent")
     except ImportError as e:
-        print(f"[UnifiedAgent] ⚠️ 未能导入统一 Agent API 蓝图: {e}")
+        _app_logger.warning(f"[UnifiedAgent] ⚠️ 未能导入统一 Agent API 蓝图: {e}")
     except Exception as e:
-        print(f"[UnifiedAgent] ❌ 注册失败: {e}")
+        _app_logger.error(f"[UnifiedAgent] ❌ 注册失败: {e}")
 
     # 注册 Skill CRUD + MCP 导出 API（Phase 2）
     try:
         from app.api.skill_routes import skill_bp as _skill_bp
 
         app.register_blueprint(_skill_bp)
-        print("[SkillAPI] ✅ Skill CRUD API 已注册: /api/skills")
+        _app_logger.info("[SkillAPI] ✅ Skill CRUD API 已注册: /api/skills")
     except ImportError as e:
-        print(f"[SkillAPI] ⚠️ 未能导入 Skill API 蓝图: {e}")
+        _app_logger.warning(f"[SkillAPI] ⚠️ 未能导入 Skill API 蓝图: {e}")
     except Exception as e:
-        print(f"[SkillAPI] ❌ Skill API 注册失败: {e}")
+        _app_logger.error(f"[SkillAPI] ❌ Skill API 注册失败: {e}")
 
     # 注册 Skill Marketplace API（风格市场 + 自动构建 + 导入导出）
     try:
         from app.api.skill_marketplace_routes import marketplace_bp as _marketplace_bp
 
         app.register_blueprint(_marketplace_bp)
-        print("[SkillMarket] ✅ Skill Marketplace API 已注册: /api/skillmarket")
+        _app_logger.info("[SkillMarket] ✅ Skill Marketplace API 已注册: /api/skillmarket")
     except ImportError as e:
-        print(f"[SkillMarket] ⚠️ 未能导入 Skill Marketplace API 蓝图: {e}")
+        _app_logger.warning(f"[SkillMarket] ⚠️ 未能导入 Skill Marketplace API 蓝图: {e}")
     except Exception as e:
-        print(f"[SkillMarket] ❌ Skill Marketplace API 注册失败: {e}")
+        _app_logger.error(f"[SkillMarket] ❌ Skill Marketplace API 注册失败: {e}")
 
     # 注册训练数据 API + LoRA 蒸馏训练 API
     # 仅在开发机上启用（需设置环境变量 KOTO_DEV_TRAINING=1）
@@ -1698,21 +1709,21 @@ def _register_blueprints_deferred():
 
             _reg_training(app)
         except ImportError as e:
-            print(f"[TrainingAPI] ⚠️ 未能导入训练数据模块: {e}")
+            _app_logger.warning(f"[TrainingAPI] ⚠️ 未能导入训练数据模块: {e}")
         except Exception as e:
-            print(f"[TrainingAPI] ❌ 训练数据 API 注册失败: {e}")
+            _app_logger.error(f"[TrainingAPI] ❌ 训练数据 API 注册失败: {e}")
 
         try:
             from app.api.distill_routes import distill_bp as _distill_bp
 
             app.register_blueprint(_distill_bp, url_prefix="/api/distill")
-            print("[DistillAPI] ✅ LoRA 蒸馏训练 API 已注册（开发模式）: /api/distill")
+            _app_logger.info("[DistillAPI] ✅ LoRA 蒸馏训练 API 已注册（开发模式）: /api/distill")
         except ImportError as e:
-            print(f"[DistillAPI] ⚠️ 未能导入蒸馏训练模块: {e}")
+            _app_logger.warning(f"[DistillAPI] ⚠️ 未能导入蒸馏训练模块: {e}")
         except Exception as e:
-            print(f"[DistillAPI] ❌ 蒸馏训练 API 注册失败: {e}")
+            _app_logger.error(f"[DistillAPI] ❌ 蒸馏训练 API 注册失败: {e}")
     else:
-        print(
+        _app_logger.debug(
             "[DistillAPI] ℹ️ LoRA 训练 API 已封存（公共版），如需启用请设置 KOTO_DEV_TRAINING=1"
         )
 
@@ -1721,99 +1732,99 @@ def _register_blueprints_deferred():
         from voice_api_enhanced import voice_bp
 
         app.register_blueprint(voice_bp)
-        print("[VOICE_API] 已注册增强语音 API 蓝图")
+        _app_logger.debug("[VOICE_API] 已注册增强语音 API 蓝图")
     except ImportError as e:
-        print(f"[VOICE_API] ⚠️ 未能导入增强语音模块: {e}")
+        _app_logger.warning(f"[VOICE_API] ⚠️ 未能导入增强语音模块: {e}")
 
     # 注册 PPT 编辑 API（P1 功能）
     try:
         from web.ppt_api_routes import ppt_api_bp
 
         app.register_blueprint(ppt_api_bp)
-        print("[PPT_API] ✅ PPT 编辑 API 已注册: /api/ppt")
+        _app_logger.info("[PPT_API] ✅ PPT 编辑 API 已注册: /api/ppt")
     except ImportError as e:
-        print(f"[PPT_API] ⚠️ 未能导入 PPT 编辑 API: {e}")
+        _app_logger.warning(f"[PPT_API] ⚠️ 未能导入 PPT 编辑 API: {e}")
     except Exception as e:
-        print(f"[PPT_API] ⚠️ PPT 编辑 API 注册失败: {e}")
+        _app_logger.warning(f"[PPT_API] ⚠️ PPT 编辑 API 注册失败: {e}")
 
     # 注册自适应 Agent API（已迁移到 UnifiedAgent，但保留兼容导入）
     try:
         from adaptive_agent_api import init_adaptive_agent_api
 
         init_adaptive_agent_api(app, gemini_client=None)
-        print("[AdaptiveAgent] ✅ 自适应 Agent API 已注册 (延迟加载客户端)")
+        _app_logger.info("[AdaptiveAgent] ✅ 自适应 Agent API 已注册 (延迟加载客户端)")
     except ImportError:
-        print("[AdaptiveAgent] ℹ️ 旧 Agent 模块已退役，使用 UnifiedAgent")
+        _app_logger.debug("[AdaptiveAgent] ℹ️ 旧 Agent 模块已退役，使用 UnifiedAgent")
     except Exception as e:
-        print(f"[AdaptiveAgent] ⚠️ 旧 Agent 初始化失败 (非致命): {e}")
+        _app_logger.warning(f"[AdaptiveAgent] ⚠️ 旧 Agent 初始化失败 (非致命): {e}")
 
     # 注册长期目标 API（GoalManager: 跨天持续执行的委托任务）
     try:
         from app.api.goal_routes import goal_bp as _goal_bp
 
         app.register_blueprint(_goal_bp, url_prefix="/api/goals")
-        print("[GoalAPI] ✅ 长期目标 API 已注册: /api/goals")
+        _app_logger.info("[GoalAPI] ✅ 长期目标 API 已注册: /api/goals")
     except ImportError as e:
-        print(f"[GoalAPI] ⚠️ 未能导入长期目标 API 蓝图: {e}")
+        _app_logger.warning(f"[GoalAPI] ⚠️ 未能导入长期目标 API 蓝图: {e}")
     except Exception as e:
-        print(f"[GoalAPI] ❌ 长期目标 API 注册失败: {e}")
+        _app_logger.error(f"[GoalAPI] ❌ 长期目标 API 注册失败: {e}")
 
     # 注册文件 Hub API（FileRegistry + FileWatcher 统一接口）
     try:
         from app.api.file_hub_routes import file_hub_bp as _file_hub_bp
 
         app.register_blueprint(_file_hub_bp, url_prefix="/api/files")
-        print("[FileHubAPI] ✅ 文件 Hub API 已注册: /api/files")
+        _app_logger.info("[FileHubAPI] ✅ 文件 Hub API 已注册: /api/files")
     except ImportError as e:
-        print(f"[FileHubAPI] ⚠️ 未能导入文件 Hub 蓝图: {e}")
+        _app_logger.warning(f"[FileHubAPI] ⚠️ 未能导入文件 Hub 蓝图: {e}")
     except Exception as e:
-        print(f"[FileHubAPI] ❌ 文件 Hub API 注册失败: {e}")
+        _app_logger.error(f"[FileHubAPI] ❌ 文件 Hub API 注册失败: {e}")
 
     # 注册后台作业 API（JobRunner + TriggerRegistry）
     try:
         from app.api.job_routes import job_bp as _job_bp
 
         app.register_blueprint(_job_bp)
-        print("[JobAPI] ✅ 后台作业 API 已注册: /api/jobs")
+        _app_logger.info("[JobAPI] ✅ 后台作业 API 已注册: /api/jobs")
     except ImportError as e:
-        print(f"[JobAPI] ⚠️ 未能导入作业 API 蓝图: {e}")
+        _app_logger.warning(f"[JobAPI] ⚠️ 未能导入作业 API 蓝图: {e}")
     except Exception as e:
-        print(f"[JobAPI] ❌ 作业 API 注册失败: {e}")
+        _app_logger.error(f"[JobAPI] ❌ 作业 API 注册失败: {e}")
 
     # 注册运维健康 API（HealthSnapshot + RemediationPolicy + OpsEventBus）
     try:
         from app.api.ops_routes import ops_bp as _ops_bp
 
         app.register_blueprint(_ops_bp)
-        print("[OpsAPI] ✅ 运维健康 API 已注册: /api/ops")
+        _app_logger.info("[OpsAPI] ✅ 运维健康 API 已注册: /api/ops")
     except ImportError as e:
-        print(f"[OpsAPI] ⚠️ 未能导入运维 API 蓝图: {e}")
+        _app_logger.warning(f"[OpsAPI] ⚠️ 未能导入运维 API 蓝图: {e}")
     except Exception as e:
-        print(f"[OpsAPI] ❌ 运维 API 注册失败: {e}")
+        _app_logger.error(f"[OpsAPI] ❌ 运维 API 注册失败: {e}")
 
     # 注册影子追踪 API（ShadowWatcher + ProactiveAgent）
     try:
         from app.api.shadow_routes import shadow_bp as _shadow_bp
 
         app.register_blueprint(_shadow_bp)
-        print("[ShadowAPI] ✅ 影子追踪 API 已注册: /api/shadow")
+        _app_logger.info("[ShadowAPI] ✅ 影子追踪 API 已注册: /api/shadow")
     except ImportError as e:
-        print(f"[ShadowAPI] ⚠️ 未能导入影子追踪蓝图: {e}")
+        _app_logger.warning(f"[ShadowAPI] ⚠️ 未能导入影子追踪蓝图: {e}")
     except Exception as e:
-        print(f"[ShadowAPI] ❌ 影子追踪 API 注册失败: {e}")
+        _app_logger.error(f"[ShadowAPI] ❌ 影子追踪 API 注册失败: {e}")
 
     # 注册宏录制 API（MacroRecorder 主动建议）
     try:
         from app.api.macro_routes import macro_bp as _macro_bp
 
         app.register_blueprint(_macro_bp)
-        print("[MacroAPI] ✅ 宏录制 API 已注册: /api/macro")
+        _app_logger.info("[MacroAPI] ✅ 宏录制 API 已注册: /api/macro")
     except ImportError as e:
-        print(f"[MacroAPI] ⚠️ 未能导入宏录制蓝图: {e}")
+        _app_logger.warning(f"[MacroAPI] ⚠️ 未能导入宏录制蓝图: {e}")
     except Exception as e:
-        print(f"[MacroAPI] ❌ 宏录制 API 注册失败: {e}")
+        _app_logger.error(f"[MacroAPI] ❌ 宏录制 API 注册失败: {e}")
 
-    print("[INIT] ✅ 所有蓝图注册完成")
+    _app_logger.info("[INIT] ✅ 所有蓝图注册完成")
 
 
 def _initialize_background_runtime():
@@ -1838,9 +1849,9 @@ def _initialize_background_runtime():
 
             _gm = get_goal_manager()
             register_goal_handler(runner)
-            print(f"[GoalManager] ✅ 长期目标管理器已启动 (活跃目标: {_gm.count()} 条)")
+            _app_logger.info(f"[GoalManager] ✅ 长期目标管理器已启动 (活跃目标: {_gm.count()} 条)")
         except Exception as _ge:
-            print(f"[GoalManager] ⚠️ 初始化失败（非致命）: {_ge}")
+            _app_logger.warning(f"[GoalManager] ⚠️ 初始化失败（非致命）: {_ge}")
 
         # 初始化 FileRegistry 并启动 FileWatcher
         try:
@@ -1850,9 +1861,9 @@ def _initialize_background_runtime():
             _fr = get_file_registry()
             _fw = get_file_watcher()
             _fw.start()
-            print(f"[FileHub] ✅ 文件注册表已启动 (已收录: {_fr.count()} 个文件)")
+            _app_logger.info(f"[FileHub] ✅ 文件注册表已启动 (已收录: {_fr.count()} 个文件)")
         except Exception as _fe:
-            print(f"[FileHub] ⚠️ 文件模块初始化失败（非致命）: {_fe}")
+            _app_logger.warning(f"[FileHub] ⚠️ 文件模块初始化失败（非致命）: {_fe}")
 
         # 初始化工作文件库（后台快速扫描桌面/文档/下载）
         try:
@@ -1861,15 +1872,15 @@ def _initialize_background_runtime():
             _wfl_inst = get_work_file_library()
             if not _wfl_inst.is_indexed():
                 _wfl_inst.scan_locations()
-                print("[WorkFileLibrary] 🚀 工作文件库后台扫描已启动（桌面/文档/下载）")
+                _app_logger.debug("[WorkFileLibrary] 🚀 工作文件库后台扫描已启动（桌面/文档/下载）")
             else:
-                print(
+                _app_logger.info(
                     f"[WorkFileLibrary] ✅ 工作文件库已加载: {_wfl_inst.count()} 个工作文件"
                 )
         except Exception as _wfl_e:
-            print(f"[WorkFileLibrary] ⚠️ 初始化失败（非致命）: {_wfl_e}")
+            _app_logger.warning(f"[WorkFileLibrary] ⚠️ 初始化失败（非致命）: {_wfl_e}")
 
-        print(
+        _app_logger.info(
             "[Runtime] ✅ 后台运行时已启动: "
             f"job_runner={runner is not None}, "
             f"triggers={len(registry.list_all())}, "
@@ -1883,24 +1894,24 @@ def _initialize_background_runtime():
 
             def _on_training_ready(event: str, skill_id: str, count: int):
                 if event == TraceEvent.TRAINING_READY:
-                    print(
+                    _app_logger.debug(
                         f"[Flywheel] 🚀 skill={skill_id} 已积累 {count} 条优质记录，自动提交 LoRA 训练..."
                     )
                     try:
                         job_id = DistillManager.instance().submit(skill_id)
-                        print(
+                        _app_logger.info(
                             f"[Flywheel] ✅ 训练任务已提交 job_id={job_id} skill={skill_id}"
                         )
                     except Exception as _e:
-                        print(f"[Flywheel] ⚠️ 自动提交训练失败: {_e}")
+                        _app_logger.warning(f"[Flywheel] ⚠️ 自动提交训练失败: {_e}")
 
             ShadowTracer.add_listener(_on_training_ready)
-            print("[Flywheel] ✅ 数据飞轮监听器已注册（ShadowTracer → DistillManager）")
+            _app_logger.info("[Flywheel] ✅ 数据飞轮监听器已注册（ShadowTracer → DistillManager）")
         except Exception as _fe:
-            print(f"[Flywheel] ⚠️ 飞轮监听器注册失败（非致命）: {_fe}")
+            _app_logger.warning(f"[Flywheel] ⚠️ 飞轮监听器注册失败（非致命）: {_fe}")
 
     except Exception as exc:
-        print(f"[Runtime] ⚠️ 后台运行时初始化失败: {exc}")
+        _app_logger.warning(f"[Runtime] ⚠️ 后台运行时初始化失败: {exc}")
 
 
 # 同步注册所有蓝图（必须在 app.run() 之前完成，否则 Flask 3.x 会在首次请求后拒绝注册）
@@ -2023,10 +2034,10 @@ def _init_model_manager():
     """
     global MODEL_MAP, _model_manager, _INTERACTIONS_ONLY_MODELS, _INTERACTIONS_FALLBACK_MODEL
     if not _model_manager_available or ModelManager is None:
-        print("[ModelManager] 模块不可用，使用静态默认路由")
+        _app_logger.debug("[ModelManager] 模块不可用，使用静态默认路由")
         return
     try:
-        print("[ModelManager] 🔍 正在发现可用模型...")
+        _app_logger.debug("[ModelManager] 🔍 正在发现可用模型...")
         _model_manager = ModelManager(client)
         dynamic_map = _model_manager.get_model_map()
         MODEL_MAP.update(dynamic_map)
@@ -2037,14 +2048,14 @@ def _init_model_manager():
             SmartDispatcher._dependencies["MODEL_MAP"] = MODEL_MAP
         except Exception:
             pass
-        print(f"[ModelManager] ✅ 动态路由已加载: {len(dynamic_map)} 个任务")
+        _app_logger.info(f"[ModelManager] ✅ 动态路由已加载: {len(dynamic_map)} 个任务")
         # ── 同步更新 ModelFallbackExecutor 的路由表 ──────────────────────────
         try:
             from app.core.llm.model_fallback import get_fallback_executor
             get_fallback_executor().update_model_map(MODEL_MAP)
-            print("[ModelManager] ✅ ModelFallbackExecutor 路由表已同步")
+            _app_logger.info("[ModelManager] ✅ ModelFallbackExecutor 路由表已同步")
         except Exception as _fe:
-            print(f"[ModelManager] ⚠️ ModelFallbackExecutor 同步失败（非致命）: {_fe}")
+            _app_logger.warning(f"[ModelManager] ⚠️ ModelFallbackExecutor 同步失败（非致命）: {_fe}")
         # ── 同步更新 AIRouter 的轻量路由模型 ────────────────────────────────
         try:
             from app.core.routing.ai_router import AIRouter
@@ -2063,11 +2074,11 @@ def _init_model_manager():
                 )[0]
                 AIRouter.set_router_model(_router_candidate)
         except Exception as _are:
-            print(f"[ModelManager] ⚠️ AIRouter 路由模型更新失败（非致命）: {_are}")
+            _app_logger.warning(f"[ModelManager] ⚠️ AIRouter 路由模型更新失败（非致命）: {_are}")
     except Exception as _me:
         import traceback as _tb
 
-        print(f"[ModelManager] ⚠️ 动态路由初始化失败，使用静态默认值: {_me}")
+        _app_logger.warning(f"[ModelManager] ⚠️ 动态路由初始化失败，使用静态默认值: {_me}")
         _tb.print_exc()
 
 
@@ -2751,12 +2762,12 @@ class WebSearcher:
                 f"{skill_prompt}\n"
                 "用中文回答，格式整洁清晰。"
             )
-            print(f"[WebSearcher] 使用 skill_prompt: {skill_prompt[:60]}")
+            _app_logger.debug(f"[WebSearcher] 使用 skill_prompt: {skill_prompt[:60]}")
         else:
             # 2. 回退：关键词检测 + 分类 system_instruction
             query_type = cls._detect_query_type(query)
             _, system_instruction = cls._build_search_context(query, query_type)
-            print(f"[WebSearcher] 关键词检测备用: {query_type}")
+            _app_logger.debug(f"[WebSearcher] 关键词检测备用: {query_type}")
         try:
             # 使用 Google Search 作为工具
             response = client.models.generate_content(
@@ -2827,7 +2838,7 @@ class WebSearcher:
             else:
                 picks = []
         except Exception as e:
-            print(f"[PPT-IMAGE] 选图AI失败: {e}")
+            _app_logger.debug(f"[PPT-IMAGE] 选图AI失败: {e}")
             # 回退：选前 max_images 个非过渡页
             picks = [
                 {"index": i, "prompt": f"professional illustration about {t}"}
@@ -2872,7 +2883,7 @@ class WebSearcher:
                                 q.put(("success", part.inline_data.data))
                                 return
                 except Exception as e0:
-                    print(f"[PPT-IMAGE] Gemini 3.1 Flash Image 失败: {e0}")
+                    _app_logger.debug(f"[PPT-IMAGE] Gemini 3.1 Flash Image 失败: {e0}")
 
                 # ② 备选: Imagen 4.0
                 try:
@@ -2885,7 +2896,7 @@ class WebSearcher:
                         q.put(("success", res.generated_images[0].image.image_bytes))
                         return
                 except Exception as e1:
-                    print(f"[PPT-IMAGE] Imagen 4.0 失败: {e1}")
+                    _app_logger.debug(f"[PPT-IMAGE] Imagen 4.0 失败: {e1}")
 
                 # ③ 备选: Imagen 4.0 Fast
                 try:
@@ -2898,7 +2909,7 @@ class WebSearcher:
                         q.put(("success", res2.generated_images[0].image.image_bytes))
                         return
                 except Exception as e2:
-                    print(f"[PPT-IMAGE] Imagen 4.0 Fast 也失败: {e2}")
+                    _app_logger.debug(f"[PPT-IMAGE] Imagen 4.0 Fast 也失败: {e2}")
 
                 # ④ 最终备选: Imagen 3.0（当前公开稳定版）
                 try:
@@ -2911,7 +2922,7 @@ class WebSearcher:
                         q.put(("success", res3.generated_images[0].image.image_bytes))
                         return
                 except Exception as e3:
-                    print(f"[PPT-IMAGE] Imagen 3.0 也失败: {e3}")
+                    _app_logger.debug(f"[PPT-IMAGE] Imagen 3.0 也失败: {e3}")
                 q.put(("fail", None))
 
             thread = threading.Thread(
@@ -2929,9 +2940,9 @@ class WebSearcher:
                     with open(fpath, "wb") as f:
                         f.write(data)
                     results.append({"slide_index": idx, "image_path": fpath})
-                    print(f"[PPT-IMAGE] ✅ 幻灯片 {idx} 配图生成: {fname}")
+                    _app_logger.info(f"[PPT-IMAGE] ✅ 幻灯片 {idx} 配图生成: {fname}")
             except Exception:
-                print(f"[PPT-IMAGE] ⚠️ 幻灯片 {idx} 配图超时或失败")
+                _app_logger.warning(f"[PPT-IMAGE] ⚠️ 幻灯片 {idx} 配图超时或失败")
 
         return results
 
@@ -3038,13 +3049,13 @@ class WebSearcher:
                 )
                 text = _extract_interaction_text(final_interaction)
                 if text and len(text) > 200:
-                    print(f"[PPT-RESEARCH] ✅ 深度研究完成 ({preferred_model}), {len(text)} 字符")
+                    _app_logger.info(f"[PPT-RESEARCH] ✅ 深度研究完成 ({preferred_model}), {len(text)} 字符")
                     return text
-                print(f"[PPT-RESEARCH] ⚠️ Interactions 返回空结果或过短")
+                _app_logger.warning(f"[PPT-RESEARCH] ⚠️ Interactions 返回空结果或过短")
             except Exception as inter_err:
-                print(f"[PPT-RESEARCH] Interactions 失败: {inter_err}")
+                _app_logger.debug(f"[PPT-RESEARCH] Interactions 失败: {inter_err}")
 
-        print(f"[PPT-RESEARCH] 🔄 切换到备用模型进行研究...")
+        _app_logger.debug(f"[PPT-RESEARCH] 🔄 切换到备用模型进行研究...")
         research_models = [
             MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025"),
             "gemini-3-pro-preview",
@@ -3076,12 +3087,12 @@ class WebSearcher:
                     ),
                 )
                 if resp.text and len(resp.text) > 200:
-                    print(
+                    _app_logger.info(
                         f"[PPT-RESEARCH] ✅ 深度研究完成 ({model}), {len(resp.text)} 字符"
                     )
                     return resp.text
             except Exception as e:
-                print(f"[PPT-RESEARCH] {model} 失败: {e}")
+                _app_logger.debug(f"[PPT-RESEARCH] {model} 失败: {e}")
                 continue
         return ""
 
@@ -3114,7 +3125,7 @@ def _get_chat_system_instruction(question: str = None):
 
             return get_dynamic_system_instruction(question)
     except Exception as e:
-        print(f"[Koto] Warning: Dynamic context injection failed: {e}")
+        _app_logger.debug(f"[Koto] Warning: Dynamic context injection failed: {e}")
 
     # 降级方案：使用基础系统指令
     from datetime import datetime
@@ -3141,7 +3152,7 @@ def _get_chat_system_instruction(question: str = None):
             for warning in warnings:
                 system_info_section += f"  • {warning}\n"
     except Exception as e:
-        print(f"[Koto] Warning: Failed to collect system info: {e}")
+        _app_logger.debug(f"[Koto] Warning: Failed to collect system info: {e}")
 
     return f"""你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。
 
@@ -3188,7 +3199,7 @@ def _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION():
     """获取默认的系统指令（用于降级场景）"""
     try:
         return _get_chat_system_instruction()
-    except:
+    except Exception:
         # 终极降级：返回基础指令
         return "你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。精通多个领域，快速理解用户意图，提供符合实际情境的答案。"
 
@@ -3932,20 +3943,20 @@ class ContextAnalyzer:
             # 如果任务类型完全不同，不应该是延续
             if curr_likely_task and prev_topic and curr_likely_task != prev_topic:
                 task_mismatch = True
-                print(
+                _app_logger.debug(
                     f"[ContextAnalyzer] 任务类型不匹配: {prev_topic} -> {curr_likely_task}"
                 )
 
         if has_new_topic and input_length > 10:
             # 有新主题且输入较长，很可能是独立任务
             max_weight *= 0.2  # 大幅降低置信度
-            print(f"[ContextAnalyzer] 检测到新主题标志，降低延续置信度")
+            _app_logger.debug(f"[ContextAnalyzer] 检测到新主题标志，降低延续置信度")
 
         if task_mismatch:
             # 任务类型不匹配，强制清零
             max_weight = 0
             detected_type = None
-            print(f"[ContextAnalyzer] 任务类型不匹配，清除延续判断")
+            _app_logger.debug(f"[ContextAnalyzer] 任务类型不匹配，清除延续判断")
 
         # 4. 如果检测到延续模式且置信度足够高
         if detected_type and max_weight > 0.5:
@@ -3964,11 +3975,11 @@ class ContextAnalyzer:
                 user_input, context_summary, detected_type
             )
 
-            print(f"[ContextAnalyzer] RAG Analysis:")
-            print(f"  - Continuation Type: {detected_type}")
-            print(f"  - Related Task: {result['related_task']}")
-            print(f"  - Confidence: {result['confidence']:.2f}")
-            print(
+            _app_logger.debug(f"[ContextAnalyzer] RAG Analysis:")
+            _app_logger.info(f"  - Continuation Type: {detected_type}")
+            _app_logger.info(f"  - Related Task: {result['related_task']}")
+            _app_logger.info(f"  - Confidence: {result['confidence']:.2f}")
+            _app_logger.info(
                 f"  - Entities: {[e['value'] for e in context_summary.get('key_entities', [])]}"
             )
 
@@ -4095,7 +4106,7 @@ class TaskOrchestrator:
 
         try:
             for i, subtask in enumerate(subtasks):
-                print(
+                _app_logger.debug(
                     f"\n[TaskOrchestrator] 执行子任务 {i+1}/{len(subtasks)}: {subtask['task_type']}"
                 )
                 execution_log.append(
@@ -4139,7 +4150,7 @@ class TaskOrchestrator:
                     subtask["error"] = error_msg
                     errors.append(error_msg)
                     execution_log.append(f"  ❌ 失败: {error_msg}")
-                    print(f"[TaskOrchestrator] 子任务失败: {error_msg}")
+                    _app_logger.debug(f"[TaskOrchestrator] 子任务失败: {error_msg}")
 
             # 合并结果
             combined_output = cls._merge_results(subtasks, context)
@@ -4179,7 +4190,7 @@ class TaskOrchestrator:
         """执行 Web 搜索子任务 (带可视进度)"""
 
         def _report(msg: str, detail: str = ""):
-            print(f"[WEB_SEARCH] {msg} | {detail}")
+            _app_logger.debug(f"[WEB_SEARCH] {msg} | {detail}")
             if progress_callback:
                 progress_callback(msg, detail)
 
@@ -4236,7 +4247,7 @@ class TaskOrchestrator:
         )
 
         def _report(msg: str, detail: str = ""):
-            print(f"[PPT_PROGRESS] {msg} | {detail}")
+            _app_logger.debug(f"[PPT_PROGRESS] {msg} | {detail}")
             if progress_callback:
                 progress_callback(msg, detail)
 
@@ -4356,7 +4367,7 @@ class TaskOrchestrator:
                     ),
                 )
             except Exception as qg_err:
-                print(f"[PPT] ⚠️ 质量门控异常: {qg_err}")
+                _app_logger.warning(f"[PPT] ⚠️ 质量门控异常: {qg_err}")
 
             # AI 验证
             try:
@@ -4417,7 +4428,7 @@ class TaskOrchestrator:
             }
 
         except Exception as e:
-            print(f"[PPT] ⚠️ 多阶段生成失败，回退到单步生成: {e}")
+            _app_logger.warning(f"[PPT] ⚠️ 多阶段生成失败，回退到单步生成: {e}")
             # 重新抛出异常让上层处理，或者在这里调用旧逻辑?
             # 为了简单，抛出异常让外部 _execute_file_gen 的 except 块捕获 (但外部是 generic exception)
             # 或者我们直接返回失败，让 TaskOrchestrator 记录错误
@@ -4436,7 +4447,7 @@ class TaskOrchestrator:
         """
 
         def _report(msg: str, detail: str = ""):
-            print(f"[FILE_GEN] {msg} | {detail}")
+            _app_logger.debug(f"[FILE_GEN] {msg} | {detail}")
             if progress_callback:
                 progress_callback(msg, detail)
 
@@ -4489,7 +4500,7 @@ class TaskOrchestrator:
                         )
                         _doc_plan = None
                 except Exception as _pe:
-                    print(f"[FILE_GEN] ⚠️ 规划层异常: {_pe}")
+                    _app_logger.warning(f"[FILE_GEN] ⚠️ 规划层异常: {_pe}")
                     _doc_plan = None
 
             # 检测目标格式（PPT、Excel、Word等）
@@ -4521,11 +4532,11 @@ class TaskOrchestrator:
                         )
                         return ppt_result
                     elif ppt_result.get("opt_out_to_legacy"):
-                        print("[FILE_GEN] ⚠️ 多阶段生成遇到问题，回退到旧版生成逻辑")
+                        _app_logger.warning("[FILE_GEN] ⚠️ 多阶段生成遇到问题，回退到旧版生成逻辑")
                     else:
                         return ppt_result
                 except Exception as e:
-                    print(f"[FILE_GEN] ⚠️ 多阶段生成异常: {e}")
+                    _app_logger.warning(f"[FILE_GEN] ⚠️ 多阶段生成异常: {e}")
 
                 # 回退旧逻辑 (Legacy Prompt Generation)
                 gen_prompt = (
@@ -4580,11 +4591,11 @@ class TaskOrchestrator:
                     )
                     if research_context:
                         previous_data = f"[深度研究]\n{research_context}\n\n[已有信息]\n{previous_data}"
-                        print(
+                        _app_logger.debug(
                             f"[FILE_GEN] 🔬 深度研究完成，追加 {len(research_context)} 字上下文"
                         )
                 except Exception as research_err:
-                    print(f"[FILE_GEN] ⚠️ 深度研究失败: {research_err}")
+                    _app_logger.warning(f"[FILE_GEN] ⚠️ 深度研究失败: {research_err}")
 
             # 调用模型生成内容
             model_id = SmartDispatcher.get_model_for_task("FILE_GEN", complexity="complex" if is_complex else "normal")
@@ -4784,7 +4795,7 @@ class TaskOrchestrator:
                         )
                         ppt_outline["slides"] = _qg["outline"]
                     except Exception as _qge:
-                        print(f"[FILE_GEN] ⚠️ PPT 质量门控异常: {_qge}")
+                        _app_logger.warning(f"[FILE_GEN] ⚠️ PPT 质量门控异常: {_qge}")
 
                     # 确定主题（通过关键词检测）
                     theme = "business"  # 默认商务主题
@@ -4827,7 +4838,7 @@ class TaskOrchestrator:
                             _report(
                                 f"正在生成PPT ({c}/{t})", f"页面: {st[:10]}... [{ty}]"
                             )
-                        except:
+                        except Exception:
                             pass
 
                     ppt_gen.generate_from_outline(
@@ -4846,7 +4857,7 @@ class TaskOrchestrator:
                     _report("PPT生成完成", f"已保存到: {rel_path}")
 
                 except Exception as ppt_err:
-                    print(f"[FILE_GEN] ⚠️ PPT生成失败: {ppt_err}")
+                    _app_logger.warning(f"[FILE_GEN] ⚠️ PPT生成失败: {ppt_err}")
                     _report("PPT生成失败，回退到Word...", f"错误: {str(ppt_err)[:50]}")
                     # PPT失败时回退到Word
                     from web.document_generator import save_docx
@@ -4989,7 +5000,7 @@ class TaskOrchestrator:
                         _report("Excel生成完成", f"已保存到: {rel_path}")
                     except Exception as excel_err:
                         excel_error = str(excel_err)
-                        print(f"[FILE_GEN] ⚠️ Excel保存失败: {excel_error}")
+                        _app_logger.warning(f"[FILE_GEN] ⚠️ Excel保存失败: {excel_error}")
                         _report(
                             "Excel保存失败，回退到Word...", f"错误: {excel_error[:50]}"
                         )
@@ -5008,11 +5019,11 @@ class TaskOrchestrator:
                         )
                         text_out = _dqg["text"]
                         if _dqg.get("issues"):
-                            print(
+                            _app_logger.debug(
                                 f"[FILE_GEN] 🔍 检查层: {', '.join(_dqg['issues'][:3])}"
                             )
                     except Exception as _dqge:
-                        print(f"[FILE_GEN] ⚠️ 导出检查层异常: {_dqge}")
+                        _app_logger.warning(f"[FILE_GEN] ⚠️ 导出检查层异常: {_dqge}")
 
                     _report("正在生成Word文档...", "转换为 DOCX")
                     from web.document_generator import save_docx, save_pdf
@@ -5042,7 +5053,7 @@ class TaskOrchestrator:
                             saved_files.append(pdf_rel)
                             _report("PDF生成完成", f"已保存到: {pdf_rel}")
                         except Exception as pdf_err:
-                            print(f"[FILE_GEN] ⚠️ PDF保存失败: {pdf_err}")
+                            _app_logger.warning(f"[FILE_GEN] ⚠️ PDF保存失败: {pdf_err}")
                             _report("PDF生成失败", str(pdf_err)[:50])
 
             return {
@@ -5064,7 +5075,7 @@ class TaskOrchestrator:
         """执行图像生成子任务 - 为PPT等生成配图 (带可视进度)"""
 
         def _report(msg: str, detail: str = ""):
-            print(f"[PAINTER] {msg} | {detail}")
+            _app_logger.debug(f"[PAINTER] {msg} | {detail}")
             if progress_callback:
                 progress_callback(msg, detail)
 
@@ -5107,18 +5118,18 @@ class TaskOrchestrator:
                             if _img_res and _img_res.generated_images:
                                 break
                         except Exception as _img_e:
-                            print(f"[PAINTER] {_img_m} 失败: {_img_e}")
+                            _app_logger.debug(f"[PAINTER] {_img_m} 失败: {_img_e}")
                             _img_res = None
                     if _img_res and _img_res.generated_images:
                         with open(fpath, "wb") as f:
                             f.write(_img_res.generated_images[0].image.image_bytes)
                         image_paths.append(fpath)
-                        print(f"[PAINTER] ✅ 配图 {i+1} 已生成: {fname}")
+                        _app_logger.info(f"[PAINTER] ✅ 配图 {i+1} 已生成: {fname}")
                         _report(f"✅ 配图 {i+1} 完成", fname)
                     else:
                         raise RuntimeError("所有图像模型均失败")
                 except Exception as img_err:
-                    print(f"[PAINTER] ⚠️ 配图 {i+1} 生成失败: {img_err}")
+                    _app_logger.warning(f"[PAINTER] ⚠️ 配图 {i+1} 生成失败: {img_err}")
                     _report(f"⚠️ 配图 {i+1} 失败", str(img_err))
 
             success = len(image_paths) > 0
@@ -5145,7 +5156,7 @@ class TaskOrchestrator:
         """执行深度研究子任务 - 使用 Gemini Pro 深度分析 (可视进度)"""
 
         def _report(msg: str, detail: str = ""):
-            print(f"[RESEARCH] {msg} | {detail}")
+            _app_logger.debug(f"[RESEARCH] {msg} | {detail}")
             if progress_callback:
                 progress_callback(msg, detail)
 
@@ -5194,7 +5205,7 @@ class TaskOrchestrator:
         """执行代码生成子任务 - 使用 gemini-3.1-pro-preview（generate_content 直调）"""
 
         def _report(msg: str, detail: str = ""):
-            print(f"[CODER] {msg} | {detail}")
+            _app_logger.debug(f"[CODER] {msg} | {detail}")
             if progress_callback:
                 progress_callback(msg, detail)
 
@@ -5277,7 +5288,7 @@ class TaskOrchestrator:
         """执行系统操作子任务 - 调用 LocalExecutor"""
 
         def _report(msg: str, detail: str = ""):
-            print(f"[SYSTEM] {msg} | {detail}")
+            _app_logger.debug(f"[SYSTEM] {msg} | {detail}")
             if progress_callback:
                 progress_callback(msg, detail)
 
@@ -5384,7 +5395,7 @@ class TaskOrchestrator:
                 semantic_score = min(30, max(0, int(m.group())))
                 score += semantic_score
         except Exception as e:
-            print(f"[VALIDATE_QUALITY] 语义评分失败，使用规则分: {e}")
+            _app_logger.debug(f"[VALIDATE_QUALITY] 语义评分失败，使用规则分: {e}")
 
         return max(0, min(100, score))
 
@@ -5394,7 +5405,7 @@ class TaskOrchestrator:
 # SmartDispatcher、ModelRouter 等已从 app.core.routing 导入
 
 try:
-    print("[INIT] Configuring SmartDispatcher with local dependencies...")
+    _app_logger.debug("[INIT] Configuring SmartDispatcher with local dependencies...")
     SmartDispatcher.configure(
         local_executor=LocalExecutor,
         context_analyzer=ContextAnalyzer,
@@ -5402,9 +5413,9 @@ try:
         model_map=MODEL_MAP,
         client=client,
     )
-    print("[INIT] SmartDispatcher configured successfully.")
+    _app_logger.debug("[INIT] SmartDispatcher configured successfully.")
 except Exception as e:
-    print(f"[ERROR] Failed to configure SmartDispatcher: {e}")
+    _app_logger.error(f"[ERROR] Failed to configure SmartDispatcher: {e}")
 
 # ─── 后台启动动态模型路由器 ────────────────────────────────────────────────────
 # 不阻塞主线程启动；路由表更新后会自动覆盖静态默认值及 SmartDispatcher 配置
@@ -5430,7 +5441,7 @@ class LocalDispatcher:
         try:
             requests.get("http://localhost:11434", timeout=0.2)
             return True
-        except:
+        except Exception:
             return False
 
     @staticmethod
@@ -5547,7 +5558,7 @@ class Utils:
                 model_generate=None,
             )
         except Exception as e:
-            print(f"[PROMPT_ADAPTER] Failed: {e}")
+            _app_logger.debug(f"[PROMPT_ADAPTER] Failed: {e}")
             return user_input
 
     @staticmethod
@@ -5584,7 +5595,7 @@ class Utils:
                 return {"pass": False, "fix_prompt": fix}
             return {"pass": True, "fix_prompt": ""}
         except Exception as e:
-            print(f"[SELF_CHECK] Failed: {e}")
+            _app_logger.debug(f"[SELF_CHECK] Failed: {e}")
             return {"pass": True, "fix_prompt": ""}
 
     @staticmethod
@@ -5706,7 +5717,7 @@ class Utils:
             return code_dir if ext in code_exts else WORKSPACE_DIR
 
         # 调试：打印前800字符看看格式
-        print(f"[FILE_GEN] Response first 800 chars:\n{text[:800]}\n")
+        _app_logger.debug(f"[FILE_GEN] Response first 800 chars:\n{text[:800]}\n")
 
         # 预处理：统一格式 (去掉多余空格)
         normalized_text = text
@@ -5729,18 +5740,18 @@ class Utils:
                 matches1 = re.findall(
                     pattern, normalized_text, re.DOTALL | re.IGNORECASE
                 )
-                print(f"[FILE_GEN] Pattern{i+1} matches: {len(matches1)}")
+                _app_logger.debug(f"[FILE_GEN] Pattern{i+1} matches: {len(matches1)}")
                 if matches1:
-                    print(f"[FILE_GEN] ✓ Using pattern {i+1}")
+                    _app_logger.debug(f"[FILE_GEN] ✓ Using pattern {i+1}")
                     break
             except Exception as e:
-                print(f"[FILE_GEN] Pattern{i+1} error: {e}")
+                _app_logger.debug(f"[FILE_GEN] Pattern{i+1} error: {e}")
 
         for filename, content in matches1:
             try:
                 filename = filename.strip()
                 content = content.strip()
-                print(
+                _app_logger.debug(
                     f"[FILE_GEN] Processing file: '{filename}', content length: {len(content)}"
                 )
 
@@ -5752,11 +5763,11 @@ class Utils:
                     if lines and lines[-1].strip() == "```":
                         lines = lines[:-1]
                     content = "\n".join(lines)
-                    print(f"[FILE_GEN] After stripping markdown: {len(content)} chars")
+                    _app_logger.debug(f"[FILE_GEN] After stripping markdown: {len(content)} chars")
 
                 # 确保文件名有效
                 if not filename or len(filename) > 100:
-                    print(f"[FILE_GEN] Invalid filename: {filename}")
+                    _app_logger.debug(f"[FILE_GEN] Invalid filename: {filename}")
                     continue
 
                 # 确保文件名有扩展名
@@ -5768,16 +5779,16 @@ class Utils:
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(content)
                 saved.append(filename)
-                print(f"[FILE_GEN] ✅ Saved: {filename} to {path}")
+                _app_logger.info(f"[FILE_GEN] ✅ Saved: {filename} to {path}")
             except Exception as e:
-                print(f"[FILE_GEN] ❌ Save failed: {e}")
+                _app_logger.error(f"[FILE_GEN] ❌ Save failed: {e}")
                 import traceback
 
                 traceback.print_exc()
 
         # 方法2: 如果方法1没找到，尝试提取 ```python 代码块 + 文件名注释
         if not saved:
-            print(f"[FILE_GEN] Method1 empty, trying method2 (```python blocks)...")
+            _app_logger.debug(f"[FILE_GEN] Method1 empty, trying method2 (```python blocks)...")
 
             # 先尝试匹配带文件名的代码块
             # 例如: # filename: cat_info.py 或 # cat_info.py
@@ -5785,7 +5796,7 @@ class Utils:
                 r"```python\s*\n#\s*(?:filename:\s*)?([a-zA-Z0-9_.-]+\.py)\s*\n(.*?)```"
             )
             matches2a = re.findall(pattern2a, text, re.DOTALL)
-            print(
+            _app_logger.debug(
                 f"[FILE_GEN] Pattern2a (with filename comment) matches: {len(matches2a)}"
             )
 
@@ -5800,14 +5811,14 @@ class Utils:
                         with open(path, "w", encoding="utf-8") as f:
                             f.write(code)
                         saved.append(filename)
-                        print(f"[FILE_GEN] ✅ Method2a saved: {filename}")
+                        _app_logger.info(f"[FILE_GEN] ✅ Method2a saved: {filename}")
                     except Exception as e:
-                        print(f"[FILE_GEN] ❌ Method2a save failed: {e}")
+                        _app_logger.error(f"[FILE_GEN] ❌ Method2a save failed: {e}")
             else:
                 # 无文件名的代码块，使用时间戳
                 pattern2 = r"```python\s*\n(.*?)```"
                 matches2 = re.findall(pattern2, text, re.DOTALL)
-                print(f"[FILE_GEN] Pattern2 (generic) matches: {len(matches2)}")
+                _app_logger.debug(f"[FILE_GEN] Pattern2 (generic) matches: {len(matches2)}")
 
                 if matches2:
                     timestamp = int(time.time())
@@ -5837,11 +5848,11 @@ class Utils:
                             with open(path, "w", encoding="utf-8") as f:
                                 f.write(code)
                             saved.append(filename)
-                            print(f"[FILE_GEN] ✅ Method2 saved: {filename}")
+                            _app_logger.info(f"[FILE_GEN] ✅ Method2 saved: {filename}")
                         except Exception as e:
-                            print(f"[FILE_GEN] ❌ Method2 save failed: {e}")
+                            _app_logger.error(f"[FILE_GEN] ❌ Method2 save failed: {e}")
 
-        print(f"[FILE_GEN] Final saved files: {saved}")
+        _app_logger.debug(f"[FILE_GEN] Final saved files: {saved}")
         return saved
 
     @staticmethod
@@ -5870,13 +5881,13 @@ class Utils:
                     with open(fallback_path, "wb") as f:
                         f.write(blob_part.inline_data.data)
                     rel_path = os.path.relpath(fallback_path, WORKSPACE_DIR)
-                    print(f"[IMAGE] Falling back to workspace/images: {rel_path}")
+                    _app_logger.debug(f"[IMAGE] Falling back to workspace/images: {rel_path}")
 
                 result = rel_path.replace("\\", "/")
-                print(f"[IMAGE] Saved image: {result}")
+                _app_logger.debug(f"[IMAGE] Saved image: {result}")
                 return result
             except Exception as path_err:
-                print(f"[IMAGE] Path calculation error: {path_err}")
+                _app_logger.debug(f"[IMAGE] Path calculation error: {path_err}")
                 # 最后的保险方案：直接保存到 workspace/images
                 abs_workspace_images = os.path.join(WORKSPACE_DIR, "images")
                 os.makedirs(abs_workspace_images, exist_ok=True)
@@ -5886,10 +5897,10 @@ class Utils:
                 result = os.path.relpath(fallback_path, WORKSPACE_DIR).replace(
                     "\\", "/"
                 )
-                print(f"[IMAGE] Emergency fallback: {result}")
+                _app_logger.debug(f"[IMAGE] Emergency fallback: {result}")
                 return result
         except Exception as e:
-            print(f"[IMAGE] Save failed: {e}")
+            _app_logger.debug(f"[IMAGE] Save failed: {e}")
             import traceback
 
             traceback.print_exc()
@@ -5924,7 +5935,8 @@ class SessionManager:
                     full_history = json.load(f)
                     # 仅截断用于模型上下文的部分，不影响持久化存储
                     return self._trim_history(full_history)
-            except:
+            except (json.JSONDecodeError, OSError) as e:
+                _app_logger.warning("Failed to load session %s: %s", filename, e)
                 return []
         return []
 
@@ -5935,7 +5947,8 @@ class SessionManager:
             try:
                 with open(path, "r", encoding="utf-8", errors="ignore") as f:
                     return json.load(f)
-            except:
+            except (json.JSONDecodeError, OSError) as e:
+                _app_logger.warning("Failed to load full session %s: %s", filename, e)
                 return []
         return []
 
@@ -5945,7 +5958,7 @@ class SessionManager:
             return history
         # 只保留最后 N 轮对话
         trimmed = history[-max_turns:]
-        print(f"[HISTORY] Trimmed to last {max_turns} turns (was {len(history)})")
+        _app_logger.debug(f"[HISTORY] Trimmed to last {max_turns} turns (was {len(history)})")
         return trimmed
 
     def create(self, name):
@@ -6038,7 +6051,8 @@ class SessionManager:
             try:
                 os.remove(path)
                 return True
-            except:
+            except OSError as e:
+                _app_logger.warning("Failed to delete session %s: %s", filename, e)
                 return False
         return False
 
@@ -6060,13 +6074,13 @@ def get_memory_manager():
             from enhanced_memory_manager import EnhancedMemoryManager
 
             _memory_manager = EnhancedMemoryManager()
-            print("[INIT] ✅ 增强记忆管理器已初始化")
+            _app_logger.info("[INIT] ✅ 增强记忆管理器已初始化")
         except ImportError:
             try:
                 from web.enhanced_memory_manager import EnhancedMemoryManager
 
                 _memory_manager = EnhancedMemoryManager()
-                print("[INIT] ✅ 增强记忆管理器已初始化")
+                _app_logger.info("[INIT] ✅ 增强记忆管理器已初始化")
             except ImportError:
                 # 降级到基础版本
                 try:
@@ -6074,7 +6088,7 @@ def get_memory_manager():
                 except ImportError:
                     from web.memory_manager import MemoryManager
                 _memory_manager = MemoryManager()
-                print("[INIT] ⚠️  使用基础记忆管理器")
+                _app_logger.warning("[INIT] ⚠️  使用基础记忆管理器")
 
         # 注入摘要与向量适配器（如果支持）
         try:
@@ -6122,7 +6136,7 @@ def get_memory_manager():
                     generate_fn=_memory_generate, embedding_fn=_memory_embed
                 )
         except Exception as e:
-            print(f"[INIT] ⚠️  记忆适配器注入失败: {e}")
+            _app_logger.warning(f"[INIT] ⚠️  记忆适配器注入失败: {e}")
     return _memory_manager
 
 
@@ -6200,11 +6214,11 @@ def _start_memory_extraction(
                     )
                 )
                 if result.get("success"):
-                    print("[MemoryIntegration] ✅ 自动记忆提取完成")
+                    _app_logger.info("[MemoryIntegration] ✅ 自动记忆提取完成")
                 else:
-                    print(f"[MemoryIntegration] ⚠️ 提取失败: {result.get('error')}")
+                    _app_logger.warning(f"[MemoryIntegration] ⚠️ 提取失败: {result.get('error')}")
             except Exception as e:
-                print(f"[MemoryIntegration] ❌ 异常: {e}")
+                _app_logger.error(f"[MemoryIntegration] ❌ 异常: {e}")
 
         # ── 2-B: MemoryReflector (deep structured reflection) ─────────────
         try:
@@ -6219,7 +6233,7 @@ def _start_memory_extraction(
                 llm_fn=_llm_sync,
             )
         except Exception as e:
-            print(f"[MemoryReflector] ⚠️ 启动失败: {e}")
+            _app_logger.warning(f"[MemoryReflector] ⚠️ 启动失败: {e}")
 
         # ── 2-C: PersonalityMatrix — 动态个人记忆矩阵更新（使用更高质量模型）──
         try:
@@ -6227,7 +6241,7 @@ def _start_memory_extraction(
             if _pm_mgr and hasattr(_pm_mgr, "update_personality_async"):
                 _pm_mgr.update_personality_async(user_msg, ai_msg, _llm_quality_sync)
         except Exception as e:
-            print(f"[PersonalityMatrix] ⚠️ 更新启动失败: {e}")
+            _app_logger.warning(f"[PersonalityMatrix] ⚠️ 更新启动失败: {e}")
 
         # ── 3: ShadowWatcher 影子追踪（零感知观察）────────────────────────────
         try:
@@ -6235,7 +6249,7 @@ def _start_memory_extraction(
 
             ShadowWatcher.observe(user_msg, ai_msg, session_name)
         except Exception as e:
-            print(f"[ShadowWatcher] ⚠️ 观察失败: {e}")
+            _app_logger.warning(f"[ShadowWatcher] ⚠️ 观察失败: {e}")
 
         # ── 3-B: ResponseEvaluator 模型自评（自动质量评分 → RatingStore）────
         try:
@@ -6252,7 +6266,7 @@ def _start_memory_extraction(
                 llm_fn=_llm_sync,
             )
         except Exception as e:
-            print(f"[ResponseEvaluator] ⚠️ 自评启动失败: {e}")
+            _app_logger.warning(f"[ResponseEvaluator] ⚠️ 自评启动失败: {e}")
 
         # ── 4: MacroRecorder 宏录制（重复工作流检测）────────────────────────
         try:
@@ -6260,7 +6274,7 @@ def _start_memory_extraction(
 
             MacroRecorder.record_turn(user_msg, task_type or "CHAT", session_name)
         except Exception as e:
-            print(f"[MacroRecorder] ⚠️ 记录失败: {e}")
+            _app_logger.warning(f"[MacroRecorder] ⚠️ 记录失败: {e}")
 
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -6274,7 +6288,7 @@ def get_knowledge_base():
         except ImportError:
             from web.knowledge_base import KnowledgeBase
         _kb = KnowledgeBase()
-        print("[INIT] ✅ Knowledge Base 已初始化")
+        _app_logger.info("[INIT] ✅ Knowledge Base 已初始化")
     return _kb
 
 
@@ -6382,7 +6396,7 @@ class KotoBrain:
                 target_key, user_input, history=history
             )
             if model_input != user_input:
-                print("[PROMPT_ADAPTER] Applied local Markdown template")
+                _app_logger.debug("[PROMPT_ADAPTER] Applied local Markdown template")
         result = {
             "task": target_key,
             "model": model_id,
@@ -6474,7 +6488,7 @@ class KotoBrain:
                                     code_content = matches[0][1].strip()
                                 else:
                                     code_content = matches[0].strip()
-                                print(
+                                _app_logger.debug(
                                     f"[IMAGE_EDIT] Extracted code, length: {len(code_content)}"
                                 )
                                 break
@@ -6493,7 +6507,7 @@ class KotoBrain:
                         with open(temp_script, "w", encoding="utf-8") as f:
                             f.write(code_content)
 
-                        print(f"[IMAGE_EDIT] Executing script: {temp_script}")
+                        _app_logger.debug(f"[IMAGE_EDIT] Executing script: {temp_script}")
                         if getattr(sys, "frozen", False):
                             # 打包模式：sys.executable 是 Koto.exe，不能用来运行脚本，改为进程内 exec()
                             import contextlib as _ctx
@@ -6530,18 +6544,18 @@ class KotoBrain:
                                 cwd=WORKSPACE_DIR,
                             )
 
-                        print(
+                        _app_logger.debug(
                             f"[IMAGE_EDIT] Script result: returncode={exec_result.returncode}"
                         )
                         if exec_result.stdout:
-                            print(f"[IMAGE_EDIT] stdout: {exec_result.stdout[:200]}")
+                            _app_logger.debug(f"[IMAGE_EDIT] stdout: {exec_result.stdout[:200]}")
                         if exec_result.stderr:
-                            print(f"[IMAGE_EDIT] stderr: {exec_result.stderr[:200]}")
+                            _app_logger.debug(f"[IMAGE_EDIT] stderr: {exec_result.stderr[:200]}")
 
                         # 清理临时脚本
                         try:
                             os.remove(temp_script)
-                        except:
+                        except OSError:
                             pass
 
                         if exec_result.returncode == 0:
@@ -6579,8 +6593,8 @@ class KotoBrain:
 
                     for edit_model in edit_models:
                         try:
-                            print(f"[IMAGE_EDIT] Trying model: {edit_model}")
-                            print(f"[IMAGE_EDIT] Sending request to API...")
+                            _app_logger.debug(f"[IMAGE_EDIT] Trying model: {edit_model}")
+                            _app_logger.debug(f"[IMAGE_EDIT] Sending request to API...")
                             response = client.models.generate_content(
                                 model=edit_model,
                                 contents=edit_instruction,
@@ -6588,7 +6602,7 @@ class KotoBrain:
                                     max_output_tokens=4096, temperature=0.5
                                 ),
                             )
-                            print(f"[IMAGE_EDIT] Got API response")
+                            _app_logger.debug(f"[IMAGE_EDIT] Got API response")
 
                             if (
                                 response.candidates
@@ -6597,13 +6611,13 @@ class KotoBrain:
                                 code_response = (
                                     response.candidates[0].content.parts[0].text
                                 )
-                                print(
+                                _app_logger.debug(
                                     f"[IMAGE_EDIT] Got response from {edit_model}, length: {len(code_response)}"
                                 )
                                 break
                         except Exception as model_err:
                             last_error = str(model_err)
-                            print(
+                            _app_logger.debug(
                                 f"[IMAGE_EDIT] Model {edit_model} failed: {last_error[:100]}"
                             )
                             continue
@@ -6632,7 +6646,7 @@ class KotoBrain:
                         retry_models = ["gemini-3-flash-preview", "gemini-2.5-flash"]
                         for retry_model in retry_models:
                             try:
-                                print(f"[IMAGE_EDIT] Retry with model: {retry_model}")
+                                _app_logger.debug(f"[IMAGE_EDIT] Retry with model: {retry_model}")
                                 retry_resp = client.models.generate_content(
                                     model=retry_model,
                                     contents=fix_prompt,
@@ -6654,14 +6668,14 @@ class KotoBrain:
                                         break
                                     result["response"] = retry_run["response"]
                             except Exception as retry_err:
-                                print(f"[IMAGE_EDIT] Retry failed: {retry_err}")
+                                _app_logger.debug(f"[IMAGE_EDIT] Retry failed: {retry_err}")
 
                     result["total_time"] = time.time() - start_time
                     return result
                 else:
                     # 纯图像生成使用 gemini-3.1-flash-image-preview
                     try:
-                        print(f"[图像生成] 开始生成: {user_input[:50]}...")
+                        _app_logger.info(f"[图像生成] 开始生成: {user_input[:50]}...")
                         response = client.models.generate_content(
                             model="gemini-3.1-flash-image-preview",
                             contents=user_input,
@@ -6669,7 +6683,7 @@ class KotoBrain:
                                 response_modalities=["TEXT", "IMAGE"]
                             ),
                         )
-                        print(
+                        _app_logger.info(
                             f"[图像生成] 响应成功，候选数: {len(response.candidates) if response.candidates else 0}"
                         )
 
@@ -6680,7 +6694,7 @@ class KotoBrain:
                                     img_filename = Utils.save_image_part(part)
                                     if img_filename:
                                         result["images"].append(img_filename)
-                                        print(f"[图像生成] 已保存: {img_filename}")
+                                        _app_logger.info(f"[图像生成] 已保存: {img_filename}")
 
                         if result["images"]:
                             save_path = settings_manager.images_dir
@@ -6695,7 +6709,7 @@ class KotoBrain:
                         return result
                     except Exception as img_err:
                         error_msg = str(img_err)
-                        print(f"[图像生成] 错误: {error_msg[:200]}")
+                        _app_logger.info(f"[图像生成] 错误: {error_msg[:200]}")
 
                         # 提供更详细的错误信息
                         if (
@@ -6753,11 +6767,11 @@ class KotoBrain:
                     # 避免对极短的问候语进行检索
                     skip_keywords = ["你好", "hello", "hi", "test", "测试"]
                     if not any(original_input.lower() == k for k in skip_keywords):
-                        print(f"[RAG]正在检索知识库: {original_input[:50]}...")
+                        _app_logger.debug(f"[RAG]正在检索知识库: {original_input[:50]}...")
                         rag_results = kb_inst.search(original_input, top_k=3)
                         
                         if rag_results:
-                            print(f"[RAG] 检索到 {len(rag_results)} 个相关片段")
+                            _app_logger.debug(f"[RAG] 检索到 {len(rag_results)} 个相关片段")
                             context_str = "\n".join([
                                 f"--- 来源: {r['file_name']} (相似度: {r['similarity']:.2f}) ---\n{r['text']}"
                                 for r in rag_results
@@ -6767,7 +6781,7 @@ class KotoBrain:
                             rag_context = f"\n\n【参考资料】\n以下是从本地知识库检索到的相关内容，供回答参考：\n{context_str}\n\n"
 
                             # Log retrieval
-                            print(f"[RAG] Injected context length: {len(rag_context)}")
+                            _app_logger.debug(f"[RAG] Injected context length: {len(rag_context)}")
 
                             # Update model input
                             # 如果有 file_data，model_input 可能是 None 或不被直接使用，需谨慎
@@ -6779,7 +6793,7 @@ class KotoBrain:
                                 original_input = rag_context + original_input
 
             except Exception as rag_err:
-                print(f"[RAG] Retrieval warning: {rag_err}")
+                _app_logger.debug(f"[RAG] Retrieval warning: {rag_err}")
 
             # === Regular Mode ===
             # 构建历史记录格式（过滤无关历史）
@@ -6812,7 +6826,7 @@ class KotoBrain:
                     # → 直接使用 gemini-2.5-flash（原生支持 generate_content + PDF bytes）
                     _doc_model = _INTERACTIONS_FALLBACK_MODEL
                     if model_id != _doc_model:
-                        print(
+                        _app_logger.info(
                             f"[brain.chat] 非图片文件 ({_fd_mime2}): 降级模型 {model_id} → {_doc_model}"
                         )
                         model_id = _doc_model
@@ -6836,7 +6850,7 @@ class KotoBrain:
                         if not accumulated_text:
                             raise ValueError("Interactions API 返回空响应")
                     except Exception as _ia_err:
-                        print(f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+                        _app_logger.info(f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}")
                         model_id = _INTERACTIONS_FALLBACK_MODEL
                         result["model"] = model_id
                         _fb_resp = client.models.generate_content(
@@ -6885,7 +6899,7 @@ class KotoBrain:
                         if not accumulated_text:
                             raise ValueError("Interactions API 返回空响应")
                     except Exception as _ia_err:
-                        print(
+                        _app_logger.info(
                             f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}"
                         )
                         model_id = _INTERACTIONS_FALLBACK_MODEL
@@ -6942,7 +6956,7 @@ class KotoBrain:
             err_str = str(e)
             # 自动降级：如果模型返回"只支持 Interactions API"错误，用 2.0-flash 重试一次
             if "Interactions API" in err_str and model_id not in (_INTERACTIONS_ONLY_MODELS | {_INTERACTIONS_FALLBACK_MODEL}):
-                print(f"[brain.chat] Interactions API 错误，自动降级 {model_id} → {_INTERACTIONS_FALLBACK_MODEL}")
+                _app_logger.info(f"[brain.chat] Interactions API 错误，自动降级 {model_id} → {_INTERACTIONS_FALLBACK_MODEL}")
                 try:
                     model_id = _INTERACTIONS_FALLBACK_MODEL
                     _fb = client.models.generate_content(
@@ -6992,7 +7006,7 @@ class KotoBrain:
                         _fbe.mark_unavailable(model_id)
                         _fb_model = _fbe.get_best_available(task_type=target_key)
                         if _fb_model and _fb_model != model_id and _fb_model not in _INTERACTIONS_ONLY_MODELS:
-                            print(f"[brain.chat] 模型不可用 {model_id} → 自动降级 {_fb_model} (task={target_key})")
+                            _app_logger.info(f"[brain.chat] 模型不可用 {model_id} → 自动降级 {_fb_model} (task={target_key})")
                             _fh = locals().get("formatted_history") or []
                             _mi = locals().get("model_input") or original_input
                             _si = locals().get("_brain_sys_instruction") or ""
@@ -7008,7 +7022,7 @@ class KotoBrain:
                             result["model"] = _fb_model
                             _retried = True
                 except Exception as _r_err:
-                    print(f"[brain.chat] 降级重试失败: {_r_err}")
+                    _app_logger.info(f"[brain.chat] 降级重试失败: {_r_err}")
                 if not _retried:
                     result["response"] = f"❌ 发生错误: {err_str}"
             result["total_time"] = time.time() - start_time
@@ -7216,10 +7230,10 @@ def chat_stream():
     locked_task = data.get("locked_task")
     locked_model = data.get("locked_model", "auto")
 
-    print(
+    _app_logger.debug(
         f"\n[STREAM] Incoming request: locked_task='{locked_task}', locked_model='{locked_model}'"
     )
-    print(f"[STREAM] User input: {user_input[:60]}")
+    _app_logger.debug(f"[STREAM] User input: {user_input[:60]}")
 
     if not session_name or not user_input:
 
@@ -7264,10 +7278,10 @@ def chat_stream():
                 user_input, full_hist, memory_context=_intent_memory_ctx
             )
             if rewritten_input and rewritten_input != user_input:
-                print(f"[STREAM] 🔄 意图重写: '{user_input}' -> '{rewritten_input}'")
+                _app_logger.debug(f"[STREAM] 🔄 意图重写: '{user_input}' -> '{rewritten_input}'")
                 user_input = rewritten_input
     except Exception as e:
-        print(f"[STREAM] ⚠️ 意图分析失败: {e}")
+        _app_logger.warning(f"[STREAM] ⚠️ 意图分析失败: {e}")
         # 降级到基础的正则匹配
         repeat_patterns = [
             r"^重复.*任务",
@@ -7290,10 +7304,10 @@ def chat_stream():
                             last_user_msg = content
                             break
                 if last_user_msg:
-                    print(f"[REPEAT] Found last user message: {last_user_msg[:50]}...")
+                    _app_logger.debug(f"[REPEAT] Found last user message: {last_user_msg[:50]}...")
                     user_input = last_user_msg
             except Exception as hist_e:
-                print(f"[REPEAT] Error fetching history: {hist_e}")
+                _app_logger.debug(f"[REPEAT] Error fetching history: {hist_e}")
 
     # ⚡ 快速路径：系统时间查询 - 直接返回，无需发送到LLM
     time_query_patterns = [
@@ -7332,7 +7346,7 @@ def chat_stream():
                     model_timestamp=timestamp,
                 )
             except Exception as e:
-                print(f"[STREAM] Quick time history save failed: {e}")
+                _app_logger.debug(f"[STREAM] Quick time history save failed: {e}")
 
             yield f"data: {json.dumps({'type': 'progress', 'message': '📅 系统时间查询', 'detail': '从本地获取'}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'token', 'content': response, 'timestamp': timestamp}, ensure_ascii=False)}\n\n"
@@ -7344,7 +7358,7 @@ def chat_stream():
     try:
         system_instruction = _get_chat_system_instruction(user_input)
     except Exception as e:
-        print(f"[STREAM] Warning: Dynamic system instruction failed: {e}")
+        _app_logger.debug(f"[STREAM] Warning: Dynamic system instruction failed: {e}")
         system_instruction = (
             _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION()
         )  # 降级到新鲜生成的指令
@@ -7368,7 +7382,7 @@ def chat_stream():
         if _cw_paged_context:
             system_instruction += f"\n\n{_cw_paged_context}"
     except Exception as _cw_err:
-        print(f"[CWM] ⚠️ 上下文管理器异常: {_cw_err}")
+        _app_logger.warning(f"[CWM] ⚠️ 上下文管理器异常: {_cw_err}")
 
     # 🕵️‍♀️ 检测是否有最近上传的文件 (5分钟内)
     has_recent_upload = False
@@ -7384,19 +7398,19 @@ def chat_stream():
                         has_recent_upload = True
                         _, ext = os.path.splitext(f)
                         recent_file_type = ext.lower()
-                        print(f"[STREAM] Found recent upload: {f} ({recent_file_type})")
+                        _app_logger.debug(f"[STREAM] Found recent upload: {f} ({recent_file_type})")
                         break
             if has_recent_upload:
                 break
     except Exception as e:
-        print(f"[STREAM] Error checking uploads: {e}")
+        _app_logger.debug(f"[STREAM] Error checking uploads: {e}")
 
     # 确定任务类型和模型
     context_info = None
     if locked_task:
         task_type = locked_task
         route_method = "🔒 Manual"
-        print(f"[STREAM] ✅ Using locked_task: '{task_type}'")
+        _app_logger.info(f"[STREAM] ✅ Using locked_task: '{task_type}'")
     else:
         # 将文件信息传递给分析器（同时注入 [FILE_ATTACHED:ext] 前缀确保本地模型正确分类）
         context_override = {
@@ -7406,11 +7420,11 @@ def chat_stream():
         _routing_input = user_input
         if has_recent_upload and recent_file_type:
             _routing_input = f"[FILE_ATTACHED:{recent_file_type}] {user_input}"
-            print(f"[STREAM] 📎 文件上下文注入: {_routing_input[:80]}")
+            _app_logger.debug(f"[STREAM] 📎 文件上下文注入: {_routing_input[:80]}")
         task_type, route_method, context_info = SmartDispatcher.analyze(
             _routing_input, history, file_context=context_override
         )
-        print(
+        _app_logger.debug(
             f"[STREAM] Auto-detected task_type: '{task_type}', context: {context_info is not None}"
         )
 
@@ -7432,7 +7446,7 @@ def chat_stream():
             "VISION",
         }
         if not task_type or task_type not in _HANDLED_TASK_TYPES:
-            print(f"[STREAM] ⚠️ 收到未知 task_type='{task_type}'，降级为 CHAT")
+            _app_logger.warning(f"[STREAM] ⚠️ 收到未知 task_type='{task_type}'，降级为 CHAT")
             task_type = "CHAT"
             route_method = "⬇️ Unknown→CHAT"
 
@@ -7440,7 +7454,7 @@ def chat_stream():
         if task_type == "MULTI_STEP" and (
             not context_info or not context_info.get("is_multi_step_task")
         ):
-            print(f"[STREAM] ⚠️ MULTI_STEP 无有效 context，降级为 CHAT")
+            _app_logger.warning(f"[STREAM] ⚠️ MULTI_STEP 无有效 context，降级为 CHAT")
             task_type = "CHAT"
             route_method = "⬇️ MULTI_STEP→CHAT"
 
@@ -7455,7 +7469,7 @@ def chat_stream():
                 user_input,
             )
             if not _fe_pat1 and not _fe_pat2:
-                print(
+                _app_logger.warning(
                     f"[STREAM] ⚠️ FILE_EDIT 输入无有效文件路径: '{user_input[:40]}' → 降级为 CHAT"
                 )
                 task_type = "CHAT"
@@ -7464,13 +7478,13 @@ def chat_stream():
         # ── CHAT → WEB_SEARCH 安全兜底（防止天气/股价/新闻等实时查询被误分为CHAT）────
         # 这是最后一道防线：在任务链路执行之前，重新校验是否需要联网搜索
         if task_type == "CHAT" and WebSearcher.needs_web_search(user_input):
-            print(f"[STREAM] ⚡ CHAT→WEB_SEARCH 安全兜底触发: '{user_input[:40]}'")
+            _app_logger.debug(f"[STREAM] ⚡ CHAT→WEB_SEARCH 安全兜底触发: '{user_input[:40]}'")
             task_type = "WEB_SEARCH"
             route_method = "🌐 CHAT→WEB_SEARCH"
 
         # 如果有上下文信息，记录详情
         if context_info and context_info.get("is_continuation"):
-            print(
+            _app_logger.debug(
                 f"[STREAM] Context continuation: {context_info.get('related_task')}, confidence: {context_info.get('confidence')}"
             )
 
@@ -7483,19 +7497,19 @@ def chat_stream():
 
         _router_decision = _LMRv2.classify_v2(user_input, hint=task_type, timeout=1.5)
         if _router_decision and _router_decision.skill_id:
-            print(
+            _app_logger.debug(
                 f"[STREAM] 🎯 RouterDecision skill_id={_router_decision.skill_id} "
                 f"forward_to_cloud={_router_decision.forward_to_cloud} "
                 f"confidence={_router_decision.confidence:.2f}"
             )
     except Exception as _rv2_err:
-        print(f"[STREAM] RouterDecision classify_v2 跳过: {_rv2_err}")
+        _app_logger.debug(f"[STREAM] RouterDecision classify_v2 跳过: {_rv2_err}")
 
     # ── 将任务专属补充指令追加到 system_instruction ────────────────────────
     _addendum = _TASK_SYSTEM_ADDENDUMS.get(task_type, "")
     if _addendum:
         system_instruction = system_instruction + _addendum
-        print(f"[STREAM] 📌 任务专属指令已注入: {task_type}")
+        _app_logger.debug(f"[STREAM] 📌 任务专属指令已注入: {task_type}")
 
     # ── 🔮 LangGraph 高级工作流路由（RESEARCH / FILE_GEN / MULTI_STEP）─────────
     # resolve_workflow() 检测用户意图，决定是否用 WorkflowEngine 替代旧路径
@@ -7504,9 +7518,9 @@ def chat_stream():
         try:
             _wf_route = SmartDispatcher.resolve_workflow(task_type, user_input)
             if _wf_route != "legacy":
-                print(f"[STREAM] 🔮 LangGraph 工作流路由: {_wf_route}")
+                _app_logger.debug(f"[STREAM] 🔮 LangGraph 工作流路由: {_wf_route}")
         except Exception as _wf_err:
-            print(f"[STREAM] resolve_workflow 跳过: {_wf_err}")
+            _app_logger.debug(f"[STREAM] resolve_workflow 跳过: {_wf_err}")
 
     if _wf_route in ("langgraph_research_doc", "langgraph_multi_agent_ppt"):
         _wf_name = (
@@ -7554,7 +7568,7 @@ def chat_stream():
             except Exception as _wf_ex:
                 import traceback
 
-                print(f"[LG_WORKFLOW] ❌ 工作流失败:\n{traceback.format_exc()}")
+                _app_logger.error(f"[LG_WORKFLOW] ❌ 工作流失败:\n{traceback.format_exc()}")
                 yield f"data: {json.dumps({'type': 'error', 'message': f'工作流执行失败: {str(_wf_ex)}'})}\n\n"
 
         return Response(generate_langgraph_workflow(), mimetype="text/event-stream")
@@ -7565,14 +7579,14 @@ def chat_stream():
         and context_info
         and context_info.get("is_multi_step_task")
     ):
-        print(f"[STREAM] 🔄 检测到复杂任务，使用 TaskOrchestrator 执行多步流程")
+        _app_logger.debug(f"[STREAM] 🔄 检测到复杂任务，使用 TaskOrchestrator 执行多步流程")
         multi_step_info = context_info.get("multi_step_info", {})
         pattern = multi_step_info.get("pattern", "unknown")
 
         # === 🤖 MultiAgent 高质量通路（LangGraph：研究→写作→审核→修订）===
         # 仅当 LangGraph 可用且路由决策为 langgraph_react（通用复杂任务）时触发
         if _wf_route == "langgraph_react":
-            print(
+            _app_logger.debug(
                 f"[STREAM] 🤖 MultiAgentOrchestrator 通路：RESEARCHER→WRITER→CRITIC→REVISE"
             )
             _ma_model = SmartDispatcher.get_model_for_task("MULTI_STEP")
@@ -7622,7 +7636,7 @@ def chat_stream():
                 except Exception as _ma_err:
                     import traceback as _tb
 
-                    print(
+                    _app_logger.error(
                         f"[MULTI_AGENT] ❌ MultiAgentOrchestrator 失败: {_tb.format_exc()}"
                     )
                     yield f"data: {json.dumps({'type': 'error', 'message': f'多Agent执行失败，请重试: {str(_ma_err)}'})}\n\n"
@@ -7631,7 +7645,7 @@ def chat_stream():
 
         # === 文档工作流执行 ===
         if pattern == "document_workflow" and DocumentWorkflowExecutor:
-            print(f"[STREAM] 📄 执行文档工作流")
+            _app_logger.debug(f"[STREAM] 📄 执行文档工作流")
 
             def generate_doc_workflow():
                 yield f"data: {json.dumps({'type': 'classification', 'task_type': 'DOC_WORKFLOW', 'pattern': 'document_workflow', 'route_method': route_method, 'message': '🎯 任务分类: 📄 文档工作流执行'})}\n\n"
@@ -7976,7 +7990,7 @@ def chat_stream():
                         )
                         final_result_text = fix_resp.text or final_result_text
                     except Exception as _fix_err:
-                        print(f"[MULTI_STEP] ⚠️ 自检修正失败: {_fix_err}")
+                        _app_logger.warning(f"[MULTI_STEP] ⚠️ 自检修正失败: {_fix_err}")
 
                 # LocalPlanner self_check
                 if use_local_planner:
@@ -8039,7 +8053,7 @@ def chat_stream():
                 session_manager.append_and_save(
                     f"{session_name}.json", user_input, _multi_summary
                 )
-                print(f"[MULTI_STEP] ✅ 对话历史已保存")
+                _app_logger.info(f"[MULTI_STEP] ✅ 对话历史已保存")
                 _start_memory_extraction(
                     user_input,
                     _multi_summary,
@@ -8048,13 +8062,13 @@ def chat_stream():
                     session_name=session_name,
                 )
             except Exception as save_err:
-                print(f"[MULTI_STEP] ⚠️ 保存对话历史失败: {save_err}")
+                _app_logger.warning(f"[MULTI_STEP] ⚠️ 保存对话历史失败: {save_err}")
 
         return Response(generate_multi_step(), mimetype="text/event-stream")
 
     # === Agent 任务执行（LangGraphAgent ReAct，降级到 UnifiedAgent）===
     if task_type == "AGENT":
-        print(f"[STREAM] 🤖 执行 Agent 任务 (LangGraphAgent ReAct)")
+        _app_logger.debug(f"[STREAM] 🤖 执行 Agent 任务 (LangGraphAgent ReAct)")
         # classify_v2 已识别出 skill_id，传给 Agent 实现 Skill 专属行为
         _agent_skill_id = _router_decision.skill_id if _router_decision else None
 
@@ -8107,7 +8121,7 @@ def chat_stream():
                     yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
 
             except Exception as _lg_err:
-                print(
+                _app_logger.debug(
                     f"[AGENT] LangGraphAgent 失败 ({_lg_err})，降级到 UnifiedAgent..."
                 )
                 _lg_ok = False
@@ -8140,7 +8154,7 @@ def chat_stream():
                 except Exception as e:
                     import traceback
 
-                    print(f"[AGENT] ❌ UnifiedAgent 也失败:\n{traceback.format_exc()}")
+                    _app_logger.error(f"[AGENT] ❌ UnifiedAgent 也失败:\n{traceback.format_exc()}")
                     yield f"data: {json.dumps({'type': 'error', 'message': f'Agent 执行失败: {str(e)}'})}\n\n"
                     return
 
@@ -8181,7 +8195,7 @@ def chat_stream():
         _complexity = (context_info or {}).get("complexity", "normal")
         model_id = SmartDispatcher.get_model_for_task(task_type, complexity=_complexity)
 
-    print(f"[STREAM] Final: task_type='{task_type}', model_id='{model_id}'\n")
+    _app_logger.debug(f"[STREAM] Final: task_type='{task_type}', model_id='{model_id}'\n")
 
     # 🎯 Skills 注入：将用户启用的 Skill 追加到 system_instruction
     try:
@@ -8189,7 +8203,7 @@ def chat_stream():
 
         _active_skills = SkillManager.get_active_skill_names(task_type=task_type)
         if _active_skills:
-            print(
+            _app_logger.debug(
                 f"[STREAM] 🎯 Active Skills ({task_type}): {', '.join(_active_skills)}"
             )
         # 意图绑定：技能未手动开启时，按输入内容临时激活匹配的技能
@@ -8215,7 +8229,7 @@ def chat_stream():
         except Exception:
             pass
         if _intent_temp_ids:
-            print(f"[STREAM] 🔗 Auto Skills: {', '.join(_intent_temp_ids)}")
+            _app_logger.debug(f"[STREAM] 🔗 Auto Skills: {', '.join(_intent_temp_ids)}")
         system_instruction = SkillManager.inject_into_prompt(
             system_instruction,
             task_type=task_type,
@@ -8223,7 +8237,7 @@ def chat_stream():
             temp_skill_ids=_intent_temp_ids,
         )
     except Exception as _sk_err:
-        print(f"[STREAM] ⚠️ Skills 注入失败: {_sk_err}")
+        _app_logger.warning(f"[STREAM] ⚠️ Skills 注入失败: {_sk_err}")
 
     # 📚 RAG 混合检索（向量 + BM25 + RRF 融合）
     # _rag_context_block: 配送给 generate()、RESEARCH 、ToT 等各路径
@@ -8244,11 +8258,11 @@ def chat_stream():
                     "\n## 📚 知识库参考内容（混合检索）\n" + _rag_context_block
                 )
                 system_instruction += _rag_sys_block
-                print(
+                _app_logger.debug(
                     f"[STREAM] 📚 混合RAG: {len(_rag_hits)} 片段，top_score={_rag_hits[0].get('score', 0):.3f}"
                 )
     except Exception as _rag_err:
-        print(f"[STREAM] ⚠️ RAG 注入跳过: {_rag_err}")
+        _app_logger.warning(f"[STREAM] ⚠️ RAG 注入跳过: {_rag_err}")
 
     # 🕸️ Graph RAG — entity-expanded triple retrieval
     try:
@@ -8260,7 +8274,7 @@ def chat_stream():
             system_instruction += (
                 "\n\n─────────────────────────────────────────" "\n" + _graph_ctx
             )
-            print(f"[STREAM] 🕸️ Graph RAG: 注入知识图谱关联事实")
+            _app_logger.debug(f"[STREAM] 🕸️ Graph RAG: 注入知识图谱关联事实")
     except Exception as _ge:
         pass
 
@@ -8268,7 +8282,7 @@ def chat_stream():
     _show_thinking = False
     try:
         _show_thinking = settings_manager.get("ai", "show_thinking") == True
-    except:
+    except Exception:
         pass
 
     def generate():
@@ -8391,7 +8405,7 @@ def chat_stream():
             and context_info.get("enhanced_input")
         ):
             effective_input = context_info["enhanced_input"]
-            print(f"[STREAM] Using enhanced input (length: {len(effective_input)})")
+            _app_logger.debug(f"[STREAM] Using enhanced input (length: {len(effective_input)})")
             yield f"data: {json.dumps({'type': 'info', 'message': '🔗 检测到延续任务，使用上下文增强'})}\n\n"
             t = yield_thinking(
                 f"检测到上下文延续，增强输入 ({len(effective_input)} 字符)",
@@ -8689,7 +8703,7 @@ def chat_stream():
 
                     _disk_scanner_ok = True
                 except Exception as _fse:
-                    print(f"[FILE_SEARCH] ⚠️ FileScanner 导入失败: {_fse}")
+                    _app_logger.warning(f"[FILE_SEARCH] ⚠️ FileScanner 导入失败: {_fse}")
                     _disk_scanner_ok = False
 
                 # 判断是否是全盘搜索意图
@@ -8835,7 +8849,7 @@ def chat_stream():
                                     response_text = f"❌ 归纳失败: {_summary.get('error', '未知错误')}"
                             except Exception as _oe:
                                 response_text = f"❌ 归纳异常: {str(_oe)}"
-                                print(
+                                _app_logger.debug(
                                     f"[FILE_SEARCH] FolderCatalogOrganizer 异常: {_oe}"
                                 )
                         elif _is_filter_intent:
@@ -9491,7 +9505,7 @@ def chat_stream():
                                 return
 
                         except Exception as _wfl_exc:
-                            print(
+                            _app_logger.warning(
                                 f"[FILE_SEARCH] ⚠️ 工作文件库搜索出错（降级到全盘扫描）: {_wfl_exc}"
                             )
                             # 继续走全盘扫描逻辑
@@ -9666,7 +9680,7 @@ def chat_stream():
                 )
                 if t:
                     yield t
-                print(f"[STREAM] 📄 执行 DOC_ANNOTATE 任务")
+                _app_logger.debug(f"[STREAM] 📄 执行 DOC_ANNOTATE 任务")
 
                 # 从请求中获取task_id，用于支持取消操作
                 task_id = request.json.get("task_id")
@@ -9725,7 +9739,7 @@ def chat_stream():
 
                         _dw_shutil.copy2(_dw_conv_path, _dw_conv_in_docs)
                         doc_path = _dw_conv_in_docs
-                        print(
+                        _app_logger.debug(
                             f"[DocWorkflow] 转换 {_dw_ext} → .docx 并复制到文档目录: {doc_path}"
                         )
                     except Exception as _dw_conv_err:
@@ -9877,7 +9891,7 @@ def chat_stream():
                     import traceback
 
                     error_detail = traceback.format_exc()
-                    print(f"[DOC_ANNOTATE] ❌ 失败:\n{error_detail}")
+                    _app_logger.error(f"[DOC_ANNOTATE] ❌ 失败:\n{error_detail}")
                     # 保存异常记录
                     session_manager.append_and_save(
                         f"{session_name}.json",
@@ -10028,7 +10042,7 @@ def chat_stream():
 
                         elif _stage == "error":
                             _errmsg = _evt.get("message", "未知错误")
-                            print(f"[ToT] ❌ 错误: {_errmsg}")
+                            _app_logger.error(f"[ToT] ❌ 错误: {_errmsg}")
                             yield f"data: {json.dumps({'type': 'progress', 'message': f'⚠️ Tree of Thought 遇到问题，切换至标准模式: {_errmsg[:100]}', 'detail': ''}, ensure_ascii=False)}\n\n"
                             _tot_enabled_fallback = True
                             _tot_final = ""
@@ -10052,14 +10066,14 @@ def chat_stream():
                         return
 
                     # ToT 失败 → 降级到下方标准 RESEARCH/FILE_GEN 逻辑
-                    print(f"[ToT] ⚠️ 未获得有效输出，降级至标准路径")
+                    _app_logger.warning(f"[ToT] ⚠️ 未获得有效输出，降级至标准路径")
 
                 except ImportError:
-                    print("[ToT] ⚠️ tree_of_thought 模块未找到，降级至标准路径")
+                    _app_logger.warning("[ToT] ⚠️ tree_of_thought 模块未找到，降级至标准路径")
                 except Exception as _tot_err:
                     import traceback as _ttb
 
-                    print(f"[ToT] ❌ 异常: {_ttb.format_exc()}")
+                    _app_logger.error(f"[ToT] ❌ 异常: {_ttb.format_exc()}")
                     yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ Tree of Thought 异常，切换至标准模式', 'detail': str(_tot_err)[:100]})}\n\n"
             # ──────────────────────────────────────────────────────────────────
 
@@ -10181,7 +10195,7 @@ def chat_stream():
                         ):  # 最多等待90秒
                             # 检查中断
                             if interrupted():
-                                print(f"[RESEARCH] 用户中断研究")
+                                _app_logger.debug(f"[RESEARCH] 用户中断研究")
                                 newline = "\n"
                                 interrupt_msg = f"{newline}{newline}⏹️ 研究已被用户中断"
                                 yield f"data: {json.dumps({'type': 'token', 'content': interrupt_msg})}{newline}{newline}"
@@ -10206,7 +10220,7 @@ def chat_stream():
                                 if chunk.text:
                                     if not first_chunk_received:
                                         first_chunk_received = True
-                                        print(
+                                        _app_logger.debug(
                                             f"[RESEARCH] 收到第一个响应块，耗时 {time.time() - start_time:.1f}s"
                                         )
 
@@ -10216,12 +10230,12 @@ def chat_stream():
 
                                     # 每50个chunk显示一次进度日志
                                     if chunk_count % 50 == 0:
-                                        print(
+                                        _app_logger.debug(
                                             f"[RESEARCH] 已生成 {chunk_count} 个chunk, {len(''.join(collected_text))} 字符"
                                         )
 
                     final_text = "".join(collected_text)
-                    print(f"[RESEARCH] ✅ 研究完成，共 {len(final_text)} 字符")
+                    _app_logger.info(f"[RESEARCH] ✅ 研究完成，共 {len(final_text)} 字符")
 
                     # 保存历史（基于磁盘完整历史追加）
                     session_manager.append_and_save(
@@ -10234,7 +10248,7 @@ def chat_stream():
 
                 except Exception as research_err:
                     error_msg = str(research_err)
-                    print(f"[RESEARCH] 错误: {error_msg}")
+                    _app_logger.debug(f"[RESEARCH] 错误: {error_msg}")
 
                     # 智能错误处理
                     if "503" in error_msg or "UNAVAILABLE" in error_msg:
@@ -10332,7 +10346,7 @@ def chat_stream():
                     and context_info.get("enhanced_input")
                 ):
                     image_prompt = context_info["enhanced_input"]
-                    print(f"[PAINTER] 使用上下文增强的prompt: {image_prompt[:100]}...")
+                    _app_logger.debug(f"[PAINTER] 使用上下文增强的prompt: {image_prompt[:100]}...")
                 else:
                     image_prompt = effective_input
 
@@ -10405,7 +10419,7 @@ def chat_stream():
                                 timed_out = True
                                 if not use_fallback:
                                     # Primary model timed out — switch to imagen
-                                    print(
+                                    _app_logger.debug(
                                         f"[PAINTER] Gemini 3.1 Flash Image 超时 ({int(attempt_elapsed)}s)，切换到 Imagen"
                                     )
                                     use_fallback = True
@@ -10464,7 +10478,7 @@ def chat_stream():
                                         ).replace("\\", "/")
                                         if ".." not in rel_path:
                                             images.append(rel_path)
-                                            print(
+                                            _app_logger.debug(
                                                 f"[PAINTER] Imagen 已保存: {rel_path}"
                                             )
                                         else:
@@ -10484,11 +10498,11 @@ def chat_stream():
                                                 fallback_filepath, WORKSPACE_DIR
                                             ).replace("\\", "/")
                                             images.append(fallback_rel)
-                                            print(
+                                            _app_logger.debug(
                                                 f"[PAINTER] Imagen 降级保存: {fallback_rel}"
                                             )
                                     except Exception as path_err:
-                                        print(f"[PAINTER] Path error: {path_err}")
+                                        _app_logger.debug(f"[PAINTER] Path error: {path_err}")
                         else:
                             if (
                                 response.candidates
@@ -10502,7 +10516,7 @@ def chat_stream():
                                         img_filename = Utils.save_image_part(part)
                                         if img_filename:
                                             images.append(img_filename)
-                                            print(
+                                            _app_logger.debug(
                                                 f"[PAINTER] Gemini 3.1 Flash Image 已保存: {img_filename}"
                                             )
 
@@ -10524,7 +10538,7 @@ def chat_stream():
                             )
 
                             total_time = time.time() - start_time
-                            print(f"[PAINTER] 发送图片列表: {images}")  # 调试
+                            _app_logger.debug(f"[PAINTER] 发送图片列表: {images}")  # 调试
                             yield f"data: {json.dumps({'type': 'done', 'images': images, 'saved_files': [], 'total_time': total_time})}\n\n"
                             return
                         else:
@@ -10539,7 +10553,7 @@ def chat_stream():
                         model_label = (
                             "Imagen" if use_fallback else "Gemini-3.1-Flash-Image"
                         )
-                        print(
+                        _app_logger.debug(
                             f"[PAINTER] {model_label} 尝试 {attempt+1} 失败 ({type(img_err).__name__}): {error_msg[:300]}"
                         )
 
@@ -10549,7 +10563,7 @@ def chat_stream():
                             and "safety" not in error_msg.lower()
                             and "blocked" not in error_msg.lower()
                         ):
-                            print(
+                            _app_logger.debug(
                                 f"[PAINTER] Gemini 3.1 Flash Image 失败，切换到 Imagen: {error_msg[:200]}"
                             )
                             use_fallback = True
@@ -10583,8 +10597,8 @@ def chat_stream():
                 )
                 if t:
                     yield t
-                print(f"[FILE_GEN] ===== Starting file generation =====")
-                print(
+                _app_logger.debug(f"[FILE_GEN] ===== Starting file generation =====")
+                _app_logger.debug(
                     f"[FILE_GEN] Model: {model_id}, User input: {user_input[:100]}..."
                 )
 
@@ -10619,7 +10633,7 @@ def chat_stream():
                         source_content = context_info["context_summary"][
                             "last_model_output"
                         ]
-                        print(
+                        _app_logger.debug(
                             f"[FILE_GEN] 直接转换模式，源内容长度: {len(source_content)}"
                         )
 
@@ -10663,11 +10677,11 @@ def chat_stream():
 
                         yield f"data: {json.dumps({'type': 'progress', 'message': '✅ 文档转换完成', 'detail': file_type, 'progress': 100, 'stage': 'complete'})}\n\n"
 
-                        print(f"[FILE_GEN] ✅ 直接转换成功: {rel_path}")
+                        _app_logger.info(f"[FILE_GEN] ✅ 直接转换成功: {rel_path}")
 
                     except Exception as convert_err:
                         error_msg = f"❌ 文档转换失败: {str(convert_err)}"
-                        print(f"[FILE_GEN] 转换错误: {convert_err}")
+                        _app_logger.debug(f"[FILE_GEN] 转换错误: {convert_err}")
                         yield f"data: {json.dumps({'type': 'token', 'content': error_msg})}\n\n"
 
                     # 保存历史（基于磁盘完整历史追加）
@@ -10699,13 +10713,13 @@ def chat_stream():
 
                 if is_ppt_request:
                     # =============== PPT 专用生成流程 ===============
-                    print(f"[FILE_GEN] 🎯 检测到 PPT 生成请求")
+                    _app_logger.debug(f"[FILE_GEN] 🎯 检测到 PPT 生成请求")
 
                     # ── 初始化智能反馈 ──
                     from web.smart_feedback import SmartFeedback
 
                     def _fb_emit(msg, detail=""):
-                        print(f"[SmartFB] {msg} | {detail}")
+                        _app_logger.debug(f"[SmartFB] {msg} | {detail}")
 
                     fb = SmartFeedback.for_ppt(user_input, emit=_fb_emit)
 
@@ -10736,9 +10750,9 @@ def chat_stream():
                                 user_input=user_input,
                                 theme="business",
                             )
-                            print(f"[FILE_GEN/PPT] 📋 创建编辑会话: {ppt_session_id}")
+                            _app_logger.info(f"[FILE_GEN/PPT] 📋 创建编辑会话: {ppt_session_id}")
                         except Exception as session_err:
-                            print(
+                            _app_logger.warning(
                                 f"[FILE_GEN/PPT] ⚠️ 会话创建异常（不影响生成）: {session_err}"
                             )
 
@@ -10784,25 +10798,25 @@ def chat_stream():
                                                 successful_results
                                             )
                                         )
-                                        print(
+                                        _app_logger.info(
                                             f"[FILE_GEN/PPT] ✅ 已解析 {len(successful_results)} 个文件, 总字数: {len(uploaded_file_context)}"
                                         )
                                         yield f"data: {json.dumps({'type': 'progress', 'message': f'✅ 已解析 {len(successful_results)} 个上传文件', 'detail': f'{len(uploaded_file_context)} 字内容'})}\n\n"
                                     else:
-                                        print(f"[FILE_GEN/PPT] ⚠️ 上传文件解析失败")
+                                        _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 上传文件解析失败")
                                         failed_reasons = [
                                             r.get("error", "未知错误")
                                             for r in parse_results
                                             if not r.get("success")
                                         ]
-                                        print(f"    原因: {', '.join(failed_reasons)}")
+                                        _app_logger.info(f"    原因: {', '.join(failed_reasons)}")
 
                             except ImportError:
-                                print(
+                                _app_logger.warning(
                                     f"[FILE_GEN/PPT] ⚠️ FileParser 模块未找到，跳过文件处理"
                                 )
                             except Exception as file_err:
-                                print(f"[FILE_GEN/PPT] ⚠️ 文件处理异常: {file_err}")
+                                _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 文件处理异常: {file_err}")
 
                         # ──────── Step 0.1: 智能判断是否需要联网搜索 ────────
                         search_context = ""
@@ -10826,7 +10840,7 @@ def chat_stream():
                             for pat in _time_topic_patterns:
                                 if _re.search(pat, user_input, _re.IGNORECASE):
                                     _needs_search = True
-                                    print(
+                                    _app_logger.info(
                                         f"[FILE_GEN/PPT] 🔍 话题时效性检测命中: {pat}"
                                     )
                                     break
@@ -10841,16 +10855,16 @@ def chat_stream():
                                     "response"
                                 ):
                                     search_context = search_result["response"]
-                                    print(
+                                    _app_logger.info(
                                         f"[FILE_GEN/PPT] ✅ 搜索完成, 获取 {len(search_context)} 字符参考信息"
                                     )
                                     yield _fb_sse(
                                         fb.search_done(char_count=len(search_context))
                                     )
                                 else:
-                                    print(f"[FILE_GEN/PPT] ⚠️ 搜索无结果或失败")
+                                    _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 搜索无结果或失败")
                             except Exception as search_err:
-                                print(f"[FILE_GEN/PPT] ⚠️ 搜索异常: {search_err}")
+                                _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 搜索异常: {search_err}")
 
                         # ──────── Step 0.5: 复杂主题深度研究 ────────
                         research_context = ""
@@ -10879,9 +10893,9 @@ def chat_stream():
                                         )
                                     )
                                 else:
-                                    print(f"[FILE_GEN/PPT] ⚠️ 深度研究未返回结果")
+                                    _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 深度研究未返回结果")
                             except Exception as res_err:
-                                print(f"[FILE_GEN/PPT] ⚠️ 深度研究异常: {res_err}")
+                                _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 深度研究异常: {res_err}")
 
                         # ──────── Step 1: 用 AI 生成结构化大纲 ────────
                         # ──── 提取用户 PPT 偏好（页数、重点、简要话题） ────
@@ -10938,7 +10952,7 @@ def chat_stream():
                                 + "\n"
                             )
 
-                        print(
+                        _app_logger.info(
                             f"[FILE_GEN/PPT] 用户偏好: 页数={_target_pages}, 重点={ppt_prefs['focus_topics']}, 简要={ppt_prefs['brief_topics']}"
                         )
 
@@ -11062,12 +11076,12 @@ def chat_stream():
                                 )
                                 if resp.text:
                                     outline_response = resp.text
-                                    print(
+                                    _app_logger.info(
                                         f"[FILE_GEN/PPT] ✅ 大纲生成成功 ({om}), 长度: {len(outline_response)}"
                                     )
                                     break
                             except Exception as oe:
-                                print(f"[FILE_GEN/PPT] 大纲模型 {om} 失败: {oe}")
+                                _app_logger.info(f"[FILE_GEN/PPT] 大纲模型 {om} 失败: {oe}")
                                 continue
 
                         if not outline_response:
@@ -11267,7 +11281,7 @@ def chat_stream():
                         slide_types_summary = ", ".join(
                             f'{s.get("type","detail")}' for s in ppt_data["slides"]
                         )
-                        print(
+                        _app_logger.info(
                             f"[FILE_GEN/PPT] 解析完成: 标题='{ppt_data['title']}', {slide_count} 页, 类型=[{slide_types_summary}]"
                         )
 
@@ -11299,7 +11313,7 @@ def chat_stream():
                                         "移除 Markdown 残留和 AI 对话痕迹",
                                     )
                                 )
-                                print(
+                                _app_logger.info(
                                     f"[FILE_GEN/PPT] 🧹 质量清洗: {len(_qg_fixes)} 处修复"
                                 )
 
@@ -11309,21 +11323,21 @@ def chat_stream():
                                     _qg_score, issues=_qg_issues, fixes=_qg_fixes
                                 )
                             )
-                            print(
+                            _app_logger.info(
                                 f"[FILE_GEN/PPT] 📊 质量评分: {_qg_score}/100, action={qg_result['action']}"
                             )
 
                             # 更新 slide_count（清洗可能移除空白 slide）
                             slide_count = len(ppt_data["slides"])
                         except Exception as qg_err:
-                            print(
+                            _app_logger.warning(
                                 f"[FILE_GEN/PPT] ⚠️ 质量门控异常（不影响生成）: {qg_err}"
                             )
 
                         # ──────── Step 2.1: 用户指定页数时调整幻灯片数量 ────────
                         _max_slides = _target_pages  # 只有用户明确指定时才生效
                         if _max_slides and slide_count > _max_slides:
-                            print(
+                            _app_logger.warning(
                                 f"[FILE_GEN/PPT] ⚠️ 页数超限 ({slide_count} > {_max_slides})，执行智能精简..."
                             )
                             yield _fb_sse(
@@ -11393,7 +11407,7 @@ def chat_stream():
 
                             ppt_data["slides"] = slides
                             slide_count = len(slides)
-                            print(f"[FILE_GEN/PPT] 精简后: {slide_count} 页")
+                            _app_logger.info(f"[FILE_GEN/PPT] 精简后: {slide_count} 页")
 
                         # 生成版式摘要
                         _type_map_display = {
@@ -11561,17 +11575,17 @@ def chat_stream():
 
                                     if _applied > 0:
                                         yield _fb_sse(fb.ppt_enriched(_applied))
-                                        print(
+                                        _app_logger.info(
                                             f"[FILE_GEN/PPT] ✅ 内容充实完成: {_applied}/{len(_thin_slides)} 页"
                                         )
                                     else:
-                                        print(
+                                        _app_logger.warning(
                                             f"[FILE_GEN/PPT] ⚠️ 内容充实解析成功但未应用"
                                         )
                                 else:
-                                    print(f"[FILE_GEN/PPT] ⚠️ 内容充实返回格式异常")
+                                    _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 内容充实返回格式异常")
                             except Exception as enrich_err:
-                                print(
+                                _app_logger.warning(
                                     f"[FILE_GEN/PPT] ⚠️ 内容充实异常（不影响生成）: {enrich_err}"
                                 )
 
@@ -11613,7 +11627,7 @@ def chat_stream():
                                 else:
                                     yield _fb_sse(fb.ppt_images_done(0))
                             except Exception as img_err:
-                                print(f"[FILE_GEN/PPT] ⚠️ 配图生成异常: {img_err}")
+                                _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 配图生成异常: {img_err}")
                                 yield _fb_sse(fb.warn("配图跳过，不影响PPT生成"))
 
                         # ──────── Step 3: 生成 PPT 文件(含逐页进度) ────────
@@ -11679,13 +11693,13 @@ def chat_stream():
                                         _pc_score, issues=_post_check["issues"]
                                     )
                                 )
-                                print(
+                                _app_logger.info(
                                     f"[FILE_GEN/PPT] 📊 文件后检: {_pc_score}/100, issues={_post_check['issues']}"
                                 )
                             else:
                                 yield _fb_sse(fb.info("✅ 文件质量验证通过"))
                         except Exception as pc_err:
-                            print(f"[FILE_GEN/PPT] ⚠️ 文件后检异常: {pc_err}")
+                            _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 文件后检异常: {pc_err}")
 
                         rel_path = os.path.relpath(ppt_path, WORKSPACE_DIR).replace(
                             "\\", "/"
@@ -11732,11 +11746,11 @@ def chat_stream():
                                     research_context=research_context,
                                     uploaded_file_context=uploaded_file_context,
                                 )
-                                print(
+                                _app_logger.info(
                                     f"[FILE_GEN/PPT] 💾 会话数据已保存，可用于后续编辑"
                                 )
                             except Exception as save_err:
-                                print(f"[FILE_GEN/PPT] ⚠️ 会话保存异常: {save_err}")
+                                _app_logger.warning(f"[FILE_GEN/PPT] ⚠️ 会话保存异常: {save_err}")
 
                         success_msg = (
                             f"✅ **PPT 演示文稿生成成功！**\n\n"
@@ -11751,10 +11765,10 @@ def chat_stream():
                             success_msg += f"\n\n🎨 **[点击编辑 PPT](/edit-ppt/{ppt_session_id})** - 修改内容、调整顺序、重新生成页面"
 
                         yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
-                        print(f"[FILE_GEN/PPT] ✅ PPT 生成成功: {rel_path}")
+                        _app_logger.info(f"[FILE_GEN/PPT] ✅ PPT 生成成功: {rel_path}")
 
                     except Exception as ppt_err:
-                        print(f"[FILE_GEN/PPT] ❌ PPT 生成失败: {ppt_err}")
+                        _app_logger.error(f"[FILE_GEN/PPT] ❌ PPT 生成失败: {ppt_err}")
                         import traceback
 
                         traceback.print_exc()
@@ -11782,7 +11796,7 @@ def chat_stream():
                     and context_info.get("enhanced_input")
                 ):
                     file_gen_input = context_info["enhanced_input"]
-                    print(
+                    _app_logger.debug(
                         f"[FILE_GEN] 使用上下文增强输入 (length: {len(file_gen_input)})"
                     )
                 else:
@@ -11820,14 +11834,14 @@ def chat_stream():
                         _search_res = WebSearcher.search_with_grounding(_q)
                         if _search_res.get("success") and _search_res.get("response"):
                             _web_context = _search_res.get("response", "")
-                            print(
+                            _app_logger.info(
                                 f"[FILE_GEN] ✅ 信息收集完成，长度: {len(_web_context)}"
                             )
                             yield f"data: {json.dumps({'type': 'progress', 'message': '✅ 信息收集完成', 'detail': f'已获取 {len(_web_context)} 字符参考信息'})}\n\n"
                         else:
-                            print(f"[FILE_GEN] ⚠️ 信息收集未返回结果")
+                            _app_logger.warning(f"[FILE_GEN] ⚠️ 信息收集未返回结果")
                     except Exception as _collect_err:
-                        print(f"[FILE_GEN] ⚠️ 信息收集异常: {_collect_err}")
+                        _app_logger.warning(f"[FILE_GEN] ⚠️ 信息收集异常: {_collect_err}")
 
                 # 将时间上下文/检索结果拼接进生成输入
                 _prepended_blocks = [_time_context_text]
@@ -11857,7 +11871,7 @@ def chat_stream():
                     # 使用 generate_content_stream 保持连接活跃，避免代理超时断开
                     _doc_type = "PDF" if "pdf" in user_input.lower() else "Word"
                     yield f"data: {json.dumps({'type': 'progress', 'message': f'📄 正在生成 {_doc_type} 文档...', 'detail': '请稍候，正在撰写内容'})}\n\n"
-                    print(
+                    _app_logger.debug(
                         f"[FILE_GEN] 📄 文档直出模式-流式 (type={_doc_type}, complex={_is_complex})"
                     )
 
@@ -11917,7 +11931,7 @@ def chat_stream():
                                 max_wait_first_token=120,  # 文档生成允许等待更久
                             ):
                                 if interrupted():
-                                    print(f"[FILE_GEN/DOC] 用户中断")
+                                    _app_logger.info(f"[FILE_GEN/DOC] 用户中断")
                                     _interrupt_msg = "\n\n⏹️ 文件生成已中断"
                                     yield f"data: {json.dumps({'type': 'token', 'content': _interrupt_msg})}\n\n"
                                     break
@@ -11931,7 +11945,7 @@ def chat_stream():
                                         yield f"data: {json.dumps({'type': 'progress', 'message': '🧠 模型正在组织内容...', 'detail': f'已等待 {_elapsed}s，请耐心等待', 'stage': 'api_calling'})}\n\n"
 
                                 elif item_type == "timeout":
-                                    print(
+                                    _app_logger.warning(
                                         f"[FILE_GEN/DOC] ⚠️ {current_model} 等待首token超时: {item_data}"
                                     )
                                     break  # 尝试下一个模型
@@ -11941,7 +11955,7 @@ def chat_stream():
                                     if chunk.text:
                                         if not _first_chunk:
                                             _first_chunk = True
-                                            print(
+                                            _app_logger.info(
                                                 f"[FILE_GEN/DOC] ✅ {current_model} 收到第一个响应块，耗时 {time.time() - start_time:.1f}s"
                                             )
                                         _doc_collected.append(chunk.text)
@@ -11955,7 +11969,7 @@ def chat_stream():
 
                         except Exception as _doc_err:
                             err_str = str(_doc_err)
-                            print(f"[FILE_GEN/DOC] ❌ {current_model}: {err_str[:200]}")
+                            _app_logger.error(f"[FILE_GEN/DOC] ❌ {current_model}: {err_str[:200]}")
                             if "location is not supported" in err_str.lower():
                                 response_text = "❌ 地区限制，请配置中转服务"
                                 break
@@ -11963,7 +11977,7 @@ def chat_stream():
 
                     response_text = "".join(_doc_collected)
                     if response_text:
-                        print(
+                        _app_logger.info(
                             f"[FILE_GEN/DOC] ✅ 流式生成完成，共 {len(response_text)} 字符"
                         )
 
@@ -11985,7 +11999,7 @@ def chat_stream():
                             _dq_emoji = "✅" if _doc_score >= 75 else "⚠️"
                             yield f"data: {json.dumps({'type': 'progress', 'message': f'{_dq_emoji} 文档质量检查: {_doc_score}/100', 'detail': '; '.join(_doc_qg['quality']['issues'][:2]) if _doc_qg['quality']['issues'] else '质量良好'})}\n\n"
                         except Exception as _dqg_err:
-                            print(f"[FILE_GEN/DOC] ⚠️ 质量门控异常: {_dqg_err}")
+                            _app_logger.warning(f"[FILE_GEN/DOC] ⚠️ 质量门控异常: {_dqg_err}")
 
                         # 直接保存文档
                         yield f"data: {json.dumps({'type': 'progress', 'message': f'📝 正在保存 {_doc_type} 文档...', 'detail': ''})}\n\n"
@@ -12018,12 +12032,12 @@ def chat_stream():
                             generated_files.append(rel_path)
                             success_msg = f"✅ **{_doc_type} 文档生成成功！**\n\n📁 文件: **{os.path.basename(saved_path)}**\n📍 位置: `{docs_dir}`"
                             yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
-                            print(f"[FILE_GEN/DOC] ✅ 文档已保存: {rel_path}")
+                            _app_logger.info(f"[FILE_GEN/DOC] ✅ 文档已保存: {rel_path}")
                         except Exception as doc_err:
                             import traceback
 
                             traceback.print_exc()
-                            print(f"[FILE_GEN/DOC] ❌ 文档保存失败: {doc_err}")
+                            _app_logger.error(f"[FILE_GEN/DOC] ❌ 文档保存失败: {doc_err}")
                             fallback_msg = (
                                 f"⚠️ 文档保存失败 ({doc_err})，以下是生成的内容：\n\n"
                             )
@@ -12038,7 +12052,7 @@ def chat_stream():
                         f"{session_name}.json", user_input, _gen_msg
                     )
                     total_time = time.time() - start_time
-                    print(
+                    _app_logger.info(
                         f"[FILE_GEN/DOC] ★★★ done event, files: {generated_files}, time: {total_time:.2f}s"
                     )
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': generated_files, 'total_time': total_time})}\n\n"
@@ -12071,7 +12085,7 @@ def chat_stream():
 
                     if model_attempt > 0:
                         yield f"data: {json.dumps({'type': 'progress', 'message': f'🔄 切换到备用模型 {current_model}...', 'detail': ''})}\n\n"
-                        print(f"[FILE_GEN] Trying fallback model: {current_model}")
+                        _app_logger.debug(f"[FILE_GEN] Trying fallback model: {current_model}")
                     else:
                         yield f"data: {json.dumps({'type': 'progress', 'message': f'🚀 正在调用 {current_model}...', 'detail': '生成中'})}\n\n"
 
@@ -12079,7 +12093,7 @@ def chat_stream():
 
                     def call_api(m=current_model):
                         try:
-                            print(f"[FILE_GEN] Calling API: {m}")
+                            _app_logger.debug(f"[FILE_GEN] Calling API: {m}")
                             response = client.models.generate_content(
                                 model=m,
                                 contents=file_gen_input,  # 使用上下文增强的输入
@@ -12089,9 +12103,9 @@ def chat_stream():
                                 ),
                             )
                             response_holder["data"] = response
-                            print(f"[FILE_GEN] ✅ API call successful with {m}")
+                            _app_logger.info(f"[FILE_GEN] ✅ API call successful with {m}")
                         except Exception as e:
-                            print(
+                            _app_logger.error(
                                 f"[FILE_GEN] ❌ API call exception with {m}: {type(e).__name__}: {str(e)}"
                             )
                             response_holder["error"] = e
@@ -12114,7 +12128,7 @@ def chat_stream():
                             yield f"data: {json.dumps({'type': 'progress', 'message': f'⏳ 正在生成中...', 'detail': f'已等待 {elapsed} 秒'})}\n\n"
 
                     if api_thread.is_alive():
-                        print(
+                        _app_logger.warning(
                             f"[FILE_GEN] ⚠️ API call timeout with {current_model} after {api_timeout}s"
                         )
                         yield f"data: {json.dumps({'type': 'progress', 'message': f'⚠️ {current_model} 响应超时', 'detail': '正在切换模型...'})}\n\n"
@@ -12122,7 +12136,7 @@ def chat_stream():
                         continue  # 尝试下一个模型
                     elif response_holder["error"]:
                         error_str = str(response_holder["error"])
-                        print(f"[FILE_GEN] API Error with {current_model}: {error_str}")
+                        _app_logger.debug(f"[FILE_GEN] API Error with {current_model}: {error_str}")
 
                         # 地区限制错误 - 直接失败，不重试
                         if (
@@ -12151,7 +12165,7 @@ def chat_stream():
                             for part in file_gen_response.candidates[0].content.parts:
                                 if hasattr(part, "text") and part.text:
                                     response_text += part.text
-                        print(f"[FILE_GEN] Response length: {len(response_text)}")
+                        _app_logger.debug(f"[FILE_GEN] Response length: {len(response_text)}")
                         if response_text:
                             break  # 成功获取响应
 
@@ -12175,7 +12189,7 @@ def chat_stream():
                         )
                         response_text = fix_resp.text or response_text
                     except Exception as fix_err:
-                        print(f"[FILE_GEN] 修正重试失败: {fix_err}")
+                        _app_logger.debug(f"[FILE_GEN] 修正重试失败: {fix_err}")
 
                 # 只显示简短的进度，不显示完整代码
                 if response_text and not response_text.startswith("❌"):
@@ -12195,7 +12209,7 @@ def chat_stream():
                         if matches:
                             _, code_content = matches[0]
                             code_content = code_content.strip()
-                            print(
+                            _app_logger.debug(
                                 f"[FILE_GEN] Extracted code, length: {len(code_content)}"
                             )
                             break
@@ -12206,7 +12220,7 @@ def chat_stream():
                         code_lower = code_content.lower()
                         # 如果提取的内容是 JSON 或 HTML 或其他格式，直接跳过代码执行
                         if code_lower.startswith(("{", "[", "<", '"')):
-                            print(
+                            _app_logger.debug(
                                 f"[FILE_GEN] Extracted content is not Python code (starts with {code_content[0]}), treating as text content"
                             )
                             code_content = None
@@ -12223,7 +12237,7 @@ def chat_stream():
                         with open(temp_script, "w", encoding="utf-8") as f:
                             f.write(code_content)
                         temp_scripts.append(temp_script)
-                        print(f"[FILE_GEN] Saved temp script: {temp_script}")
+                        _app_logger.debug(f"[FILE_GEN] Saved temp script: {temp_script}")
 
                         # 执行脚本
                         yield f"data: {json.dumps({'type': 'progress', 'message': '⚙️ 正在执行脚本生成文件...', 'detail': ''})}\n\n"
@@ -12271,9 +12285,9 @@ def chat_stream():
                                         else 0
                                     ),
                                 )
-                            print(f"[FILE_GEN] Script exit code: {result.returncode}")
-                            print(f"[FILE_GEN] Script stdout: {result.stdout}")
-                            print(f"[FILE_GEN] Script stderr: {result.stderr}")
+                            _app_logger.debug(f"[FILE_GEN] Script exit code: {result.returncode}")
+                            _app_logger.debug(f"[FILE_GEN] Script stdout: {result.stdout}")
+                            _app_logger.debug(f"[FILE_GEN] Script stderr: {result.stderr}")
 
                             if result.returncode == 0:
                                 # 检查生成的文件
@@ -12301,7 +12315,7 @@ def chat_stream():
                                                 ).replace("\\", "/")
                                                 if rel_path not in generated_files:
                                                     generated_files.append(rel_path)
-                                                    print(
+                                                    _app_logger.debug(
                                                         f"[FILE_GEN] Generated: {rel_path}"
                                                     )
 
@@ -12337,7 +12351,7 @@ def chat_stream():
                         except subprocess.TimeoutExpired:
                             yield f"data: {json.dumps({'type': 'token', 'content': '⚠️ 脚本执行超时（60秒）'})}\n\n"
                         except Exception as e:
-                            print(f"[FILE_GEN] Execution error: {e}")
+                            _app_logger.debug(f"[FILE_GEN] Execution error: {e}")
                             err_msg = "❌ 执行错误: " + str(e)
                             yield f"data: {json.dumps({'type': 'token', 'content': err_msg})}\n\n"
 
@@ -12346,10 +12360,8 @@ def chat_stream():
                             try:
                                 if os.path.exists(temp_file):
                                     os.remove(temp_file)
-                                    print(
-                                        f"[FILE_GEN] Deleted temp script: {temp_file}"
-                                    )
-                            except:
+                                    _app_logger.debug("Deleted temp script: %s", temp_file)
+                            except OSError:
                                 pass
                     else:
                         # 没有匹配到代码格式：直接把模型内容生成文档
@@ -12408,7 +12420,7 @@ def chat_stream():
                                         title = "_".join(valid_keywords[:3])
                                     else:
                                         title = f"Koto文档_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                                except:
+                                except Exception:
                                     title = f"Koto文档_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
                             user_lower = user_input.lower()
@@ -12432,7 +12444,7 @@ def chat_stream():
                             success_msg = f"✅ **{file_type} 文档生成成功！**\n\n📁 文件: **{os.path.basename(saved_path)}**\n📍 位置: `{docs_dir}`"
                             yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
                         except Exception as direct_err:
-                            print(f"[FILE_GEN] Direct save failed: {direct_err}")
+                            _app_logger.debug(f"[FILE_GEN] Direct save failed: {direct_err}")
                             # 回退展示原始响应
                             yield f"data: {json.dumps({'type': 'token', 'content': response_text})}\n\n"
                 else:
@@ -12450,7 +12462,7 @@ def chat_stream():
 
                 # 发送完成事件
                 total_time = time.time() - start_time
-                print(
+                _app_logger.debug(
                     f"[FILE_GEN] ★★★ Sending done event, generated_files: {generated_files}, total_time: {total_time:.2f}s"
                 )
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': generated_files, 'total_time': total_time})}\n\n"
@@ -12475,16 +12487,16 @@ def chat_stream():
 
                 _, err, timed_out = run_with_timeout(_summarize, 6)
                 if timed_out:
-                    print("[MEMORY] 摘要更新超时，已跳过")
+                    _app_logger.debug("[MEMORY] 摘要更新超时，已跳过")
                 elif err:
-                    print(f"[MEMORY] 摘要更新失败: {err}")
+                    _app_logger.debug(f"[MEMORY] 摘要更新失败: {err}")
 
             memory_context = _memory_manager.get_context_string(
                 user_input, session_name=session_name, history=full_history
             )
             if memory_context:
                 use_instruction += f"\n\n{memory_context}"
-                print(f"[MEMORY] 注入了 {len(memory_context)} 字符的记忆上下文")
+                _app_logger.debug(f"[MEMORY] 注入了 {len(memory_context)} 字符的记忆上下文")
                 t = yield_thinking(
                     f"从长期记忆中检索到 {len(memory_context)} 字符的相关上下文并注入",
                     "context",
@@ -12531,7 +12543,7 @@ def chat_stream():
                         system_instruction=_get_DEFAULT_CHAT_SYSTEM_INSTRUCTION(),
                     )
                     if local_stream is not None:
-                        print(
+                        _app_logger.debug(
                             f"[CHAT] ⚡ 使用本地模型快速响应: {LocalModelRouter._response_model}"
                         )
                         t = yield_thinking(
@@ -12550,7 +12562,7 @@ def chat_stream():
                                 yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
                             local_ok = bool(local_full_text.strip())
                         except Exception as local_err:
-                            print(f"[CHAT] 本地模型生成失败: {local_err}")
+                            _app_logger.debug(f"[CHAT] 本地模型生成失败: {local_err}")
 
                         if local_ok:
                             # 本地模型成功 → 保存并返回
@@ -12571,12 +12583,12 @@ def chat_stream():
                                     session_name=session_name,
                                 )
                             total_time = time.time() - start_time
-                            print(f"[CHAT] ⚡ 本地模型响应完成 ({total_time:.2f}s)")
+                            _app_logger.debug(f"[CHAT] ⚡ 本地模型响应完成 ({total_time:.2f}s)")
                             yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                             return
                         else:
                             # 本地模型失败 → 静默降级到云模型
-                            print(f"[CHAT] 本地模型输出为空，降级到云模型")
+                            _app_logger.debug(f"[CHAT] 本地模型输出为空，降级到云模型")
                             t = yield_thinking(
                                 f"本地模型输出为空，降级到云端模型 {model_id}",
                                 "model",
@@ -12693,7 +12705,7 @@ def chat_stream():
                 ):
                     # 检查中断标志
                     if _interrupt_manager.is_interrupted(session_name):
-                        print(f"[INTERRUPT] User interrupted at chunk {chunk_count}")
+                        _app_logger.debug(f"[INTERRUPT] User interrupted at chunk {chunk_count}")
                         interrupt_msg = "\n\n⏸️ 用户已中断"
                         yield f"data: {json.dumps({'type': 'token', 'content': interrupt_msg})}\n\n"
                         break
@@ -12777,7 +12789,7 @@ def chat_stream():
                         if chunk.text:
                             if not first_chunk_received:
                                 first_chunk_received = True
-                                print(
+                                _app_logger.debug(
                                     f"[CHAT] 收到第一个响应，耗时 {time.time() - start_time:.1f}s"
                                 )
                                 # 首包到达：最后一次机会刷出执行计划（等最多 0.5s）
@@ -12802,7 +12814,7 @@ def chat_stream():
 
             except Exception as stream_error:
                 error_str = str(stream_error)
-                print(f"[CHAT] Stream error: {error_str}")
+                _app_logger.debug(f"[CHAT] Stream error: {error_str}")
 
                 # 地区限制错误
                 if (
@@ -12931,7 +12943,7 @@ def chat_stream():
 
         except Exception as e:
             error_str = str(e)
-            print(f"[CHAT] Exception: {error_str}")
+            _app_logger.debug(f"[CHAT] Exception: {error_str}")
 
             # 地区限制错误
             if (
@@ -13036,7 +13048,7 @@ def chat_stream():
                         _sent_done = True
                 yield _chunk
         except Exception as _sg_err:
-            print(f"[STREAM] ⚠️ _safe_generate caught exception: {_sg_err}")
+            _app_logger.warning(f"[STREAM] ⚠️ _safe_generate caught exception: {_sg_err}")
             import traceback
 
             traceback.print_exc()
@@ -13045,7 +13057,7 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'token', 'content': _err_msg})}\n\n"
         finally:
             if not _sent_done:
-                print(
+                _app_logger.warning(
                     f"[STREAM] ⚠️ generate() 未发送 done 事件，触发兜底 done (task_type={task_type})"
                 )
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0, 'fallback_done': True})}\n\n"
@@ -13216,24 +13228,24 @@ def chat_with_file():
     files = request.files.getlist("file")
 
     # 🔍 调试日志
-    print(f"[FILE UPLOAD DEBUG] ========== 接收到文件上传请求 ==========")
-    print(f"[FILE UPLOAD DEBUG] request.files keys: {list(request.files.keys())}")
-    print(f"[FILE UPLOAD DEBUG] request.files.getlist('file'): {len(files)} 个文件")
+    _app_logger.info(f"[FILE UPLOAD DEBUG] ========== 接收到文件上传请求 ==========")
+    _app_logger.info(f"[FILE UPLOAD DEBUG] request.files keys: {list(request.files.keys())}")
+    _app_logger.info(f"[FILE UPLOAD DEBUG] request.files.getlist('file'): {len(files)} 个文件")
     for i, f in enumerate(files):
-        print(f"[FILE UPLOAD DEBUG]   {i+1}. {f.filename if f else 'None'}")
+        _app_logger.info(f"[FILE UPLOAD DEBUG]   {i+1}. {f.filename if f else 'None'}")
 
     if not files:
         single_file = request.files.get("file")
         if single_file:
             files = [single_file]
-            print(f"[FILE UPLOAD DEBUG] 使用单文件模式，文件: {single_file.filename}")
+            _app_logger.info(f"[FILE UPLOAD DEBUG] 使用单文件模式，文件: {single_file.filename}")
 
     locked_task = request.form.get("locked_task")
     locked_model = request.form.get("locked_model", "auto")
     stream_mode = request.form.get("stream", "").lower() in ("1", "true", "yes")
 
-    print(f"[FILE UPLOAD DEBUG] 最终 files 列表: {len(files)} 个文件")
-    print(f"[FILE UPLOAD DEBUG] 判断: len(files) > 1 = {len(files) > 1}")
+    _app_logger.info(f"[FILE UPLOAD DEBUG] 最终 files 列表: {len(files)} 个文件")
+    _app_logger.info(f"[FILE UPLOAD DEBUG] 判断: len(files) > 1 = {len(files) > 1}")
 
     if not session_name or not files:
         return jsonify({"error": "Missing session or file"}), 400
@@ -13246,7 +13258,7 @@ def chat_with_file():
         is_ppt_intent = any(kw in (user_input or "").lower() for kw in ppt_keywords)
 
         if is_ppt_intent:
-            print(f"[FILE UPLOAD] 检测到多文件 PPT 生成意图: {user_input}")
+            _app_logger.info(f"[FILE UPLOAD] 检测到多文件 PPT 生成意图: {user_input}")
 
             # 预先保存所有文件，避免在生成器中访问已关闭的 FileStorage
             saved_file_paths = []
@@ -13291,7 +13303,7 @@ def chat_with_file():
                             context_text += f"\n\n=== {filename} ===\n{content}\n"
 
                         except Exception as e:
-                            print(f"[PPT BATCH] 读取文件 {filename} 失败: {e}")
+                            _app_logger.info(f"[PPT BATCH] 读取文件 {filename} 失败: {e}")
                             context_text += (
                                 f"\n\n=== {filename} (Error) ===\n无法读取内容\n"
                             )
@@ -13429,15 +13441,15 @@ def chat_with_file():
                                     f"\n\n> 🤖 **Koto 思考**: {item['text']}\n"
                                 )
                                 yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
-                    except:
+                    except Exception:
                         pass
 
                     if run_state["error"]:
                         err = run_state["error"]
                         tb = run_state.get("traceback", "")
-                        print(f"[PPT BATCH] Background pipeline error: {err}")
+                        _app_logger.info(f"[PPT BATCH] Background pipeline error: {err}")
                         if tb:
-                            print(f"[PPT BATCH] Traceback: {tb[:800]}")
+                            _app_logger.info(f"[PPT BATCH] Traceback: {tb[:800]}")
                         raise Exception(f"PPT 管道异常: {err}")
 
                     ppt_result = run_state["result"] or {}
@@ -13450,9 +13462,9 @@ def chat_with_file():
                     if not ppt_result.get("success"):
                         err_detail = ppt_result.get("error", "未知错误")
                         tb = ppt_result.get("traceback", "")
-                        print(f"[PPT BATCH] Pipeline returned failure: {err_detail}")
+                        _app_logger.info(f"[PPT BATCH] Pipeline returned failure: {err_detail}")
                         if tb:
-                            print(f"[PPT BATCH] Traceback: {tb[:500]}")
+                            _app_logger.info(f"[PPT BATCH] Traceback: {tb[:500]}")
                         raise Exception(f"PPT 管道生成失败: {err_detail}")
 
                     if saved_path and os.path.exists(saved_path):
@@ -13470,7 +13482,7 @@ def chat_with_file():
                         raise Exception("PPT 文件生成失败，未返回路径")
 
                 except Exception as e:
-                    print(f"[PPT BATCH ERROR] {e}")
+                    _app_logger.info(f"[PPT BATCH ERROR] {e}")
                     import traceback
 
                     traceback.print_exc()
@@ -13535,9 +13547,9 @@ def chat_with_file():
 
                                 _kb = KnowledgeBase()
                                 res = _kb.add_content(content, meta)
-                                print(f"[KB] Auto-indexing completed: {res}")
+                                _app_logger.debug(f"[KB] Auto-indexing completed: {res}")
                             except Exception as e:
-                                print(f"[KB] Auto-indexing failed: {e}")
+                                _app_logger.debug(f"[KB] Auto-indexing failed: {e}")
 
                         import threading
 
@@ -13554,9 +13566,9 @@ def chat_with_file():
                             ),
                         )
                         _idx_thread.start()
-                        print(f"[KB] 已启动后台建库任务: {filename}")
+                        _app_logger.debug(f"[KB] 已启动后台建库任务: {filename}")
                 except Exception as _kb_err:
-                    print(f"[KB] Indexing trigger failed: {_kb_err}")
+                    _app_logger.debug(f"[KB] Indexing trigger failed: {_kb_err}")
 
                 # 1-B. 注册到 FileRegistry（统一文件元数据中心）
                 try:
@@ -13572,11 +13584,11 @@ def chat_with_file():
                                 session_id=_sid,
                                 extract_content=True,
                             )
-                            print(
+                            _app_logger.info(
                                 f"[FileRegistry] ✅ 已注册上传文件: {os.path.basename(_fpath)}"
                             )
                         except Exception as _re:
-                            print(f"[FileRegistry] ⚠️ 注册失败（非致命）: {_re}")
+                            _app_logger.warning(f"[FileRegistry] ⚠️ 注册失败（非致命）: {_re}")
 
                     import threading as _thr
 
@@ -13587,7 +13599,7 @@ def chat_with_file():
                     )
                     _reg_thread.start()
                 except Exception as _rge:
-                    print(f"[FileRegistry] ⚠️ 启动注册线程失败: {_rge}")
+                    _app_logger.warning(f"[FileRegistry] ⚠️ 启动注册线程失败: {_rge}")
 
                 # 2. Continue with standard chat formatting
                 formatted_message, file_data = _processor.format_result_for_chat(
@@ -13607,7 +13619,7 @@ def chat_with_file():
                         route_method = (
                             "🖼️ Image Edit" if is_edit else "👁️ Image Analysis"
                         )
-                        print(
+                        _app_logger.info(
                             f"[FILE UPLOAD] 图片任务直通路由: {task_type} (方法: {route_method})"
                         )
                     else:
@@ -13666,7 +13678,7 @@ def chat_with_file():
                             task_type, has_image=bool(file_data)
                         )
 
-                print(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
+                _app_logger.info(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
 
                 result = {
                     "task": task_type,
@@ -13679,12 +13691,12 @@ def chat_with_file():
 
                 # 纯归档模式：跳过AI内容分析，直接归档
                 if is_organize_only:
-                    print(f"[FILE UPLOAD] 纯归档模式: {filename}，跳过AI分析")
+                    _app_logger.info(f"[FILE UPLOAD] 纯归档模式: {filename}，跳过AI分析")
                     result["response"] = ""
                     result["task"] = "FILE_ORGANIZE"
                 elif task_type == "DOC_ANNOTATE":
                     # 批量/多文件模式下的标注：同步运行标注管道
-                    print(f"[FILE UPLOAD] 批量 DOC_ANNOTATE 模式: {filename}")
+                    _app_logger.info(f"[FILE UPLOAD] 批量 DOC_ANNOTATE 模式: {filename}")
                     try:
                         from web.document_feedback import DocumentFeedbackSystem
 
@@ -13709,7 +13721,7 @@ def chat_with_file():
                                 _bt_sh.copy2(_bt_conv, _bt_dest)
                                 _batch_filepath = _bt_dest
                             except Exception as _bt_err:
-                                print(f"[BATCH DOC_ANNOTATE] 转换失败: {_bt_err}")
+                                _app_logger.info(f"[BATCH DOC_ANNOTATE] 转换失败: {_bt_err}")
                         _batch_target = os.path.join(
                             _batch_docs_dir, os.path.basename(_batch_filepath)
                         )
@@ -13739,7 +13751,7 @@ def chat_with_file():
                     except Exception as _bt_exc:
                         result["response"] = f"❌ 批量标注异常: {_bt_exc}"
                 else:
-                    print(f"[FILE UPLOAD] 处理文件: {filename}, 使用 brain.chat")
+                    _app_logger.info(f"[FILE UPLOAD] 处理文件: {filename}, 使用 brain.chat")
                     brain_result = brain.chat(
                         history=history,
                         user_input=formatted_message,
@@ -13786,7 +13798,7 @@ def chat_with_file():
                                 "category": suggested_folder,
                                 "path": org_result.get("dest_file"),
                             }
-                            print(
+                            _app_logger.info(
                                 f"[FILE ORGANIZE] ✅ {filename} -> {suggested_folder}"
                             )
                         else:
@@ -13804,7 +13816,7 @@ def chat_with_file():
                         "success": False,
                         "message": f"⚠️ 归档异常: {str(e)}",
                     }
-                    print(f"[FILE ORGANIZE ERROR] {filename}: {e}")
+                    _app_logger.info(f"[FILE ORGANIZE ERROR] {filename}: {e}")
 
                 result["file_name"] = filename
                 result["organize"] = organize_info
@@ -14014,7 +14026,7 @@ def chat_with_file():
                 kw in (user_input or "").lower() for kw in _TRANSLATE_KWS
             )
             if _is_translate_request and locked_task != "DOC_ANNOTATE":
-                print(f"[DOCX TRANSLATE] 检测到翻译请求，启用格式保留翻译管道")
+                _app_logger.info(f"[DOCX TRANSLATE] 检测到翻译请求，启用格式保留翻译管道")
 
                 def generate_docx_translation():
                     try:
@@ -14075,7 +14087,7 @@ def chat_with_file():
                     except Exception as _te:
                         import traceback as _tb
 
-                        print(f"[DOCX TRANSLATE] ❌ 翻译异常: {_tb.format_exc()}")
+                        _app_logger.error(f"[DOCX TRANSLATE] ❌ 翻译异常: {_tb.format_exc()}")
                         yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 翻译出错: {str(_te)}'})}\n\n"
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
 
@@ -14132,7 +14144,7 @@ def chat_with_file():
             )
 
             if is_doc_processing_request and not force_annotation:
-                print(f"[INTELLIGENT ANALYZER] 检测到文档处理请求，启用智能分析引擎")
+                _app_logger.info(f"[INTELLIGENT ANALYZER] 检测到文档处理请求，启用智能分析引擎")
                 from web.intelligent_document_analyzer import (
                     create_intelligent_analyzer,
                 )
@@ -14193,7 +14205,7 @@ def chat_with_file():
                 )
                 task_type = "PAINTER" if is_edit else "VISION"
                 route_method = "🖼️ Image Edit" if is_edit else "👁️ Image Analysis"
-                print(
+                _app_logger.info(
                     f"[FILE UPLOAD] 图片任务直通路由: {task_type} (方法: {route_method})"
                 )
             else:
@@ -14220,7 +14232,7 @@ def chat_with_file():
                     # 用户明确要生成新文件，直接路由，无需模型分类
                     task_type = "FILE_GEN"
                     route_method = "📄 Explicit-Gen"
-                    print(
+                    _app_logger.info(
                         f"[FILE UPLOAD] 🎯 检测到明确文件生成请求，启用 FILE_GEN 模式"
                     )
                 else:
@@ -14236,7 +14248,7 @@ def chat_with_file():
                     )
                     task_type = task_analysis
 
-                print(
+                _app_logger.info(
                     f"[FILE UPLOAD] 智能路由选择任务类型: {task_type} (方法: {route_method})"
                 )
 
@@ -14266,9 +14278,9 @@ def chat_with_file():
         if model_to_use in _INTERACTIONS_ONLY_MODELS or str(model_to_use or "").startswith("deep-research-pro-preview"):
             _orig_model = model_to_use
             model_to_use = _INTERACTIONS_FALLBACK_MODEL
-            print(f"[FILE UPLOAD] ⚠️ {_orig_model} 是 interactions-only，文件分析降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+            _app_logger.warning(f"[FILE UPLOAD] ⚠️ {_orig_model} 是 interactions-only，文件分析降级到 {_INTERACTIONS_FALLBACK_MODEL}")
 
-        print(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
+        _app_logger.info(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
 
         # 安全兜底：locked_task 预设时 prefer_ppt 可能未定义
         if "prefer_ppt" not in locals():
@@ -14357,7 +14369,7 @@ def chat_with_file():
                             )
                             _loc_filename = _conv_basename
                             _loc_file_ext = ".docx"
-                            print(
+                            _app_logger.info(
                                 f"[DocConvert] ✅ 转换并复制到文档目录 → {_loc_target_path}"
                             )
                         else:
@@ -14605,7 +14617,7 @@ def chat_with_file():
 
         # 🎯 FILE_GEN + PPT 生成（P0 新增）
         elif task_type == "FILE_GEN" and prefer_ppt:
-            print(f"[FILE_GEN PPT] 开始 PPT 生成流程")
+            _app_logger.info(f"[FILE_GEN PPT] 开始 PPT 生成流程")
 
             # 第 1 步：使用 FileParser 提取结构化内容
             from web.file_parser import FileParser
@@ -14625,7 +14637,7 @@ def chat_with_file():
                 user_input=user_input,
                 theme="business",
             )
-            print(f"[FILE_GEN PPT] 创建会话: {ppt_session_id}")
+            _app_logger.info(f"[FILE_GEN PPT] 创建会话: {ppt_session_id}")
 
             # 第 3 步：保存文件内容到会话
             session_manager_ppt.save_generation_data(
@@ -14634,7 +14646,7 @@ def chat_with_file():
                 ppt_file_path=None,
                 uploaded_file_context=file_content[:3000],  # 将内容限制为前3000字符
             )
-            print(f"[FILE_GEN PPT] 文件内容已保存到会话")
+            _app_logger.info(f"[FILE_GEN PPT] 文件内容已保存到会话")
 
             # 使用流式响应（Streamed Response）以支持实时进度显示
             def generate_ppt_file_stream():
@@ -14808,7 +14820,7 @@ def chat_with_file():
                     # 通用拦截：interactions-only 模型不支持 generate_content_stream
                     # 覆盖所有情况（包括文本嵌入模式，不仅是 binary doc）
                     if _stream_model in _INTERACTIONS_ONLY_MODELS or str(_stream_model).startswith("deep-research-pro-preview"):
-                        print(f"[FILE STREAM] ⚠️ {_stream_model} 是 interactions-only，降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+                        _app_logger.warning(f"[FILE STREAM] ⚠️ {_stream_model} 是 interactions-only，降级到 {_INTERACTIONS_FALLBACK_MODEL}")
                         _stream_model = _INTERACTIONS_FALLBACK_MODEL
 
                     _has_binary_doc = (
@@ -14824,11 +14836,11 @@ def chat_with_file():
                                 mime_type=file_data.get("mime_type", "application/pdf"),
                             )
                             _stream_contents = [formatted_message, _doc_part]
-                            print(
+                            _app_logger.info(
                                 f"[FILE STREAM] 📄 Binary-Doc-Read: model={_stream_model}, bytes={len(file_data['data'])}"
                             )
                         except Exception as _bp_err:
-                            print(
+                            _app_logger.warning(
                                 f"[FILE STREAM] ⚠️ 无法创建 doc_part，回退到文本模式: {_bp_err}"
                             )
                             _stream_contents = formatted_message
@@ -14884,7 +14896,7 @@ def chat_with_file():
                                 "\\", "/"
                             )
                             _saved_files.append(_docx_rel)
-                            print(f"[FILE UPLOAD] ✅ 分析已保存 DOCX: {_docx_rel}")
+                            _app_logger.info(f"[FILE UPLOAD] ✅ 分析已保存 DOCX: {_docx_rel}")
                             # 按需同时保存 PDF
                             if any(
                                 kw in (user_input or "").lower()
@@ -14904,7 +14916,7 @@ def chat_with_file():
                                 except Exception:
                                     pass
                         except Exception as _de:
-                            print(f"[FILE UPLOAD] ⚠️ 保存 DOCX 失败: {_de}")
+                            _app_logger.warning(f"[FILE UPLOAD] ⚠️ 保存 DOCX 失败: {_de}")
 
                     session_manager.update_last_model_response(
                         f"{session_name}.json",
@@ -14980,9 +14992,9 @@ def chat_with_file():
                                 "\\", "/"
                             )
                             _saved_files.append(_docx_rel)
-                            print(f"[FILE UPLOAD] ✅ 视觉分析已保存 DOCX: {_docx_rel}")
+                            _app_logger.info(f"[FILE UPLOAD] ✅ 视觉分析已保存 DOCX: {_docx_rel}")
                         except Exception as _de:
-                            print(f"[FILE UPLOAD] ⚠️ 视觉 DOCX 保存失败: {_de}")
+                            _app_logger.warning(f"[FILE UPLOAD] ⚠️ 视觉 DOCX 保存失败: {_de}")
 
                     session_manager.update_last_model_response(
                         f"{session_name}.json",
@@ -15015,7 +15027,7 @@ def chat_with_file():
         import traceback
 
         error_detail = traceback.format_exc()
-        print(f"[FILE UPLOAD ERROR] {error_detail}")
+        _app_logger.info(f"[FILE UPLOAD ERROR] {error_detail}")
 
         error_response = f"❌ 处理文件时出错: {str(e)}"
         session_manager.update_last_model_response(
@@ -15076,7 +15088,7 @@ def download_ppt():
         )
 
     except Exception as e:
-        print(f"[PPT DOWNLOAD] 错误: {e}")
+        _app_logger.info(f"[PPT DOWNLOAD] 错误: {e}")
         return jsonify({"error": f"Download failed: {str(e)}"}), 500
 
 
@@ -15108,62 +15120,8 @@ def get_ppt_session(session_id):
         )
 
     except Exception as e:
-        print(f"[PPT SESSION] 错误: {e}")
+        _app_logger.info(f"[PPT SESSION] 错误: {e}")
         return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/ping", methods=["GET"])
-def ping():
-    """Check connectivity and LLM API reachability.
-    ---
-    tags: [Health]
-    responses:
-      200:
-        description: LLM API reachable
-        schema:
-          properties:
-            status: {type: string, example: ok}
-            latency: {type: number, description: LLM API roundtrip ms}
-            ollama: {type: boolean}
-            version: {type: string}
-      200:
-        description: LLM API unreachable
-        schema:
-          properties:
-            status: {type: string, example: error}
-            error: {type: string}
-    """
-    start = time.time()
-    try:
-        client.models.get(model=MODEL_MAP["CHAT"])
-        latency = (time.time() - start) * 1000
-        return jsonify(
-            {
-                "status": "ok",
-                "latency": latency,
-                "ollama": LocalDispatcher.is_ollama_running(),
-                "version": APP_VERSION,
-            }
-        )
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)})
-
-
-@app.route("/api/health", methods=["GET"])
-def health():
-    """Lightweight health check (no model call).
-    ---
-    tags: [Health]
-    responses:
-      200:
-        description: App is healthy
-        schema:
-          properties:
-            status: {type: string, example: ok}
-            time: {type: number, description: Unix timestamp}
-            version: {type: string}
-    """
-    return jsonify({"status": "ok", "time": time.time(), "version": APP_VERSION})
 
 
 @app.route("/api/info", methods=["GET"])
@@ -15265,7 +15223,7 @@ def api_refresh_models():
             from app.core.llm.model_fallback import get_fallback_executor
             get_fallback_executor().update_model_map(MODEL_MAP)
         except Exception as _fe:
-            print(f"[ModelRefresh] ⚠️ FallbackExecutor sync failed: {_fe}")
+            _app_logger.warning(f"[ModelRefresh] ⚠️ FallbackExecutor sync failed: {_fe}")
         # 同步更新 AIRouter 轻量路由模型
         try:
             from app.core.routing.ai_router import AIRouter
@@ -15280,7 +15238,7 @@ def api_refresh_models():
                 _best = max(_candidates, key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1)[0]
                 AIRouter.set_router_model(_best)
         except Exception as _are:
-            print(f"[ModelRefresh] ⚠️ AIRouter update failed: {_are}")
+            _app_logger.warning(f"[ModelRefresh] ⚠️ AIRouter update failed: {_are}")
         return jsonify({
             "status":    "ok",
             "model_map": _model_manager.get_model_map_with_scores(),
@@ -15369,7 +15327,7 @@ def analyze_task():
 @app.route("/api/workspace/<path:filepath>")
 def get_workspace_file(filepath):
     """获取 workspace 中的文件，支持子目录"""
-    print(f"[API] Serving workspace file: {filepath}")
+    _app_logger.debug(f"[API] Serving workspace file: {filepath}")
     full_path = os.path.join(WORKSPACE_DIR, filepath)
 
     # 安全检查：确保请求的路径在 WORKSPACE_DIR 下
@@ -15377,19 +15335,19 @@ def get_workspace_file(filepath):
         resolved_path = os.path.abspath(full_path)
         resolved_workspace = os.path.abspath(WORKSPACE_DIR)
         if not resolved_path.startswith(resolved_workspace):
-            print(
+            _app_logger.debug(
                 f"[API] Security violation: {resolved_path} not under {resolved_workspace}"
             )
             return jsonify({"error": "Access denied"}), 403
 
         if not os.path.exists(resolved_path):
-            print(f"[API] File not found: {resolved_path}")
+            _app_logger.debug(f"[API] File not found: {resolved_path}")
             return jsonify({"error": "File not found"}), 404
 
-        print(f"[API] Serving: {resolved_path}")
+        _app_logger.debug(f"[API] Serving: {resolved_path}")
         return send_from_directory(WORKSPACE_DIR, filepath)
     except Exception as e:
-        print(f"[API] Error serving {filepath}: {e}")
+        _app_logger.debug(f"[API] Error serving {filepath}: {e}")
         import traceback
 
         traceback.print_exc()
@@ -15441,7 +15399,7 @@ def open_file_native():
         if not os.path.exists(resolved_path):
             return jsonify({"success": False, "error": "File not found"}), 404
 
-        print(f"[API] Opening file natively: {resolved_path}")
+        _app_logger.debug(f"[API] Opening file natively: {resolved_path}")
         if sys.platform == "win32":
             os.startfile(resolved_path)
         elif sys.platform == "darwin":
@@ -15451,7 +15409,7 @@ def open_file_native():
 
         return jsonify({"success": True, "path": resolved_path})
     except Exception as e:
-        print(f"[API] Error opening file: {e}")
+        _app_logger.debug(f"[API] Error opening file: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -15526,7 +15484,7 @@ def local_model_setup():
             _client = None
             _client_mode_key = (None, None)
         except Exception as e:
-            print(f"[LocalModel] 安装向导失败: {e}")
+            _app_logger.debug(f"[LocalModel] 安装向导失败: {e}")
 
     import threading as _threading
 
@@ -15713,7 +15671,7 @@ def mini_chat():
 
     # 🎯 使用 SmartDispatcher 进行任务分析（与完整版相同）
     task_type, route_method, context_info = SmartDispatcher.analyze(user_input, history)
-    print(
+    _app_logger.debug(
         f"[MINI_CHAT] SmartDispatcher 分析结果: task_type='{task_type}', method='{route_method}'"
     )
 
@@ -15726,7 +15684,7 @@ def mini_chat():
 
         if task_type == "WEB_SEARCH":
             # 🌐 网络搜索 - 使用 Gemini Google Search Grounding
-            print(f"[MINI_CHAT] 🌐 执行网络搜索...")
+            _app_logger.debug(f"[MINI_CHAT] 🌐 执行网络搜索...")
             _mini_skill_prompt = (context_info or {}).get("skill_prompt")
             search_result = WebSearcher.search_with_grounding(
                 user_input, skill_prompt=_mini_skill_prompt
@@ -15740,7 +15698,7 @@ def mini_chat():
                 or Utils.is_failure_output(response_text)
                 or "搜索失败" in response_text
             ):
-                print(f"[MINI_CHAT] ⚠️ 初次搜索失败，尝试修正查询...")
+                _app_logger.warning(f"[MINI_CHAT] ⚠️ 初次搜索失败，尝试修正查询...")
                 fix_query_prompt = (
                     "请把用户需求改写成更适合搜索的简短关键词或查询语句，只输出查询语句。\n"
                     f"用户需求: {user_input}"
@@ -15754,11 +15712,11 @@ def mini_chat():
                         ),
                     )
                     fixed_query = (fix_query_resp.text or user_input).strip()
-                    print(f"[MINI_CHAT] 修正后的查询: {fixed_query}")
+                    _app_logger.debug(f"[MINI_CHAT] 修正后的查询: {fixed_query}")
                     search_result = WebSearcher.search_with_grounding(fixed_query)
                     response_text = search_result.get("response", "")
                 except Exception as e:
-                    print(f"[MINI_CHAT] 修正查询失败: {e}")
+                    _app_logger.debug(f"[MINI_CHAT] 修正查询失败: {e}")
 
             if not response_text or Utils.is_failure_output(response_text):
                 is_error = True
@@ -15766,7 +15724,7 @@ def mini_chat():
 
         elif task_type == "SYSTEM":
             # 🖥️ 系统命令 - 本地执行
-            print(f"[MINI_CHAT] 🖥️ 执行系统命令：{user_input}")
+            _app_logger.debug(f"[MINI_CHAT] 🖥️ 执行系统命令：{user_input}")
             try:
                 exec_result = LocalExecutor.execute(user_input)
                 response_text = exec_result.get("message", "命令执行失败")
@@ -15777,7 +15735,7 @@ def mini_chat():
 
                 # 如果执行失败，尝试用 AI 修正
                 if is_error or Utils.is_failure_output(response_text):
-                    print(f"[MINI_CHAT] ⚠️ 本地执行失败，尝试 AI 修正...")
+                    _app_logger.warning(f"[MINI_CHAT] ⚠️ 本地执行失败，尝试 AI 修正...")
                     fix_prompt = Utils.build_fix_prompt(
                         "SYSTEM", user_input, response_text
                     )
@@ -15795,16 +15753,16 @@ def mini_chat():
                         used_model = "gemini-2.5-flash (fallback)"
                         is_error = False
                     except Exception as e:
-                        print(f"[MINI_CHAT] AI 修正失败: {e}")
+                        _app_logger.debug(f"[MINI_CHAT] AI 修正失败: {e}")
             except Exception as e:
-                print(f"[MINI_CHAT] ❌ 系统命令执行出错: {e}")
+                _app_logger.error(f"[MINI_CHAT] ❌ 系统命令执行出错: {e}")
                 response_text = f"系统命令执行出错：{str(e)}"
                 used_model = "LocalExecutor"
                 is_error = True
 
         else:
             # 💬 其他任务（CHAT, RESEARCH, CODER 等）- 使用 brain.chat()
-            print(f"[MINI_CHAT] 💬 执行 {task_type} 任务...")
+            _app_logger.debug(f"[MINI_CHAT] 💬 执行 {task_type} 任务...")
             model = MODEL_MAP.get(task_type, MODEL_MAP["CHAT"])
             result = brain.chat(
                 history, user_input, model=model, auto_model=False, task_type=task_type
@@ -15815,7 +15773,7 @@ def mini_chat():
 
             # 如果遇到 404 错误，尝试备用模型
             if is_error and "404" in response_text:
-                print(f"[MINI_CHAT] ⚠️ 模型 404，尝试备用模型...")
+                _app_logger.warning(f"[MINI_CHAT] ⚠️ 模型 404，尝试备用模型...")
                 for fallback_model in ["gemini-2.5-flash", "gemini-3-flash-preview"]:
                     try:
                         result = brain.chat(
@@ -15830,7 +15788,7 @@ def mini_chat():
                         continue
 
     except Exception as e:
-        print(f"[MINI_CHAT] ❌ 执行出错: {e}")
+        _app_logger.error(f"[MINI_CHAT] ❌ 执行出错: {e}")
         is_error = True
         response_text = f"Error: {str(e)}"
 
@@ -15840,7 +15798,7 @@ def mini_chat():
             f"{session_name}.json", user_input, response_text
         )
 
-    print(
+    _app_logger.info(
         f"[MINI_CHAT] ✅ 完成: task_type={task_type}, model={used_model}, success={not is_error}"
     )
 
@@ -16090,9 +16048,9 @@ def interrupt_chat():
             from task_scheduler import get_task_scheduler
 
             get_task_scheduler().cancel_task(task_id)
-            print(f"[INTERRUPT] Cancel task_id={task_id}")
+            _app_logger.debug(f"[INTERRUPT] Cancel task_id={task_id}")
         except Exception as e:
-            print(f"[INTERRUPT] cancel task failed: {e}")
+            _app_logger.debug(f"[INTERRUPT] cancel task failed: {e}")
 
     # 同步中断标志到 AgentLoop（如果正在执行 Agent 任务）
     # NOTE: Legacy agent_loop retired — interrupt handled by _interrupt_manager above
@@ -16719,7 +16677,7 @@ def voice_gemini_stt():
                 {"success": False, "text": "", "message": "录音太短，请重新说话"}
             )
 
-        print(f"[STT] 收到音频 {len(audio_bytes)/1024:.1f}KB  MIME={mime_type}")
+        _app_logger.debug(f"[STT] 收到音频 {len(audio_bytes)/1024:.1f}KB  MIME={mime_type}")
 
         # ── 优先尝试本地 Whisper ──────────────────────────────────────────────
         try:
@@ -16746,7 +16704,7 @@ def voice_gemini_stt():
                     }
                 )
         except Exception as _le:
-            print(f"[STT] 本地 STT 异常，回退 Gemini: {_le}")
+            _app_logger.debug(f"[STT] 本地 STT 异常，回退 Gemini: {_le}")
 
         # ── 回退：Gemini STT ──────────────────────────────────────────────────
         if client is None:
@@ -16785,7 +16743,7 @@ def voice_gemini_stt():
             if text.startswith(prefix):
                 text = text[len(prefix) :].strip()
 
-        print(f"[STT] Gemini 识别结果: {text[:80]!r}")
+        _app_logger.debug(f"[STT] Gemini 识别结果: {text[:80]!r}")
         return jsonify(
             {
                 "success": bool(text),
@@ -17188,16 +17146,16 @@ def document_smart_process():
         # 智能判断应该用哪个系统
         use_annotation = _should_use_annotation_system(requirement)
 
-        print(f"[SmartProcess] 智能判断: use_annotation={use_annotation}")
-        print(f"[SmartProcess] 需求: {requirement[:100]}")
+        _app_logger.debug(f"[SmartProcess] 智能判断: use_annotation={use_annotation}")
+        _app_logger.debug(f"[SmartProcess] 需求: {requirement[:100]}")
 
         if use_annotation:
             # 使用文档标注系统
-            print(f"[SmartProcess] 路由到: 文档自动标注系统")
+            _app_logger.debug(f"[SmartProcess] 路由到: 文档自动标注系统")
             return _call_document_annotate(file_path, requirement)
         else:
             # 使用传统的文件分析系统
-            print(f"[SmartProcess] 路由到: 文件分析系统")
+            _app_logger.debug(f"[SmartProcess] 路由到: 文件分析系统")
             return _call_document_analysis(file_path, requirement)
 
     except Exception as e:
@@ -18269,7 +18227,7 @@ def notebook_overview():
             return jsonify({"success": False, "error": "音频合成失败"}), 500
 
     except Exception as e:
-        print(f"Error processing audio overview: {e}")
+        _app_logger.error(f"Error processing audio overview: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -18378,7 +18336,7 @@ def notebook_upload():
         # Cleanup
         try:
             os.remove(temp_path)
-        except:
+        except OSError:
             pass
 
         if result.get("success"):
@@ -18695,7 +18653,7 @@ def get_trigger_system():
         try:
             _trigger_system_cache["system"].start_monitoring(check_interval=300)
         except Exception as _tse:
-            print(f"[TriggerSystem] ⚠️ start_monitoring 失败（非致命）: {_tse}")
+            _app_logger.warning(f"[TriggerSystem] ⚠️ start_monitoring 失败（非致命）: {_tse}")
     return _trigger_system_cache["system"]
 
 
@@ -20289,7 +20247,7 @@ except ImportError:
 
         register_memory_routes(app, get_memory_manager)
     except ImportError:
-        print("⚠️  增强记忆系统API未找到，使用基础功能")
+        _app_logger.warning("⚠️  增强记忆系统API未找到，使用基础功能")
 
 
 # ═══ 自动归纳调度器 API ═══
@@ -20698,7 +20656,7 @@ def api_response_rate():
             ai_response=ai_response,
         )
     except Exception as e:
-        print(f"[ResponseRate] ⚠️ RatingStore 保存失败: {e}")
+        _app_logger.warning(f"[ResponseRate] ⚠️ RatingStore 保存失败: {e}")
 
     # ── 2. 高评分（≥4 星）→ ShadowTracer 记录优质样本，推进飞轮 ──────────────
     trace_id = None
@@ -20715,11 +20673,11 @@ def api_response_rate():
                 model_used="",
                 metadata={"stars": stars, "comment": comment, "source": "user_rating"},
             )
-            print(
+            _app_logger.debug(
                 f"[ResponseRate] ⭐ {stars}星 → ShadowTracer 记录 trace_id={trace_id}"
             )
         except Exception as e:
-            print(f"[ResponseRate] ⚠️ ShadowTracer 记录失败: {e}")
+            _app_logger.warning(f"[ResponseRate] ⚠️ ShadowTracer 记录失败: {e}")
 
     return jsonify({
         "success": True,
