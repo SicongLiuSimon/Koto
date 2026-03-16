@@ -388,13 +388,29 @@ class UnifiedAgent(Agent):
                     logger.debug("[UnifiedAgent] executor_tools 过滤跳过: %s", _ste)
 
             try:
-                response = self.llm.generate_content(
-                    prompt=current_history,
-                    model=self.model_id,
-                    system_instruction=_effective_instruction,
-                    tools=tools_def if tools_def else None,
-                    stream=False
-                )
+                # 使用 ModelFallbackExecutor：首选 self.model_id，失败时自动降级
+                try:
+                    from app.core.llm.model_fallback import get_fallback_executor
+                    _executor = get_fallback_executor()
+                    response = _executor.generate_with_fallback(
+                        provider=self.llm,
+                        prompt=current_history,
+                        preferred_model=self.model_id,
+                        task_type=_task_type or self.task_type or "CHAT",
+                        system_instruction=_effective_instruction,
+                        tools=tools_def if tools_def else None,
+                        stream=False,
+                    )
+                    # 如果执行器选了不同的模型，同步更新当前 model_id
+                    # （不修改 self.model_id，避免影响外部状态）
+                except ImportError:
+                    response = self.llm.generate_content(
+                        prompt=current_history,
+                        model=self.model_id,
+                        system_instruction=_effective_instruction,
+                        tools=tools_def if tools_def else None,
+                        stream=False,
+                    )
                 
                 content_text = response.get("content", "")
                 tool_calls = response.get("tool_calls", [])

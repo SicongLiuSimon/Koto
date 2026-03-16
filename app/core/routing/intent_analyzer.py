@@ -71,19 +71,26 @@ class IntentAnalyzer:
         return any(re.search(p, user_input, re.IGNORECASE) for p in cls.TRIGGER_PATTERNS)
 
     @classmethod
-    def rewrite_intent(cls, user_input: str, history: list, tracker=None) -> str:
+    def rewrite_intent(
+        cls,
+        user_input: str,
+        history: list,
+        tracker=None,
+        memory_context: str = None,
+    ) -> str:
         """
         Rewrite an ambiguous user input into a clear, standalone instruction.
 
         Args:
-            user_input: current user message
-            history:    conversation history ({role, parts} or {role, content} format)
-            tracker:    optional ConversationTracker for extra context
+            user_input:     current user message
+            history:        conversation history ({role, parts} or {role, content} format)
+            tracker:        optional ConversationTracker for extra context
+            memory_context: optional pre-formatted memory string (alternative to tracker)
 
         Returns:
             Rewritten instruction, or original user_input if no rewrite is possible.
         """
-        if not history and tracker is None:
+        if not history and tracker is None and not memory_context:
             return user_input
 
         # Build history summary text — last 10 messages (~5 turns)
@@ -103,6 +110,10 @@ class IntentAnalyzer:
                     recent_lines.append(f"[上轮回复摘要] {last_summary}")
             except Exception:
                 pass
+
+        # Append pre-formatted memory context string if provided
+        if memory_context and memory_context.strip():
+            recent_lines.append(f"[记忆上下文] {memory_context.strip()[:300]}")
 
         history_text = "\n".join(recent_lines)
         if not history_text:
