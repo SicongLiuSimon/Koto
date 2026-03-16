@@ -187,16 +187,16 @@ class SkillAutoMatcher:
          "patterns": ["工作日报", "今天做了什么", "工作进展", "工作总结", "文件变动",
                        "每日汇报", "工作日志", "今日工作", "daily report", "文件活动记录"]},
         # ── 高价值 Workflow Skills（商业场景）──
-        {"skill_id": "email_composer",
+        {"skill_id": "email_writer",
          "patterns": ["写邮件", "帮我写邮件", "邮件正文", "回复邮件", "发邮件", "邮件模板",
                        "起草邮件", "邮件草稿", "write email", "draft email", "compose email",
                        "客户邮件", "商务邮件正文", "邮件内容",
                        "一封邮件", "封邮件", "封邮", "邮件怎么写", "邮件范文",
                        "商务邮件", "邮件内容", "写封邮", "邮件撰写"]},
-        {"skill_id": "meeting_minutes",
+        {"skill_id": "meeting_notes",
          "patterns": ["会议纪要", "整理会议", "会议记录", "会议总结", "帮我整理会议",
                        "meeting minutes", "会议内容整理", "讨论要点", "会议梳理", "开会记录"]},
-        {"skill_id": "report_writer",
+        {"skill_id": "work_report_generator",
          "patterns": ["写报告", "帮我写报告", "生成报告", "撰写报告", "分析报告",
                        "工作报告", "项目报告", "write report", "报告模板", "报告正文"]},
         {"skill_id": "negotiation_assist",
@@ -233,7 +233,7 @@ class SkillAutoMatcher:
          "patterns": ["面试准备", "面试题", "帮我准备面试", "interview prep", "interview questions",
                        "模拟面试", "面试技巧", "hr面试", "技术面试", "面试常见问题",
                        "面试自我介绍", "面试问答"]},
-        {"skill_id": "learning_roadmap",
+        {"skill_id": "learning_guide",
          "patterns": ["学习路线", "学习路径", "学习计划", "learning roadmap", "learning path",
                        "如何学习", "从哪里开始学", "入门到精通", "学习大纲", "技能树",
                        "怎么系统学习", "自学方案"]},
@@ -251,7 +251,7 @@ class SkillAutoMatcher:
          "patterns": ["优化反馈", "改写反馈", "润色反馈", "更委婉", "表达得更好",
                        "feedback polish", "说得好听一点", "更有建设性", "温和地表达",
                        "批评怎么说", "如何给反馈", "建设性意见"]},
-        {"skill_id": "prompt_engineer",
+        {"skill_id": "prompt_refiner",
          "patterns": ["写prompt", "优化prompt", "prompt工程", "提示词", "prompt engineering",
                        "写提示词", "提示词优化", "system prompt", "如何写prompt",
                        "prompt设计", "指令优化", "ai提示词"]},
@@ -296,19 +296,20 @@ class SkillAutoMatcher:
 
     @classmethod
     def _has_active_skills_for_task(cls, task_type: str) -> bool:
-        """判断当前 task_type 下是否已有用户手动启用的领域/工作流类 Skill。
-        behavior / memory / addon 等全局增强类 Skill 不计入判断，
-        避免它们阻止域技能的自动匹配。
+        """判断当前 task_type 下是否已有用户手动启用的非系统 Skill。
+
+        系统级 Skill（skill_nature='system'，如 long_term_memory）即使启用也不
+        阻断 AutoMatcher，因为它们是后台能力，不代表用户对本轮任务的主动干预。
         """
         try:
             from app.core.skills.skill_manager import SkillManager
             SkillManager._ensure_init()
             tt = task_type.upper() if task_type else ""
-            for s in SkillManager._registry.values():
+            for sid, s in SkillManager._registry.items():
                 if not s.get("enabled", False):
                     continue
-                # 只有 domain / workflow 类 Skill 才视为"已覆盖本次任务"
-                if s.get("category") not in ("domain", "workflow"):
+                # 跳过系统级 Skill（不代表用户的任务导向选择）
+                if s.get("skill_nature", "") == "system":
                     continue
                 applicable = s.get("task_types", [])
                 if not applicable or tt in applicable:
@@ -318,19 +319,87 @@ class SkillAutoMatcher:
         return False
 
     @classmethod
+    def _match_with_intent_ngram(
+        cls,
+        user_input: str,
+        candidates: List[dict],
+        n: int = 2,
+        threshold: float = 0.07,
+    ) -> List[str]:
+        """
+        字符 n-gram 相似度中间层：计算用户输入与每个技能 intent_description / description
+        的字符二元组 Jaccard 相似度，作为 Ollama（本地模型）与规则兜底之间的语义补充层。
+        无外部依赖，不增加启动开销。
+        """
+        if not user_input or not candidates:
+            return []
+
+        def _ngrams(text: str) -> set:
+            t = text.lower().replace(" ", "")
+            return {t[i:i + n] for i in range(max(0, len(t) - n + 1))}
+
+        input_ng = _ngrams(user_input[:300])
+        if not input_ng:
+            return []
+
+        scored: list = []
+        for c in candidates:
+            desc = c.get("desc", "")
+            if not desc:
+                continue
+            desc_ng = _ngrams(desc)
+            if not desc_ng:
+                continue
+            union = len(input_ng | desc_ng)
+            if union == 0:
+                continue
+            jaccard = len(input_ng & desc_ng) / union
+            if jaccard >= threshold:
+                scored.append((jaccard, c["id"]))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [sid for _, sid in scored[:_MAX_AUTO_SKILLS]]
+
+    @classmethod
     def _match_with_patterns(cls, user_input: str, candidates: List[dict]) -> List[str]:
-        """规则兜底：简单关键词匹配，返回匹配到的 skill_id 列表。"""
+        """规则兜底：关键词匹配，返回匹配到的 skill_id 列表。
+
+        匹配来源（优先级依次降低）：
+        1. 类级 _PATTERN_MAP（内置硬编码规则，启动时固定）
+        2. SkillDefinition.trigger_keywords（自定义 Skill 运行时注册，重启后仍有效）
+        """
         candidate_ids = {c["id"] for c in candidates}
         matched: List[str] = []
+        matched_set: set = set()
         lowered = user_input.lower()
+
+        # 1. 内置 _PATTERN_MAP
         for entry in cls._PATTERN_MAP:
             sid = entry["skill_id"]
-            if sid not in candidate_ids:
+            if sid not in candidate_ids or sid in matched_set:
                 continue
             if any(p.lower() in lowered for p in entry["patterns"]):
                 matched.append(sid)
+                matched_set.add(sid)
                 if len(matched) >= _MAX_AUTO_SKILLS:
-                    break
+                    return matched
+
+        # 2. SkillDefinition.trigger_keywords（持久化在 JSON 的自定义 Skill）
+        try:
+            from app.core.skills.skill_manager import SkillManager
+            SkillManager._ensure_init()
+            for sid, skill_def in SkillManager._def_registry.items():
+                if sid not in candidate_ids or sid in matched_set:
+                    continue
+                kws = getattr(skill_def, "trigger_keywords", None) or []
+                if kws and any(kw.lower() in lowered for kw in kws):
+                    matched.append(sid)
+                    matched_set.add(sid)
+                    if len(matched) >= _MAX_AUTO_SKILLS:
+                        return matched
+        except Exception as _e:
+            logger.debug("[AutoMatcher] trigger_keywords 扫描失败: %s", _e)
+
         return matched
 
     @classmethod
@@ -441,6 +510,11 @@ class SkillAutoMatcher:
         ----
         List[str]  : 推荐临时激活的 skill_id 列表；空列表表示不需要额外注入
         """
+        # ── 如果用户已经手动启用了适合本轮任务的 Skill，默认退出 ─────────────
+        if not force and cls._has_active_skills_for_task(task_type):
+            logger.debug(f"[AutoMatcher] 用户已启用 Skill，跳过自动匹配")
+            return []
+
         # ── 构建候选 Skill 目录 ─────────────────────────────────────────────
         candidates, catalog_text = cls._build_skill_catalog(task_type)
         if not candidates:
@@ -448,27 +522,28 @@ class SkillAutoMatcher:
 
         candidate_ids = {c["id"] for c in candidates}
 
-        # ── 规则匹配先行（快速、零成本） ──────────────────────────────────────
-        pattern_result = cls._match_with_patterns(user_input, candidates)
-        if pattern_result:
-            logger.info(
-                f"[AutoMatcher] 📋 规则匹配: {task_type} → {pattern_result}"
-            )
-            return pattern_result
-
-        # ── 如果已有活跃领域 Skill，跳过 LLM 调用（只节省 LLM 开销） ───────────
-        if not force and cls._has_active_skills_for_task(task_type):
-            logger.debug(f"[AutoMatcher] 用户已启用域 Skill，跳过 LLM 自动匹配")
-            return []
-
-        # ── 规则未命中，尝试本地模型语义匹配 ──────────────────────────────────
+        # ── 优先尝试本地模型匹配 ────────────────────────────────────────────
         model_result = cls._match_with_local_model(
             user_input, task_type, catalog_text, candidate_ids
         )
-        if model_result:
+        if model_result is not None:
             return model_result
 
-        return []
+        # ── n-gram 语义相似度中间层（Ollama 不可用时，比纯关键词更泛化）─────
+        ngram_result = cls._match_with_intent_ngram(user_input, candidates)
+        if ngram_result:
+            logger.info(
+                f"[AutoMatcher] 🔤 n-gram 匹配: {task_type} → {ngram_result}"
+            )
+            return ngram_result
+
+        # ── 最终兜底：精确关键词规则 ────────────────────────────────────────
+        pattern_result = cls._match_with_patterns(user_input, candidates)
+        if pattern_result:
+            logger.info(
+                f"[AutoMatcher] 📋 规则兜底匹配: {task_type} → {pattern_result}"
+            )
+        return pattern_result
 
     @classmethod
     def describe_matched(cls, skill_ids: List[str]) -> str:

@@ -1,0 +1,87 @@
+{
+  "id": "chart_analyst",
+  "name": "图表智能解读",
+  "icon": "📈",
+  "category": "domain",
+  "description": "上传图表截图（柱状图、折线图、饼图、散点图等），Koto 通过 Gemini 多模态视觉进行深度解读：图表类型、坐标轴、关键数据点、趋势规律、核心洞察",
+  "intent_description": "用户上传或提到图表图片、截图、可视化图形时，需要解读图表内容、分析趋势或提取数据",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [
+      "##"
+    ],
+    "must_not_contain": [],
+    "min_chars": 200,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "结构化图表分析报告：图表类型、坐标轴说明、关键数据、趋势判断、核心洞察"
+  },
+  "bound_tools": [
+    "analyze_chart_image",
+    "analyze_screenshot"
+  ],
+  "executor_tools": [
+    "analyze_chart_image",
+    "analyze_screenshot"
+  ],
+  "task_types": [
+    "CHAT",
+    "RESEARCH"
+  ],
+  "priority": 80,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 📈 能力增强：图表多模态智能解读\n\n当用户提供图表图片、截图或任何可视化图形时，按以下步骤处理：\n\n### 工具使用规则\n- 用户提到「图片」「截图」「图表」「chart」「这张图」时 → 调用 `analyze_chart_image(filepath=...)`\n- 需要解读 UI/界面/非数据类图片 → 调用 `analyze_screenshot(filepath=...)`\n- 用户有具体问题 → 将问题传入 `question` 参数\n- 图片路径从用户消息、上传附件路径或文件工具返回结果中提取\n\n### 输出规范\n分析结果已由 api 返回，直接以 Markdown 格式展示，无需二次改写。\n如果用户有追问（如「这个趋势原因是什么？」），在图表分析结果基础上继续推理回答。\n\n### 能力边界说明\n- ✅ 支持：PNG、JPEG、WEBP、GIF、BMP 格式的本地图片文件\n- ✅ 支持：柱状图、折线图、饼图、散点图、热力图、仪表盘截图\n- ❌ 不支持：直接从网页 URL 读取图片（需先下载到本地）\n- ❌ 不支持：超过 20MB 的图片文件",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-15T00:00:00Z",
+  "tags": [
+    "chart",
+    "图表",
+    "截图",
+    "可视化",
+    "vision",
+    "multimodal",
+    "折线图",
+    "柱状图",
+    "饼图",
+    "散点图",
+    "数据分析",
+    "图片分析"
+  ],
+  "trigger_keywords": [
+    "分析图表",
+    "解读图表",
+    "看一下这个图",
+    "图表分析",
+    "这张图",
+    "截图分析",
+    "帮我看看这个",
+    "图片里",
+    "chart分析",
+    "可视化分析",
+    "这个折线图",
+    "这个柱状图",
+    "这个饼图",
+    "分析这张",
+    "图表解读",
+    "analyze chart",
+    "interpret chart",
+    "read this chart"
+  ],
+  "examples": [
+    {
+      "input": "我有一张销售折线图截图，帮我分析一下趋势",
+      "output": "## 📈 图表分析结果\n\n### 1. 图表类型\n折线图（Line Chart）\n\n### 2. 坐标轴\n- **横轴**：时间维度（月份/日期）\n- **纵轴**：销售额（单位：万元）\n\n### 3. 关键数据点\n- **峰值**：X月达到最高点\n- **谷值**：Y月出现低谷\n\n### 4. 趋势\n整体呈上升趋势，季度末有明显波峰\n\n### 5. 核心洞察\n1. ...\n2. ...\n3. ...",
+      "note": "实际路径需从用户上传的文件中提取"
+    }
+  ],
+  "plan_template": [
+    "1. 确认用户提供的图片文件路径",
+    "2. 调用 analyze_chart_image(filepath=<路径>, question=<用户问题或空>) 获取 Gemini Vision 分析结果",
+    "3. 将分析结果以 Markdown 格式整理输出",
+    "4. 如用户有追问，结合已有分析进一步推理"
+  ]
+}

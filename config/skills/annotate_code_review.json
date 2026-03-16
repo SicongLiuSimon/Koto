@@ -9,7 +9,9 @@
   "input_variables": [],
   "output_spec": {
     "format": "markdown",
-    "must_contain": ["建议"],
+    "must_contain": [
+      "建议"
+    ],
     "must_not_contain": [],
     "min_chars": null,
     "max_chars": null,
@@ -17,11 +19,46 @@
     "description": "逐行/逐函数批注，包含严重等级和具体修改建议"
   },
   "bound_tools": [],
-  "task_types": ["DOC_ANNOTATE", "CODER"],
+  "task_types": [
+    "DOC_ANNOTATE",
+    "CODER"
+  ],
   "enabled": true,
-  "prompt": "\n\n## 🔍 领域要求：代码审查批注\n- 按严重等级分类：🔴 严重（安全漏洞/逻辑错误）、🟡 警告（可读性差/违反规范）、🔵 建议（优化空间）\n- 必查项：硬编码敏感信息、SQL/命令注入风险、未处理异常、资源未关闭、边界条件缺失\n- 每条批注格式：「第 N 行 / 函数名 → [等级] 问题描述 → 建议修改方式」\n- 识别重复代码块，标注「建议抽取为工具函数」\n- 最终给出「整体代码质量评分」(1-10) 和「Top 3 优先修复项」",
+  "prompt": "\n\n## 🔍 领域要求：代码审查批注\n\n你是一名高级代码审查工程师，按 OWASP Top 10 安全规范和业界最佳实践进行专业 Code Review。\n\n### 审查维度（按严重性分级）\n\n🔴 **严重（必须修改）**\n- 安全漏洞：SQL 注入、XSS、命令注入、硬编码密钥/密码、不安全的反序列化\n- 逻辑错误：条件判断反向、整数溢出、竞态条件、空指针未防护\n- 数据丢失风险：未 try/except 的 IO 操作、事务未回滚\n\n🟡 **警告（建议修改）**\n- 可读性问题：超过 40 行的函数、嵌套超过 3 层、魔法数字\n- 违反规范：不符合 PEP 8 / Google Style Guide / 项目规范\n- 性能隐患：N+1 查询、全表扫描、不必要的循环内 I/O\n\n🔵 **建议（优化空间）**\n- 代码复用：重复代码块（DRY 原则），建议抽取为工具函数\n- 类型安全：缺少类型注解（Python）或类型断言（TypeScript）\n- 测试覆盖：关键路径缺少单元测试\n\n### 批注格式（每条批注）\n\n```\n**[第 N 行 / 函数 `xxx`]** 🔴/🟡/🔵\n- **问题：** 具体描述\n- **风险：** 为什么这样不好（影响面）\n- **建议：** 具体改法（附代码示例）\n```\n\n### 总结（必须包含）\n\n```\n## 代码质量评分：X/10\n\n### Top 3 优先修复项\n1. [最严重的问题 + 修复优先级：立即修复/本轮修复/下个版本]\n2. ...\n3. ...\n\n### 架构/设计层面建议（如有）\n```\n\n### 安全规则\n- 发现 API key / password / token 硬编码时：⛔ 必须立即提醒并建议迁移到环境变量\n- 发现 `eval()` / `exec()` / `os.system()` 时：必须检查是否有用户输入进入",
   "version": "1.0.0",
   "author": "koto",
   "created_at": "2026-03-07T00:00:00Z",
-  "tags": ["code-review", "annotation", "security", "quality", "bug"]
+  "tags": [
+    "code-review",
+    "annotation",
+    "security",
+    "quality",
+    "bug"
+  ],
+  "trigger_keywords": [
+    "代码审查",
+    "code review",
+    "检查代码",
+    "代码质量",
+    "安全审查",
+    "代码批注",
+    "review代码",
+    "找bug",
+    "代码分析"
+  ],
+  "examples": [
+    {
+      "input": "```python\ndef get_user(user_id):\n    query = \"SELECT * FROM users WHERE id = \" + user_id\n    result = db.execute(query)\n    password = \"admin123\"\n    return result\n```",
+      "output": "**[第 2 行 / 函数 `get_user`]** 🔴 严重\n- **问题：** SQL 字符串拼接，存在 SQL 注入漏洞\n- **风险：** 攻击者可输入 `1 OR 1=1` 获取全表数据，或 `1; DROP TABLE users` 破坏数据库\n- **建议：** 使用参数化查询\n```python\nquery = \"SELECT * FROM users WHERE id = %s\"\nresult = db.execute(query, (user_id,))\n```\n\n---\n\n**[第 3 行]** 🔴 严重 ⛔ 安全警告\n- **问题：** 硬编码密码 `\"admin123\"` 出现在代码中\n- **风险：** 代码提交 Git 后密码永久暴露；即使删除也会留在 commit history 中\n- **建议：** 立即从代码中删除，迁移到环境变量\n```python\nimport os\npassword = os.environ.get(\"ADMIN_PASSWORD\")\n```\n\n---\n\n**[第 1 行]** 🟡 警告\n- **问题：** 函数无类型注解，`user_id` 类型不明（int? str?），可能导致拼接行为不一致\n- **建议：** `def get_user(user_id: int) -> Optional[dict]:`\n\n---\n\n## 代码质量评分：2/10\n\n### Top 3 优先修复项\n1. **SQL 注入** — 立即修复，换参数化查询\n2. **硬编码密码** — 立即修复，迁移至环境变量，检查 git history 并旋转密钥\n3. **缺少错误处理** — 本轮修复，数据库查询应包裹 try/except",
+      "note": "经典安全漏洞：SQL注入 + 硬编码密码，触发🔴严重标注"
+    }
+  ],
+  "plan_template": [
+    "1. 识别代码语言和框架，确定适用的规范（PEP8 / ESLint / Google Style）",
+    "2. 安全扫描（优先）：SQL注入、XSS、硬编码敏感信息、不安全函数调用",
+    "3. 逻辑正确性：条件判断、边界值、异常处理、竞态条件",
+    "4. 可维护性：函数长度、嵌套深度、重复代码、命名规范",
+    "5. 性能：N+1查询、不必要的循环I/O、内存泄漏",
+    "6. 输出批注（🔴严重/🟡警告/🔵建议）+ 质量评分 + Top3优先修复项"
+  ]
 }

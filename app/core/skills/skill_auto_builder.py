@@ -184,76 +184,6 @@ _DOMAIN_KEYWORDS: Dict[str, List[str]] = {
     "lifestyle":    ["生活", "健身", "饮食", "旅行", "情感", "关系", "心理"],
 }
 
-# 领域 → 适用任务类型的映射
-_DOMAIN_TO_TASK_TYPES: Dict[str, List[str]] = {
-    "coding":       ["CODER", "CHAT"],
-    "writing":      ["FILE_GEN", "CHAT"],
-    "research":     ["RESEARCH", "CHAT"],
-    "finance":      ["RESEARCH", "CHAT"],
-    "legal":        ["CHAT", "FILE_GEN"],
-    "medical":      ["CHAT"],
-    "education":    ["CHAT", "RESEARCH"],
-    "marketing":    ["CHAT", "FILE_GEN"],
-    "productivity": ["CHAT", "AGENT"],
-    "lifestyle":    ["CHAT"],
-    "general":      ["CHAT"],
-}
-
-
-def _infer_task_types(domain: str, description: str = "") -> List[str]:
-    """
-    根据领域标签和描述推断 task_types。
-    优先使用 domain 映射；若描述中含强信号词则叠加对应类型。
-    """
-    base = list(_DOMAIN_TO_TASK_TYPES.get(domain, ["CHAT"]))
-    desc_lower = description.lower()
-    extra: List[str] = []
-    if any(kw in desc_lower for kw in ("代码", "编程", "debug", "python", "javascript", "函数", "重构")):
-        extra.append("CODER")
-    if any(kw in desc_lower for kw in ("研究", "分析", "调研", "报告", "论文", "深度")):
-        extra.append("RESEARCH")
-    if any(kw in desc_lower for kw in ("生成文件", "生成文档", "输出报告", "生成word", "生成excel", "生成ppt")):
-        extra.append("FILE_GEN")
-    if any(kw in desc_lower for kw in ("批注", "审查", "校对", "修改文档")):
-        extra.append("DOC_ANNOTATE")
-    # 合并去重，保持 base 顺序优先
-    for t in extra:
-        if t not in base:
-            base.append(t)
-    return base
-
-
-def _infer_conflict_with(profile: "StyleProfile") -> List[str]:
-    """
-    根据风格维度自动推断与哪些内置 Skill 存在逻辑互斥关系。
-
-    规则（阈值经验值）：
-    - 高简洁度(conciseness>0.7) / 低详细度(verbosity<0.3) → 与 step_by_step、research_depth 互斥
-    - 高严肃度(humor<0.15) + 高正式度(formality>0.75)    → 与 emoji_assist、creative_writing 互斥
-    - 高创意度(creativity>0.75)                          → 与 strict_mode 互斥
-    - 高结构化(structure>0.8) + 高详细度(verbosity>0.7)  → 与 concise_mode 互斥
-    """
-    conflicts: List[str] = []
-
-    # 简洁风格 vs 详细输出类 Skill
-    if profile.conciseness > 0.7 or profile.verbosity < 0.3:
-        conflicts.extend(["step_by_step", "research_depth", "complex_task_planner"])
-
-    # 严肃正式风格 vs 活泼风格类 Skill
-    if profile.humor < 0.15 and profile.formality > 0.75:
-        conflicts.extend(["emoji_assist", "creative_writing"])
-
-    # 高创意风格 vs 严谨约束类 Skill
-    if profile.creativity > 0.75:
-        conflicts.append("strict_mode")
-
-    # 高结构化+详细 vs 精简模式
-    if profile.structure > 0.8 and profile.verbosity > 0.7:
-        conflicts.append("concise_mode")
-
-    return list(dict.fromkeys(conflicts))  # 去重保序
-
-
 # ══════════════════════════════════════════════════════════════════
 # 风格分析器
 # ══════════════════════════════════════════════════════════════════
@@ -718,8 +648,7 @@ class SkillAutoBuilder:
                 format="any",
                 description=f"以「{name}」风格回答",
             ),
-            task_types=_infer_task_types(profile.domain, effective_description),
-            conflict_with=_infer_conflict_with(profile),
+            task_types=["CHAT"],
             enabled=enabled,
             version="1.0.0",
             author=author,
@@ -736,7 +665,7 @@ class SkillAutoBuilder:
         author: str = "user",
         tags: Optional[List[str]] = None,
         enabled: bool = False,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3-flash-preview",
         personalize: bool = False,
         personalization_context: Optional[Dict[str, Any]] = None,
     ):
@@ -771,17 +700,15 @@ class SkillAutoBuilder:
         if context:
             effective_description = cls._build_effective_description(description, context)
 
-        # 尝试 AI 生成（返回结构化 dict）
-        ai_result = cls._generate_prompt_with_ai(name, effective_description, model)
+        # 尝试 AI 生成
+        ai_prompt = cls._generate_prompt_with_ai(name, effective_description, model)
 
-        if ai_result:
-            # AI 生成成功：直接使用 AI 返回的所有字段
-            ai_prompt_text = ai_result.get("prompt", "")
-            ai_intent = ai_result.get("intent_description", "")
-            ai_tags = ai_result.get("tags") or auto_tags
-            ai_task_types = ai_result.get("task_types") or _infer_task_types("general", effective_description)
-            # 融合用户传入的 tags
-            merged_tags = list(dict.fromkeys(auto_tags + ai_tags))  # 去重保序
+        if ai_prompt:
+            # AI 生成成功：同时用规则引擎获取辅助信息
+            profile = StyleAnalyzer.analyze_text(effective_description)
+            if context:
+                profile = cls._apply_profile_bias(profile, context)
+            _, intent_desc = PromptSynthesizer.synthesize(profile, name, effective_description)
 
             return SkillDefinition(
                 id=skill_id,
@@ -789,18 +716,18 @@ class SkillAutoBuilder:
                 icon=icon,
                 category=category,
                 description=description,
-                intent_description=ai_intent,
-                system_prompt_template=ai_prompt_text,
-                prompt=ai_prompt_text,
+                intent_description=intent_desc,
+                system_prompt_template=ai_prompt,
+                prompt=ai_prompt,
                 input_variables=[
                     InputVariable(name="input", description="用户输入的内容", required=True)
                 ],
                 output_spec=OutputSpec(format="any", description=f"以「{name}」风格回答"),
-                task_types=ai_task_types,
+                task_types=["CHAT"],
                 enabled=enabled,
                 version="1.0.0",
                 author=author,
-                tags=merged_tags,
+                tags=auto_tags,
                 examples=[],
             )
         else:
@@ -819,20 +746,10 @@ class SkillAutoBuilder:
             )
 
     @classmethod
-    def _generate_prompt_with_ai(
-        cls, name: str, description: str, model: str
-    ) -> Optional[Dict[str, Any]]:
+    def _generate_prompt_with_ai(cls, name: str, description: str, model: str) -> Optional[str]:
         """
-        调用 Gemini API 一次生成完整 Skill 元数据，返回 dict 或 None。
-
-        返回结构：
-          {
-            "prompt":             str,          # system prompt 正文
-            "intent_description": str,          # 意图一句话描述（供 AutoMatcher 使用）
-            "tags":               List[str],    # 3-6 个中文触发关键词
-            "task_types":         List[str],    # 适用任务类型
-          }
-        失败时返回 None，调用方应降级到规则引擎。
+        调用 Gemini API 生成 system_prompt_template。
+        成功返回 prompt 字符串，失败返回 None。
         """
         try:
             from app.core.llm.gemini import GeminiProvider
@@ -844,51 +761,31 @@ class SkillAutoBuilder:
 
 "{description}"
 
-请输出一个 JSON 对象，包含以下 4 个字段（只输出 JSON，不要任何其他文字）：
+请为这个技能设计一段高质量的 System Prompt，要求：
+1. 以「你是「{name}」」开头，明确 AI 的角色定位
+2. 包含「## 行为规范」标题，下面用要点列表列出 4-6 条具体行为指南
+3. 行为指南要具体、可执行，不要空洞，要针对上述描述量身定制
+4. 结尾说明输入格式：「## 用户输入\\n用户输入：{{input}}\\n\\n请...」
+5. 总长度 200-400 字
+6. 只输出 System Prompt 纯文本，不要 JSON，不要解释，不要代码块包裹
 
-1. "prompt": 高质量的 System Prompt 文本（200-400字）。要求：
-   - 以「你是「{name}」」开头，明确角色定位
-   - 包含「## 行为规范」标题，下面 4-6 条具体可执行的行为指南
-   - 结尾固定为：## 用户输入\\n用户输入：{{{{input}}}}\\n\\n请根据以上要求回应。
+直接输出 System Prompt："""
 
-2. "intent_description": 一句话（≤20字），描述用户在何种情境下使用此技能。
-   要求紧凑直接，例如「用户需要写商务邮件或正式通知」
-
-3. "tags": 3-6 个中文关键词的 JSON 数组，用户说出这些词时应自动激活该技能。
-   例如 ["写邮件", "商务邮件", "起草邮件", "正式通知"]
-
-4. "task_types": 适用任务类型的 JSON 数组，从以下中选 1-3 个：
-   ["CHAT", "CODER", "RESEARCH", "FILE_GEN", "SYSTEM", "AGENT", "DOC_ANNOTATE"]
-
-输出示例格式：
-{{"prompt": "...", "intent_description": "...", "tags": [...], "task_types": [...]}}
-"""
-
-            raw = client.generate_content(
+            result = client.generate_content(
                 prompt=meta_prompt,
                 model=model,
                 temperature=0.7,
-                max_tokens=1500,
+                max_tokens=1024,
             )
 
-            text = raw["text"].strip() if isinstance(raw, dict) and "text" in raw else str(raw).strip()
-
-            # 容错解析：去掉可能的 ```json ``` 包裹
-            if text.startswith("```"):
-                text = re.sub(r"^```[\w]*\n?", "", text)
-                text = re.sub(r"\n?```$", "", text.strip())
-
-            data = json.loads(text)
-            if not isinstance(data.get("prompt"), str) or not data["prompt"].strip():
-                return None
-            # 确保字段完整且类型正确
-            data["tags"] = [str(t) for t in data.get("tags") or []]
-            data["task_types"] = [str(t) for t in data.get("task_types") or ["CHAT"]]
-            data["intent_description"] = str(data.get("intent_description") or "")
-            return data
+            if isinstance(result, dict) and "text" in result:
+                return result["text"].strip()
+            elif isinstance(result, str):
+                return result.strip()
+            return None
 
         except Exception as e:
-            logger.debug(f"[SkillAutoBuilder] Gemini 结构化生成失败: {e}")
+            logger.debug(f"[SkillAutoBuilder] Gemini 生成失败: {e}")
             return None
 
     @classmethod
@@ -956,8 +853,7 @@ class SkillAutoBuilder:
                 InputVariable(name="input", description="用户输入", required=True)
             ],
             output_spec=OutputSpec(format="any"),
-            task_types=_infer_task_types(profile.domain, final_desc),
-            conflict_with=_infer_conflict_with(profile),
+            task_types=["CHAT"],
             enabled=False,
             version="1.0.0",
             author=author,
@@ -1034,8 +930,7 @@ class SkillAutoBuilder:
                 InputVariable(name="input", description="用户输入", required=True)
             ],
             output_spec=OutputSpec(format="any"),
-            task_types=_infer_task_types(domain, description),
-            conflict_with=_infer_conflict_with(profile),
+            task_types=["CHAT"],
             enabled=enabled,
             version="1.0.0",
             author=author,
@@ -1098,7 +993,6 @@ class SkillAutoBuilder:
             "intent_description": intent_desc,
             "style_profile": profile.to_dict(),
             "suggested_id": _make_skill_id(name),
-            "task_types": _infer_task_types(domain, effective_description),
         }
 
     @classmethod

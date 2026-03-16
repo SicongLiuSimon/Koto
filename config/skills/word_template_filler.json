@@ -1,0 +1,92 @@
+{
+  "id": "word_template_filler",
+  "name": "Word 模板批量填充",
+  "icon": "📄",
+  "category": "domain",
+  "description": "识别 Word 文档中的 {{占位符}}，用结构化数据自动替换，支持一键生成百份合同/通知/报告",
+  "intent_description": "用户要用模板批量生成 Word 文档，如合同、通知书、录取函、工资条，或提到「批量生成」「挨个填名字」时",
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [
+      "✅"
+    ],
+    "must_not_contain": [],
+    "min_chars": 60,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "生成结果摘要：已生成文件数量、占位符替换情况、输出目录路径及任何未填充占位符的警告"
+  },
+  "bound_tools": [
+    "read_file",
+    "read_docx_paragraphs",
+    "write_file",
+    "load_data",
+    "copy_file",
+    "convert_file",
+    "create_directory"
+  ],
+  "executor_tools": [
+    "read_docx_paragraphs",
+    "load_data",
+    "write_file",
+    "copy_file",
+    "convert_file",
+    "create_directory"
+  ],
+  "task_types": [
+    "CHAT",
+    "FILE_GEN"
+  ],
+  "priority": 80,
+  "conflict_with": [
+    "concise_mode"
+  ],
+  "enabled": false,
+  "prompt": "\n\n## 📄 能力增强：Word 模板批量填充专家\n\n你现在可以读取带有 `{{占位符}}` 的 Word 模板，将结构化数据逐条替换后批量生成独立文档。\n\n---\n\n### 占位符规范\n\n模板中使用双花括号标记占位符，支持以下格式：\n- `{{姓名}}` — 任意文本\n- `{{日期}}` — 自动格式化为「YYYY年MM月DD日」\n- `{{金额}}` — 数字自动加千位分隔符（如 12,500.00）\n- `{{序号}}` — 自动按批次从 1 开始递增\n\n---\n\n### 工作流程（必须按顺序执行）\n\n**步骤 1 — 扫描模板占位符**\n调用 `read_docx_paragraphs(filepath=\"<模板路径>\")` 读取全文，提取所有 `{{...}}` 占位符，列出清单。\n\n**步骤 2 — 获取填充数据**\n- 用户直接提供：解析为字典列表\n- 用户提供 Excel/CSV 文件：调用 `load_data(filepath=\"<数据源>\")` 读取，每行对应一份文档\n- 只生成一份：将用户对话中的信息整理成字典\n\n**步骤 3 — 数据与占位符对齐**\n将数据列名映射到占位符（支持模糊匹配）：\n- `name` / `姓名` / `员工` → `{{姓名}}` ✅\n- 无法匹配的占位符：生成时保留原样并在结果中标注 ⚠️\n\n**步骤 4 — 批量生成**\n对每条数据记录：\n```\n1. copy_file(src=\"模板.docx\", dst=\"输出目录/[标识符]_filled.docx\")\n2. 读取复制后的文件全文\n3. 执行占位符替换（replace {{key}} → value）\n4. write_file 将替换后内容写回\n```\n\n批量生成时，输出文件名规则：\n- 有「姓名」列 → `{姓名}_合同.docx`\n- 有「编号」列 → `{编号}_通知.docx`\n- 否则 → `filled_{序号:03d}.docx`\n\n**步骤 5 — 结果汇报**\n- ✅ 成功生成 N 份文档，保存至 `输出目录/`\n- ⚠️ 未填充的占位符列表（如有）\n- 附：如需转为 PDF，提示用户可用文件格式转换技能\n\n---\n\n### 约束\n- **不要** 修改原始模板文件，始终复制后再操作\n- **不要** 在数据不完整时静默跳过；标注 ⚠️ 并继续处理其余记录\n- **不要** 生成超过 500 份时不先征求确认（大批量操作需明确知会用户）\n- 如模板不含任何 `{{` 占位符，提示用户先在 Word 中添加占位符\n\n---\n\n### 示例对话\n\n用户：「用 contract_template.docx 给以下三人各生成一份合同：张三（3月1日，工资8000）、李四（3月5日，工资9500）、王五（3月10日，工资7800）」  \n→ `read_docx_paragraphs(\"contract_template.docx\")` → 发现占位符：`{{姓名}} {{入职日期}} {{月薪}}`  \n→ 生成三份：`张三_合同.docx`、`李四_合同.docx`、`王五_合同.docx`  \n→ ✅ 共 3 份，占位符全部填充，保存至 `./合同_批量生成/`\n\n用户：「这里有一个 employees.xlsx，200 个人，帮我批量生成入职通知书，模板是 notice_template.docx」  \n→ `load_data(\"employees.xlsx\")` + `read_docx_paragraphs(\"notice_template.docx\")`  \n→ ⚠️ 「部门」列在模板中找不到对应占位符（模板没有 `{{部门}}`），跳过  \n→ ✅ 成功生成 200 份，保存至 `./入职通知_批量/`",
+  "examples": [
+    {
+      "input": "帮我用 offer_letter.docx 给候选人生成 offer：\n姓名：陈晓，职位：高级工程师，到岗日期：2026-04-01，税前月薪：22000",
+      "output": "**扫描模板占位符…**\n\n发现占位符 4 个：`{{候选人姓名}}` `{{应聘职位}}` `{{到岗日期}}` `{{月薪(元)}}`\n\n**数据映射：**\n| 来源字段 | 占位符 | 状态 |\n|---|---|---|\n| 陈晓 | `{{候选人姓名}}` | ✅ 精确匹配 |\n| 高级工程师 | `{{应聘职位}}` | ✅ 精确匹配 |\n| 2026-04-01 → 2026年04月01日 | `{{到岗日期}}` | ✅ 日期格式化 |\n| 22000 → 22,000 | `{{月薪(元)}}` | ✅ 数字格式化 |\n\n✅ 已生成：`陈晓_offer_letter.docx`\n📁 路径：`./output/陈晓_offer_letter.docx`\n💡 如需转为 PDF 版本，可以告知我，或使用「文件格式转换」技能",
+      "note": "单份生成：含日期格式化、金额千位分隔"
+    },
+    {
+      "input": "模板是 salary_notice.docx，数据是 payroll_march.xlsx（200人的工资表），帮我批量生成工资条，每人一个文件",
+      "output": "**读取模板占位符…**\n占位符：`{{员工姓名}}` `{{部门}}` `{{月份}}` `{{基本工资}}` `{{绩效}}` `{{实发金额}}`\n\n**读取数据源：** `payroll_march.xlsx` — 200 行 × 8 列\n\n**列名对齐：**\n✅ 精确：员工姓名 / 部门 / 基本工资 / 绩效 / 实发金额\n⚠️ 来源无「月份」列 → 已自动填入「2026年03月」\n\n**批量生成中…**\n\n✅ 已成功生成 **200** 份工资条\n📁 输出目录：`./工资条_2026-03/`\n文件命名规则：`{员工姓名}_工资条_2026-03.docx`\n\n⚠️ 提示：2 条记录「实发金额」为空（第 88 行 张XX、第 134 行 李XX），已保留占位符原样，请手动核查",
+      "note": "批量 200 份 + 自动补全缺失字段 + 空值警告"
+    }
+  ],
+  "plan_template": [
+    "1. read_docx_paragraphs 扫描模板，提取所有 {{占位符}} 清单",
+    "2. 获取填充数据（用户对话 / load_data 读取 Excel/CSV）",
+    "3. 将数据列名与占位符对齐，标注模糊匹配和缺失",
+    "4. create_directory 创建输出目录（避免文件散落）",
+    "5. 循环每条记录：copy_file 复制模板 → 替换占位符 → write_file 写回",
+    "6. 汇报成功数量、未填充占位符警告、输出目录路径"
+  ],
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-15T00:00:00Z",
+  "tags": [
+    "word",
+    "docx",
+    "模板",
+    "批量",
+    "合同",
+    "通知书",
+    "占位符",
+    "letter",
+    "template",
+    "generate",
+    "工资条",
+    "offer"
+  ],
+  "trigger_keywords": [
+    "填写Word模板",
+    "Word批量生成",
+    "合同批量生成",
+    "Word模板填充",
+    "批量生成文档",
+    "模板填充",
+    "word template"
+  ]
+}
