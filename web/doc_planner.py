@@ -21,7 +21,7 @@ doc_planner.py — 复杂文件生成的规划层（Planning Layer）
     └── generation_notes: 整体生成注意事项
 
 使用方式:
-    planner = DocumentPlanner(ai_client, model_name="gemini-2.5-flash")
+    planner = DocumentPlanner(ai_client, model_name="gemini-3.1-pro-preview")
     plan = await planner.plan(user_request, previous_context="")
     # 然后将 plan 传入 content generator 生成各节
 """
@@ -138,7 +138,7 @@ class DocumentPlanner:
     支持异步调用（async plan）和同步后备（sync plan_sync）。
     """
 
-    def __init__(self, ai_client, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, ai_client, model_name: str = "gemini-3.1-pro-preview"):
         self.client = ai_client
         self.model_name = model_name
 
