@@ -2,9 +2,6 @@ from typing import Any, Dict, List, Optional, Union, Generator
 import os
 import time
 import logging
-import queue
-import threading
-import concurrent.futures
 from .base import LLMProvider
 
 try:
@@ -16,6 +13,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Interactions-only models: cannot use client.models.generate_content()
+# Must be routed through rc.interactions.create(agent=...) instead.
+# NOTE: gemini-3-flash-preview and gemini-3-pro-preview are regular models
+# (use generate_content). Only deep-research-* are actual Interactions API agents.
+_INTERACTIONS_ONLY_MODELS: frozenset = frozenset({
+    "deep-research-pro-preview-12-2025",  # Research agent: Interactions API only
+})
+# No background=True restriction needed for current interactions models
+_NO_BACKGROUND_MODELS: frozenset = frozenset()
+
 
 class GeminiProvider(LLMProvider):
     """Google Gemini specific implementation of LLMProvider (google.genai SDK)"""
@@ -23,10 +30,6 @@ class GeminiProvider(LLMProvider):
     MAX_RETRIES = 3
     RETRY_BASE_DELAY = 2.0   # seconds
     RETRYABLE_STATUS_CODES = {429, 503}
-    # 非流式调用整体超时（秒），超时后抛出 TimeoutError 触发本地模型兜底
-    CALL_TIMEOUT: int = int(os.getenv("GEMINI_CALL_TIMEOUT", "30"))
-    # 流式调用每个 chunk 之间的最长等待（秒）
-    STREAM_CHUNK_TIMEOUT: int = int(os.getenv("GEMINI_STREAM_CHUNK_TIMEOUT", "15"))
 
     def __init__(self, api_key: str = None):
         self.api_key = (
@@ -62,6 +65,12 @@ class GeminiProvider(LLMProvider):
         if not self.client or not types:
             raise ImportError("google.genai client not initialized")
 
+        # Route interactions-only models through Interactions API transparently
+        if model in _INTERACTIONS_ONLY_MODELS:
+            return self._call_via_interactions_api(
+                model, prompt, sys_instruction=system_instruction, stream=stream
+            )
+
         try:
             config = types.GenerateContentConfig(
                 temperature=kwargs.get("temperature", 0.7),
@@ -91,31 +100,16 @@ class GeminiProvider(LLMProvider):
             raise
 
     def _call_with_retry(self, model: str, contents, config):
-        """Call generate_content with exponential backoff retry on 429/503.
-        
-        每次调用在独立线程中执行，若超过 CALL_TIMEOUT 秒无响应则抛出
-        TimeoutError（消息含 "timed out"），触发上层本地模型兜底逻辑。
-        """
+        """Call generate_content with exponential backoff retry on 429/503."""
         last_exc = None
         for attempt in range(self.MAX_RETRIES):
             try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                    _future = _pool.submit(
-                        self.client.models.generate_content,
-                        model=model,
-                        contents=contents,
-                        config=config,
-                    )
-                    try:
-                        response = _future.result(timeout=self.CALL_TIMEOUT)
-                    except concurrent.futures.TimeoutError:
-                        raise TimeoutError(
-                            f"LLM call timed out after {self.CALL_TIMEOUT}s"
-                        )
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config,
+                )
                 return self._format_response(response)
-            except TimeoutError:
-                # 超时不重试，直接向上抛，由 UnifiedAgent 产生 ERROR step
-                raise
             except Exception as exc:
                 last_exc = exc
                 # Check if retryable
@@ -277,43 +271,130 @@ class GeminiProvider(LLMProvider):
         }
 
     def _stream_generator(self, response_iterator: Any):
-        """Yield standardized chunks from google.genai stream.
-
-        后台线程负责迭代 SDK 流并向队列投递 chunk；主生成器以 STREAM_CHUNK_TIMEOUT
-        秒超时读取队列。若超时则认为云端流卡住，抛出 TimeoutError 触发兜底。
-        """
-        _q: queue.Queue = queue.Queue()
-        _SENTINEL = object()
-
-        def _feed():
-            try:
-                for chunk in response_iterator:
-                    _q.put(chunk)
-            except Exception as exc:
-                _q.put(exc)
-            finally:
-                _q.put(_SENTINEL)
-
-        _t = threading.Thread(target=_feed, daemon=True)
-        _t.start()
-
-        while True:
-            try:
-                item = _q.get(timeout=self.STREAM_CHUNK_TIMEOUT)
-            except queue.Empty:
-                raise TimeoutError(
-                    f"Stream stalled: no chunk received in {self.STREAM_CHUNK_TIMEOUT}s"
-                )
-            if item is _SENTINEL:
-                break
-            if isinstance(item, Exception):
-                raise item
-            text = getattr(item, "text", "") or ""
+        """Yield standardized chunks from google.genai stream."""
+        for chunk in response_iterator:
+            text = getattr(chunk, "text", "") or ""
             finish_reason = None
-            candidates = getattr(item, "candidates", None) or []
+            candidates = getattr(chunk, "candidates", None) or []
             if candidates:
                 finish_reason = getattr(candidates[0], "finish_reason", None)
+
             yield {
                 "content": text,
                 "finish_reason": finish_reason,
             }
+
+    def _call_via_interactions_api(
+        self,
+        model_id: str,
+        prompt,
+        sys_instruction: str = None,
+        stream: bool = False,
+        timeout: float = 90.0,
+    ):
+        """Route interactions-only models (e.g. deep-research-pro-preview) via rc.interactions.create().
+
+        Returns the same dict format as generate_content() so all callers work unchanged.
+        For stream=True, yields the full response as a single chunk (Interactions API has
+        no token-level streaming).
+        """
+        flat = self._flatten_prompt_to_text(prompt)
+        full_input = flat
+        if sys_instruction:
+            full_input = f"[\u7cfb\u7edf\u6307\u4ee4]\n{sys_instruction}\n\n[\u7528\u6237\u8f93\u5165]\n{flat}"
+
+        # Build a client with extended timeout (interactions can take up to 5 min)
+        try:
+            import httpx
+            from google.genai._api_client import HttpOptions as _HttpOptions
+            http_client = httpx.Client(
+                timeout=httpx.Timeout(300.0, connect=30.0), verify=True
+            )
+            rc = genai.Client(
+                api_key=self.api_key,
+                http_options=_HttpOptions(api_version="v1beta", httpx_client=http_client),
+            )
+        except Exception:
+            rc = self.client
+
+        background = model_id not in _NO_BACKGROUND_MODELS
+        interaction = rc.interactions.create(
+            agent=model_id,
+            input=full_input[:80000],
+            background=background,
+            stream=False,
+        )
+
+        interaction_id = getattr(interaction, "id", None)
+        status = getattr(interaction, "status", "")
+        start_wait = time.time()
+
+        while (
+            interaction_id
+            and status not in ("completed", "failed", "cancelled")
+            and (time.time() - start_wait) < timeout
+        ):
+            time.sleep(2)
+            interaction = rc.interactions.get(interaction_id)
+            status = getattr(interaction, "status", "")
+
+        if status not in ("completed", "failed", "cancelled"):
+            try:
+                rc.interactions.cancel(interaction_id)
+            except Exception:
+                pass
+            raise TimeoutError(
+                f"Interactions API timeout ({timeout}s) model={model_id}"
+            )
+
+        text = (
+            self._get_interactions_text(getattr(interaction, "outputs", None))
+            or self._get_interactions_text(interaction)
+        ).strip()
+
+        if stream:
+            # Interactions API has no token-level streaming; emit as a single chunk
+            def _single_chunk():
+                yield {"content": text, "finish_reason": "stop"}
+            return _single_chunk()
+
+        return {"content": text, "tool_calls": [], "usage": {}}
+
+    @staticmethod
+    def _get_interactions_text(obj) -> str:
+        """Recursively extract text from an Interactions API response object."""
+        if obj is None:
+            return ""
+        if isinstance(obj, str):
+            return obj
+        if hasattr(obj, "text") and obj.text:
+            return str(obj.text)
+        if hasattr(obj, "parts"):
+            return " ".join(
+                str(p.text)
+                for p in (obj.parts or [])
+                if hasattr(p, "text") and p.text
+            )
+        if hasattr(obj, "outputs"):
+            texts = [
+                GeminiProvider._get_interactions_text(o)
+                for o in (obj.outputs or [])
+            ]
+            return "\n".join(t for t in texts if t)
+        return ""
+
+    @staticmethod
+    def _flatten_prompt_to_text(prompt) -> str:
+        """Flatten a str or message-list prompt to plain text for Interactions API."""
+        if isinstance(prompt, str):
+            return prompt
+        if not isinstance(prompt, list):
+            return str(prompt)
+        lines = []
+        for msg in prompt:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if content:
+                label = "\u52a9\u624b" if role in ("assistant", "model") else "\u7528\u6237"
+                lines.append(f"{label}: {content}")
+        return "\n".join(lines)
