@@ -111,32 +111,20 @@ LOCAL_EXECUTOR_TASKS = {"SYSTEM", "FILE_OP"}
 KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     # ── Gemini 3.x ──────────────────────────────────────────────
     "gemini-3-pro-preview": {
-        "provider": "gemini",
-        "tier": 9,
-        "speed": 4,
-        "quality": 10,
-        "reasoning": 10,
-        "context": 10,
-        "multimodal": True,
-        "function_calling": True,
-        "grounding": True,
-        "image_gen": False,
-        "interactions_only": True,
+        "provider": "gemini", "tier": 9,
+        "speed": 4,  "quality": 10, "reasoning": 10,
+        "context": 10, "multimodal": True, "function_calling": True,
+        "grounding": True, "image_gen": False,
+        "interactions_only": False,  # 普通 Gemini 模型，直接用 generate_content
         "display": "Gemini 3.0 Pro 🚀",
         "strengths": ["推理", "代码", "分析", "复杂任务"],
     },
     "gemini-3-flash-preview": {
-        "provider": "gemini",
-        "tier": 7,
-        "speed": 9,
-        "quality": 7,
-        "reasoning": 7,
-        "context": 7,
-        "multimodal": True,
-        "function_calling": True,
-        "grounding": True,
-        "image_gen": False,
-        "interactions_only": True,
+        "provider": "gemini", "tier": 7,
+        "speed": 9,  "quality": 7,  "reasoning": 7,
+        "context": 7, "multimodal": True, "function_calling": True,
+        "grounding": True, "image_gen": False,
+        "interactions_only": False,  # 普通 Gemini 模型，直接用 generate_content
         "display": "Gemini 3.0 Flash ⚡",
         "strengths": ["快速", "对话", "多模态"],
     },
@@ -216,7 +204,7 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "speed": 1,  "quality": 10, "reasoning": 10,
         "context": 10, "multimodal": False, "function_calling": False,
         "grounding": True, "image_gen": False,
-        "interactions_only": True,
+        "interactions_only": True,   # 仅支持 Interactions API，不能用 generate_content
         "display": "Deep Research Pro 🔬",
         "strengths": ["深度研究", "学术分析", "综合报告"],
     },
@@ -299,17 +287,8 @@ _INFER_RULES: List[Tuple[str, Dict[str, Any]]] = [
     ),
     (r"image.*gen|gen.*image", {"image_gen": True}),
     (r"image.*preview|flash.*image", {"image_gen": True, "multimodal": True}),
-    # 深度研究
-    (
-        r"deep.?research",
-        {
-            "grounding": True,
-            "reasoning": 10,
-            "context": 10,
-            "speed": 1,
-            "tier_bonus": 3,
-        },
-    ),
+    # 深度研究（仅支持 Interactions API）
+    (r"deep.?research",  {"grounding": True, "reasoning": 10, "context": 10, "speed": 1, "tier_bonus": 3, "interactions_only": True}),
     # Pro 系列能力更强
     (
         r"\bpro\b",
@@ -518,38 +497,18 @@ class ModelManager:
         }
 
     def get_fallback_model(self) -> str:
-        """返回最适合做通用降级的模型（支持 generate_content，速度快、稳定可用）。"""
+        """返回最适合做通用降级的模型（支持 generate_content，速度快）。"""
         self.get_model_map()
-        # 优先选用已知稳定的 Flash 模型，避免 pro-preview 等访问受限的模型
-        _PREFERRED_FALLBACKS = [
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-preview",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-        ]
-        for mid in _PREFERRED_FALLBACKS:
-            caps = self._cached_caps.get(mid)
-            if caps and not caps.get("interactions_only", False) and not caps.get("image_gen", False):
-                return mid
-        # 兜底：按 tier+speed 排序，但排除 preview/exp 等访问受限模型
         candidates = [
             (mid, caps)
             for mid, caps in self._cached_caps.items()
             if not caps.get("interactions_only", False)
             and not caps.get("image_gen", False)
             and mid != "local-executor"
-            and "preview" not in mid
-            and "-exp" not in mid
         ]
         if not candidates:
-            candidates = [
-                (mid, caps) for mid, caps in self._cached_caps.items()
-                if not caps.get("interactions_only", False)
-                and not caps.get("image_gen", False)
-                and mid != "local-executor"
-            ]
-        if not candidates:
             return "gemini-2.5-flash"
+        # 选 tier 最高但速度也不太慢的
         best = max(candidates, key=lambda x: x[1].get("tier", 0) + x[1].get("speed", 0) * 0.3)
         return best[0]
 
@@ -574,22 +533,26 @@ class ModelManager:
                 self._preload_static_caps()
             return
 
-        # 合并已发现模型（API）与注册表中的已知模型
-        all_model_ids = self._merge_with_registry(discovered)
-        self._available_ids = all_model_ids
+        # 路由只使用 API 实际返回的模型（避免将不存在/已下线模型加入评分池）
+        self._available_ids = list(dict.fromkeys(discovered))  # 去重保序
 
-        # 构建能力缓存
-        for mid in all_model_ids:
+        # 构建能力缓存：API 发现的模型优先用注册表补充能力，否则自动推断
+        for mid in self._available_ids:
             if mid not in self._cached_caps:
                 if mid in KNOWN_MODEL_REGISTRY:
                     self._cached_caps[mid] = KNOWN_MODEL_REGISTRY[mid].copy()
                 else:
                     self._cached_caps[mid] = infer_capabilities(mid)
 
-        # 为每个任务类型选择最优模型
+        # 额外预加载注册表（用于 get_interactions_only_models 等能力查询，不影响路由评分）
+        for mid, caps in KNOWN_MODEL_REGISTRY.items():
+            if mid not in self._cached_caps:
+                self._cached_caps[mid] = caps.copy()
+
+        # 为每个任务类型选择最优模型（仅从 API 实际发现的模型中选，跳过 interactions_only）
         new_map: Dict[str, str] = {}
         for task in TASK_REQUIREMENTS:
-            best = self._select_best(task, all_model_ids)
+            best = self._select_best(task, self._available_ids)
             if best:
                 new_map[task] = best
         for task in LOCAL_EXECUTOR_TASKS:
@@ -660,23 +623,23 @@ class ModelManager:
 
     def _merge_with_registry(self, discovered: List[str]) -> List[str]:
         """
-        将 API 发现的模型与注册表条目合并。
-        注册表中的模型即使 API 没返回也保留（用于本地测试/预填）。
-        但 interactions_only 模型不参与无 Interactions API 路由。
+        （保留接口供外部调用，_rebuild 已不使用此方法进行路由。）
+        仅返回 API 发现的模型列表，不再强制追加注册表中未被 API 返回的模型，
+        避免将已下线或不可用模型混入评分路由池。
         """
-        merged = list(dict.fromkeys(discovered))  # 去重保序
-        for known_id in KNOWN_MODEL_REGISTRY:
-            if known_id not in merged:
-                merged.append(known_id)
-        return merged
+        return list(dict.fromkeys(discovered))  # 去重保序
 
     def _select_best(self, task: str, model_ids: List[str]) -> Optional[str]:
-        """从提供的模型列表中，为指定任务选出得分最高的模型。"""
-        best_id = None
+        """从提供的模型列表中，为指定任务选出得分最高的模型。
+        跳过 interactions_only 模型（不支持 generate_content，无法直接路由）。"""
+        best_id    = None
         best_score = -1.0
         for mid in model_ids:
             caps = self._cached_caps.get(mid)
             if not caps:
+                continue
+            # interactions_only 模型必须走 Interactions API，不能通过 generate_content 调用
+            if caps.get("interactions_only", False):
                 continue
             sc = score_model_for_task(caps, task)
             if sc > best_score:
@@ -692,24 +655,18 @@ class ModelManager:
 
     @staticmethod
     def _static_default_map() -> Dict[str, str]:
-        """API 不可用时的静态兜底映射（与原 MODEL_MAP 保持一致）。"""
+        """API 不可用时的静态兜底映射（使用 generate_content 兼容的稳定模型）。"""
         defaults = {
-            "CHAT":               "gemini-3-flash-preview",
-            "CODER":              "gemini-3-pro-preview",
-            "WEB_SEARCH":         "gemini-2.5-flash",
-            "VISION":             "gemini-3-flash-preview",
-            "RESEARCH":           "gemini-2.5-pro-preview",
-            "FILE_GEN":           "gemini-3-flash-preview",
-            "FILE_GEN_COMPLEX":   "gemini-3-pro-preview",
-            "DOC_ANNOTATE":       "gemini-3-flash-preview",
-            "DOC_ANNOTATE_COMPLEX":"gemini-3-pro-preview",
-            "CODER_COMPLEX":      "gemini-3-pro-preview",
-            "MULTI_STEP":         "gemini-3-pro-preview",
-            "PAINTER":            "gemini-3.1-flash-image-preview",
-            "AGENT":              "gemini-3-flash-preview",
-            "SYSTEM":             "local-executor",
-            "FILE_OP":            "local-executor",
-            "COMPLEX":            "gemini-3-pro-preview",
+            "CHAT":       "gemini-3-flash-preview",
+            "CODER":      "gemini-3.1-pro-preview",
+            "WEB_SEARCH": "gemini-2.5-flash",
+            "VISION":     "gemini-2.5-flash",
+            "RESEARCH":   "gemini-3.1-pro-preview",
+            "FILE_GEN":   "gemini-3-flash-preview",
+            "PAINTER":    "gemini-3.1-flash-image-preview",
+            "AGENT":      "gemini-3-flash-preview",
+            "SYSTEM":     "local-executor",
+            "FILE_OP":    "local-executor",
         }
         return defaults
 

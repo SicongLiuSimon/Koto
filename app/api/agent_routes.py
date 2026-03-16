@@ -228,19 +228,10 @@ def _get_chats_dir() -> str:
     return _CHATS_DIR
 
 
-def _load_history(session_id: str, max_turns: int = 20, token_budget: int = 6000):
-    """Load recent history with token-budget truncation.
-
-    Loads at most `max_turns` messages, then trims from the oldest end until
-    the cumulative estimated token count stays within `token_budget`.
-    Estimation: len(content) // 4  (rough chars-to-tokens ratio for mixed CJK/Latin).
-    Newest messages always have priority so the most recent context is kept.
-
-    token_budget=6000 keeps ~3-4 turns of normal conversation plus moderate tool
-    observations without artificially squashing memory-relevant context.
-    Heavy raw tool output is compressed at the agent history level (unified_agent.py)
-    before being saved, so budgeting here is a secondary safety valve only.
-    """
+def _load_history(session_id: str, max_turns: int = 30):
+    """Load recent history from chats/<session_id>.json, compatible with
+    SessionManager format {role, parts}. Converts to agent-compatible
+    {role, content} dicts."""
     if not session_id:
         return []
     fname = session_id if session_id.endswith(".json") else f"{session_id}.json"
@@ -250,29 +241,23 @@ def _load_history(session_id: str, max_turns: int = 20, token_budget: int = 6000
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             raw = json.load(f)
-        # Convert {role, parts} → {role, content} for the last max_turns messages
-        converted = []
+        # Convert {role, parts} → {role, content}
+        history = []
         for msg in raw[-max_turns:]:
             role = msg.get("role", "user")
             parts = msg.get("parts", [])
             content = parts[0] if parts else msg.get("content", "")
-            converted.append({"role": role, "content": content})
-        # Apply token budget: iterate newest-first, stop when budget overflows
-        budget_used = 0
-        selected = []
-        for msg in reversed(converted):
-            est = max(1, len(msg.get("content", "")) // 4)
-            if budget_used + est > token_budget and selected:
-                break
-            selected.insert(0, msg)
-            budget_used += est
-        logger.debug(
-            f"[_load_history] {len(selected)}/{len(converted)} msgs kept, ~{budget_used} est. tokens"
-        )
-        return selected
+            history.append({"role": role, "content": content})
+        return history
     except Exception as exc:
         logger.warning(f"Failed to load history for {session_id}: {exc}")
         return []
+
+
+def _get_tracker_path(session_id: str) -> str:
+    """Return path to the per-session ConversationTracker JSON file."""
+    safe_id = (session_id or "").replace(".json", "").strip()
+    return os.path.join(_get_chats_dir(), f"{safe_id}.tracker.json")
 
 
 def _save_history(session_id: str, user_msg: str, model_msg: str):
@@ -528,23 +513,71 @@ def _run_agent_collect(
 @agent_bp.route("/chat", methods=["POST"])
 def chat():
     data = request.json
-    message = data.get("message")
-    session_id = data.get("session_id") or data.get("session", "")
-    history = data.get("history") or _load_history(session_id)
-    model_id = data.get("model", "gemini-3-flash-preview")
-    skill_id = data.get("skill_id")  # v2: 关联的 Skill ID
-    task_type = data.get("task_type")  # v2: 任务分类
+    message = data.get('message')
+    session_id = data.get('session_id') or data.get('session', '')
+    history = data.get('history') or _load_history(session_id)
+    model_id = data.get('model', 'gemini-3-flash-preview')
+    skill_id = data.get('skill_id')          # v2: 关联的 Skill ID
+    task_type = data.get('task_type')         # v2: 任务分类
+
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+
+    # ── v4: 载入对话跟踪器 ─────────────────────────────────────────
+    _tracker = None
+    _tracker_path = ""
+    try:
+        from app.core.memory.conversation_tracker import ConversationTracker
+        _tracker_path = _get_tracker_path(session_id)
+        _tracker = ConversationTracker.load(_tracker_path)
+    except Exception as _te:
+        logger.debug(f"[chat] ConversationTracker 加载跳过: {_te}")
+
+    # ── v4: 意图分析与重写 (IntentAnalyzer) ────────────────────
+    _rewritten_message = message
+    try:
+        from app.core.routing.intent_analyzer import IntentAnalyzer
+        if IntentAnalyzer.should_analyze(message):
+            _rw = IntentAnalyzer.rewrite_intent(message, history, _tracker)
+            if _rw and _rw != message:
+                logger.info(f"[chat] 意图重写: '{message[:40]}' -> '{_rw[:60]}'")
+                _rewritten_message = _rw
+    except Exception as _ia_err:
+        logger.debug(f"[chat] IntentAnalyzer 跳过: {_ia_err}")
+
+    # ── v4: ContextWindowManager (MemGPT 历史压缩)──────────────────
+    _cw_paged_context = ""
+    try:
+        from app.core.memory.context_window_manager import ContextWindowManager
+        _cw_out = ContextWindowManager.manage(
+            history=history,
+            query=_rewritten_message,
+            session_name=(session_id or "").replace(".json", ""),
+            get_memory_fn=lambda: None,
+        )
+        history = _cw_out["history"]
+        _cw_paged_context = _cw_out.get("paged_in_context", "")
+    except Exception as _cw_err:
+        logger.debug(f"[chat] ContextWindowManager 跳过: {_cw_err}")
+
+    # ── 构建 system_context 注入块 ──────────────────────────────────────────
+    _system_ctx_parts = []
+    if _tracker is not None:
+        _ctx_inj = _tracker.get_context_injection()
+        if _ctx_inj:
+            _system_ctx_parts.append(_ctx_inj)
+    if _cw_paged_context:
+        _system_ctx_parts.append(_cw_paged_context)
+    _system_context = "\n\n".join(_system_ctx_parts) if _system_ctx_parts else None
 
     # Phase3: load system state snapshot and inject into history
     session_state = _load_session_state(session_id)
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
+    
 
-    if not message:
-        return jsonify({"error": "Message is required"}), 400
-
-    skill_id, auto_skill_ids = _resolve_runtime_skill(message, skill_id, task_type)
+    skill_id, auto_skill_ids = _resolve_runtime_skill(_rewritten_message, skill_id, task_type)
 
     agent = get_agent()
     if agent.model_id != model_id:
@@ -552,10 +585,10 @@ def chat():
 
     # ── v2: PII 脱敏 ─────────────────────────────────────────────────────────
     mask_result = None
-    safe_message = message
+    safe_message = _rewritten_message
     try:
         PIIFilter = _lazy_pii()
-        mask_result = PIIFilter.mask(message)
+        mask_result = PIIFilter.mask(_rewritten_message)
         if mask_result.has_pii:
             safe_message = mask_result.masked_text
             logger.info(f"[chat] 🔒 PII 脱敏 {mask_result.stats}")
@@ -575,6 +608,7 @@ def chat():
                 session_id=session_id,
                 skill_id=skill_id,
                 task_type=task_type,
+                system_context=_system_context,
             ):
                 step_data = step.to_dict()
                 collected_steps.append(step_data)
@@ -647,6 +681,23 @@ def chat():
                     f"{display_answer}"
                 )
 
+            # ── Skill 推荐提示 ────────────────────────────────────────────────
+            # 在回答末尾追加相关但未启用的 Skill 推荐，
+            # 帮助用户发现可以增强本类任务体验的专项技能。
+            if display_answer and not used_local_fallback:
+                try:
+                    from app.core.skills.skill_suggester import SkillSuggester
+                    _suggestions = SkillSuggester.suggest(
+                        user_input=message or "",
+                        task_type=task_type or "CHAT",
+                        already_active_ids=auto_skill_ids or [],
+                        answer_text=display_answer,
+                    )
+                    if _suggestions:
+                        display_answer += SkillSuggester.format_hint(_suggestions)
+                except Exception as _se:
+                    logger.debug(f"[chat] Skill 推荐注入跳过: {_se}")
+
             latency_ms = int((time.time() - _t_start) * 1000)
             task_payload = {
                 "id": f"task_{int(time.time() * 1000)}",
@@ -676,6 +727,10 @@ def chat():
                 session_state, collected_steps
             )
             _save_session_state(session_id, merged_state)
+
+            # ── v4: 更新对话跟踪器（异步，非阻塞）─────────────────────────
+            if _tracker is not None and _tracker_path and display_answer:
+                _tracker.update_async(message, display_answer, _tracker_path)
 
             # ── 后台自评分（数据飞轮: model_eval 通道）────────────────────────
             if display_answer and not used_local_fallback:
@@ -893,7 +948,7 @@ def process_stream_compat():
                     if validation_action == "BLOCK":
                         raw_final = "[内容被安全策略拦截，请调整您的请求]"
                     elif validation_action in ("WARN", "REFORMAT"):
-                        raw_final = val_result.cleaned_text or raw_final
+                        raw_final = val_result.text or raw_final
             except Exception as _ve:
                 logger.warning(f"[process-stream] 输出校验失败: {_ve}")
 

@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Koto Shadow Routes — 影子追踪 REST API
+"""Koto Shadow Routes — 影子追踪 REST API
 =======================================
 挂载前缀: /api/shadow
 
@@ -8,7 +7,8 @@ Koto Shadow Routes — 影子追踪 REST API
   GET  /api/shadow/status           — 启用状态 + 统计摘要
   POST /api/shadow/toggle           — 开启 / 关闭
   GET  /api/shadow/observations     — 全部观察数据（调试用）
-  GET  /api/shadow/pending          — 待展示的主动消息
+  GET  /api/shadow/pending          — 待展示的主动消息（轮询）
+  GET  /api/shadow/stream           — SSE 实时推送（EventSource 长连接）
   POST /api/shadow/dismiss/<id>     — 关闭单条消息
   POST /api/shadow/dismiss-all      — 全部关闭
   POST /api/shadow/tick             — 手动触发一次主动检查（测试用）
@@ -17,9 +17,11 @@ Koto Shadow Routes — 影子追踪 REST API
 
 from __future__ import annotations
 
+import json as _json
 import logging
+import queue as _queue
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -62,39 +64,16 @@ def shadow_status():
     try:
         obs = _get_watcher().get_observations()
         topics = sorted(obs.get("topics", {}).items(), key=lambda x: -x[1])[:5]
+        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])[:5]
         open_tasks = _get_watcher().get_open_tasks()
         pending = _get_agent().pending()
-
-        # 对话风格摘要
-        cs = obs.get("conversation_style", {})
-        cs_samples = cs.get("samples", 0)
-        style_summary = {
-            "avg_query_len": cs.get("avg_query_len", 0),
-            "polite_ratio": round(cs.get("polite_ratio", 0.5), 2),
-            "context_ratio": round(cs.get("context_ratio", 0.0), 2),
-            "explicit_pref_ratio": round(cs.get("explicit_pref_ratio", 0.0), 2),
-            "multistep_ratio": round(cs.get("multistep_ratio", 0.0), 2),
-            "samples": cs_samples,
-        } if cs_samples > 0 else None
-
-        # 任务风格摘要：top-3 任务类型 + top-3 输出格式
-        ts = obs.get("task_style", {})
-        task_types_top = sorted(ts.get("task_types", {}).items(), key=lambda x: -x[1])[:3]
-        output_fmt_top = sorted(ts.get("output_format", {}).items(), key=lambda x: -x[1])[:3]
-        task_summary = {
-            "top_task_types": [{"type": k, "count": v} for k, v in task_types_top],
-            "top_output_formats": [{"format": k, "count": v} for k, v in output_fmt_top],
-            "samples": ts.get("samples", 0),
-        } if ts.get("samples", 0) > 0 else None
-
         return _ok({
             "enabled": obs.get("enabled", True),
             "total_observations": obs.get("total_observations", 0),
             "last_seen": obs.get("last_seen"),
             "streak_days": obs.get("streak", {}).get("days", 0),
             "top_topics": [{"topic": k, "count": v} for k, v in topics],
-            "style_summary": style_summary,
-            "task_summary": task_summary,
+            "top_phrases": [{"phrase": k, "count": v} for k, v in phrases],
             "open_tasks_count": len(open_tasks),
             "pending_messages": len(pending),
         })
@@ -141,6 +120,44 @@ def shadow_pending():
         return _ok(msgs)
     except Exception as exc:
         return _err(str(exc), 500)
+
+
+@shadow_bp.get("/stream")
+def shadow_stream():
+    """
+    SSE 实时推送端点。客户端连接后，新的主动消息会在入队时立即推送，无需轮询。
+
+    前端用法:
+        const es = new EventSource('/api/shadow/stream');
+        es.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            // msg.type: greeting | follow_up | suggestion | reminder | failed_retry
+            showProactiveNotification(msg);
+        };
+
+    协议:
+      - 数据帧:   data: <JSON 消息体>\n\n
+      - 心跳帧:   : keepalive\n\n  （每 30 秒发送一次，防止连接超时）
+    """
+    agent = _get_agent()
+    sub_q = agent.subscribe_sse()
+
+    def _generate():
+        try:
+            while True:
+                try:
+                    msg = sub_q.get(timeout=30)
+                    yield f"data: {_json.dumps(msg, ensure_ascii=False)}\n\n"
+                except _queue.Empty:
+                    yield ": keepalive\n\n"
+        finally:
+            agent.unsubscribe_sse(sub_q)
+
+    return Response(
+        stream_with_context(_generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @shadow_bp.post("/dismiss/<msg_id>")
