@@ -46,8 +46,9 @@ from __future__ import annotations
 
 import re
 import logging
+import concurrent.futures
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,132 @@ class _Formatter:
 class OutputValidator:
     """
     静态验收器。所有方法均为类方法，无需实例化。
+
+    可选 LLM 质量判断模式：调用 configure_llm_judge(client, model_id) 启用。
+    启用后，通过所有规则检测的响应会额外经过一次语义质量评判，
+    能捕获答非所问、内容严重不足等规则无法判断的问题。
     """
+
+    # ── LLM 判断配置 ──────────────────────────────────────────────
+    _judge_client: Optional[Any] = None          # GeminiProvider 或兼容实例
+    _judge_model: str = "gemini-2.5-flash"       # 默认使用快速但有能力的模型
+    _judge_timeout: float = 15.0                 # 最长等待秒数，超时则跳过
+    _judge_min_len: int = 80                     # 响应短于此字符数则不启动 LLM 判断
+
+    @classmethod
+    def configure_llm_judge(
+        cls,
+        client: Any,
+        model_id: str = "gemini-2.5-flash",
+        timeout: float = 15.0,
+    ) -> None:
+        """
+        配置 LLM 质量判断器。在应用启动时调用一次即可。
+
+        Args:
+            client  : GeminiProvider 实例（或任何实现 generate_content() 的对象）
+            model_id: 用于质量判断的模型 ID（轻量快速模型即可，不需要最强模型）
+            timeout : 单次判断最长等待秒数，超时自动跳过（默认 15s）
+        """
+        cls._judge_client = client
+        cls._judge_model = model_id
+        cls._judge_timeout = timeout
+        logger.info("[OutputValidator] LLM judge 已配置: model=%s timeout=%.0fs", model_id, timeout)
+
+    @classmethod
+    def _get_judge_client(cls) -> Optional[Any]:
+        """
+        返回已配置的 judge client。若未通过 configure_llm_judge() 配置，
+        尝试用环境变量懒加载一个 GeminiProvider。
+        """
+        if cls._judge_client is not None:
+            return cls._judge_client
+        try:
+            import os
+            api_key = (
+                os.environ.get("GEMINI_API_KEY")
+                or os.environ.get("API_KEY")
+                or os.environ.get("GOOGLE_API_KEY")
+            )
+            if not api_key:
+                return None
+            from app.core.llm.gemini import GeminiProvider
+            cls._judge_client = GeminiProvider(api_key=api_key)
+            logger.info("[OutputValidator] LLM judge 懒加载成功: model=%s", cls._judge_model)
+            return cls._judge_client
+        except Exception as e:
+            logger.debug("[OutputValidator] LLM judge 懒加载失败（跳过）: %s", e)
+            return None
+
+    @classmethod
+    def _llm_judge(cls, text: str, original_prompt: str) -> Optional[tuple]:
+        """
+        使用 LLM 对输出进行语义质量判断。仅在规则检测全部通过后调用。
+
+        返回 (action, reason) 或 None（表示通过，不需干预）。
+
+        判断标准：
+            PASS  — 回复切题、内容完整
+            WARN  — 基本可用但有轻微瑕疵（略短、信息稍不完整等）
+            RETRY — 答非所问、内容严重不足或逻辑明显错误
+        """
+        if len(text) < cls._judge_min_len:
+            return None
+
+        client = cls._get_judge_client()
+        if client is None:
+            return None
+
+        judge_prompt = (
+            "你是一个 AI 回复质量评判员。请根据用户请求和 AI 的回复，判断回复质量。\n\n"
+            f"【用户请求】\n{original_prompt[:600]}\n\n"
+            f"【AI 回复】\n{text[:2000]}\n\n"
+            "请只输出 JSON，格式如下，不要其他内容：\n"
+            '{"verdict": "PASS" | "WARN" | "RETRY", "reason": "一句话说明原因"}\n\n'
+            "判断标准：\n"
+            "- PASS  : 回复切题，内容完整，无明显问题\n"
+            "- WARN  : 回复基本可用但有瑕疵（如信息略显不足或稍短）\n"
+            "- RETRY : 答非所问、内容严重不足、逻辑明显错误，或完全没有实质性内容"
+        )
+
+        def _call():
+            return client.generate_content(
+                prompt=judge_prompt,
+                model=cls._judge_model,
+                temperature=0.0,
+                max_tokens=128,
+                response_mime_type="application/json",
+            )
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_call)
+                response = future.result(timeout=cls._judge_timeout)
+
+            import json
+            raw = response.get("content", "{}") if isinstance(response, dict) else "{}"
+            # 兼容模型直接返回 markdown 代码块包裹 JSON 的情况
+            raw = raw.strip().strip("```json").strip("```").strip()
+            data = json.loads(raw)
+            verdict = data.get("verdict", "PASS").upper()
+            reason = data.get("reason", "")
+
+            if verdict == "RETRY":
+                logger.info("[OutputValidator] LLM judge → RETRY: %s", reason)
+                return ("RETRY", f"[LLM 质量判断] {reason}")
+            elif verdict == "WARN":
+                logger.info("[OutputValidator] LLM judge → WARN: %s", reason)
+                return ("WARN", f"[LLM 质量判断] {reason}")
+            return None
+
+        except concurrent.futures.TimeoutError:
+            logger.debug(
+                "[OutputValidator] LLM judge 超时 (%.0fs)，已跳过", cls._judge_timeout
+            )
+            return None
+        except Exception as e:
+            logger.debug("[OutputValidator] LLM judge 异常（跳过）: %s", e)
+            return None
 
     @classmethod
     def validate(
@@ -325,7 +451,21 @@ class OutputValidator:
                     skill_id=skill_id,
                 )
 
-        # ── 6. 通过 ─────────────────────────────────────────────────
+        # ── 7. LLM 语义质量判断（可选，规则全部通过后才触发）─────────
+        if original_prompt and len(text) >= cls._judge_min_len:
+            judge_result = cls._llm_judge(text, original_prompt)
+            if judge_result:
+                action, reason = judge_result
+                logger.info("[OutputValidator] action=%s from LLM judge", action)
+                return ValidationResult(
+                    action=action,
+                    text=current_text,
+                    original_text=text,
+                    reasons=[reason],
+                    skill_id=skill_id,
+                )
+
+        # ── 8. 通过 ─────────────────────────────────────────────────
         logger.debug("[OutputValidator] action=PASS skill_id=%s", skill_id)
         return ValidationResult(
             action="PASS",

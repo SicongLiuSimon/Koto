@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import threading
 import uuid
 from datetime import datetime, timedelta
@@ -32,11 +33,30 @@ _QUEUE_FILE = _BASE / "proactive_queue.json"
 _MAX_QUEUE = 20
 # 同类消息最小冷却（小时）
 _COOLDOWN_HOURS = {
-    "greeting": 6,
-    "follow_up": 12,
-    "suggestion": 24,
-    "reminder": 1,
-    "failed_retry": 48,
+    "greeting":       4,    # 4h 冷却，更快响应回访
+    "follow_up":      3,    # 3h（原 12h）
+    "suggestion":     12,
+    "reminder":       1,
+    "failed_retry":   24,   # 24h（原 48h）
+    "context_carry":  0.25, # 15 分钟 — 任务完成后立即接续
+    "session_summary": 1,   # 每小时最多一次
+    "insight":        8,    # 模式洞察，每 8h 最多一次
+}
+# 这些类型入队新消息时自动淘汰同类旧消息（时效性单槽）
+_SINGLE_SLOT_TYPES = {"greeting", "session_summary", "insight"}
+
+# 任务类型 → 接续建议（用于 context_carry）
+_TASK_CARRY_HINTS: Dict[str, str] = {
+    "翻译":  "需要我再润色一下，或者翻译其他段落吗？",
+    "写":    "要不要让我帮你检查一遍，或者生成一个大纲？",
+    "代码":  "要不要我帮你写测试用例，或者添加注释？",
+    "总结":  "要不要我再提炼出几个关键行动点？",
+    "分析":  "需要我把分析结果整理成报告格式吗？",
+    "邮件":  "要不要我帮你想一个更好的主题行？",
+    "数据":  "要不要我帮你生成一张可视化图表？",
+    "报告":  "要不要我帮你生成一份简洁的执行摘要？",
+    "表格":  "要不要我帮你分析一下数据规律？",
+    "图片":  "需要我帮你调整描述或生成更多变体吗？",
 }
 
 
@@ -80,10 +100,13 @@ class ProactiveAgent:
     _instance: Optional["ProactiveAgent"] = None
     _lock = threading.Lock()
 
+    # SSE 推送订阅者列表（每个前端连接对应一个 Queue）
+    _sse_subs: List["queue.Queue[Dict]"] = []
+    _sse_lock = threading.Lock()
+
     def __init__(self):
         self._queue: List[Dict] = []
         self._last_type_time: Dict[str, datetime] = {}
-        self._last_suggestion_topic: str = ""  # 轮换推荐话题，避免每次推同一个
         self._q_lock = threading.Lock()
         self._load_queue()
 
@@ -166,6 +189,82 @@ class ProactiveAgent:
         msg = _make_msg("reminder", content, priority=priority, ttl_hours=48)
         self._enqueue(msg)
 
+    def tick_immediate(self):
+        """
+        由 ShadowWatcher 检测到新失败请求或新开放任务时立即调用（绕过定时 interval）。
+        仅检查高优先级类型，使用缩短的冷却时间：
+          follow_up    → 1h
+          failed_retry → 4h
+        """
+        from app.core.monitoring.shadow_watcher import get_shadow_watcher
+        watcher = get_shadow_watcher()
+        if not watcher.enabled:
+            return
+
+        if self._can_fire("follow_up", min_cooldown_h=1.0):
+            msg = self._build_follow_up(watcher.get_open_tasks())
+            if msg:
+                self._enqueue(msg)
+
+        if self._can_fire("failed_retry", min_cooldown_h=4.0):
+            msg = self._build_failed_retry(watcher.get_failed_tasks())
+            if msg:
+                self._enqueue(msg)
+
+    def tick_after_exchange(
+        self,
+        session_exchanges: int,
+        completed_task_text: Optional[str],
+        obs: Dict,
+    ):
+        """
+        每次对话完成后由 ShadowWatcher 调用，实现真正意义上的「主动 AI」。
+
+        session_exchanges    — 本次会话已进行的轮次数
+        completed_task_text  — 刚完成任务的文本（若本轮完成了某个开放任务，否则 None）
+        obs                  — 当前影子观察数据快照
+        """
+        from app.core.monitoring.shadow_watcher import get_shadow_watcher
+        if not get_shadow_watcher().enabled:
+            return
+
+        # 1. 任务完成后立即接续（「完成了！要不要接着做 X？」）
+        if completed_task_text and self._can_fire("context_carry"):
+            msg = self._build_context_carry(completed_task_text)
+            if msg:
+                self._enqueue(msg)
+
+        # 2. 长会话摘要提示（10 轮以上）
+        if session_exchanges >= 10 and self._can_fire("session_summary"):
+            msg = self._build_session_summary(obs, session_exchanges)
+            if msg:
+                self._enqueue(msg)
+
+        # 3. 模式洞察（高频话题/短语 → 建议建 Skill / 工作流）
+        if self._can_fire("insight"):
+            msg = self._build_insight(obs)
+            if msg:
+                self._enqueue(msg)
+
+    # ── SSE 订阅管理 ──────────────────────────────────────────────────────────
+
+    @classmethod
+    def subscribe_sse(cls) -> "queue.Queue[Dict]":
+        """注册一个 SSE 订阅者，返回接收新消息的 Queue（每个前端长连接调用一次）。"""
+        q: queue.Queue[Dict] = queue.Queue(maxsize=50)
+        with cls._sse_lock:
+            cls._sse_subs.append(q)
+        return q
+
+    @classmethod
+    def unsubscribe_sse(cls, q: "queue.Queue[Dict]"):
+        """移除 SSE 订阅者（连接断开时调用）。"""
+        with cls._sse_lock:
+            try:
+                cls._sse_subs.remove(q)
+            except ValueError:
+                pass
+
     # ── 消息构建 ──────────────────────────────────────────────────────────────
 
     def _build_greeting(
@@ -187,6 +286,10 @@ class ProactiveAgent:
             return None
 
         hour = now.hour
+        # 深夜（0-5点）不主动问候
+        if hour < 5:
+            return None
+
         if 5 <= hour < 12:
             time_str = "早上好"
         elif 12 <= hour < 18:
@@ -278,43 +381,95 @@ class ProactiveAgent:
             or obs.get("recent_topics_30d")
             or dict(sorted(obs.get("topics", {}).items(), key=lambda x: -x[1]))
         )
+        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])
 
-        # 轮换话题：跳过上次已推荐的，避免每次推相同内容
-        topic_keys = list(recent_topics.keys()) if recent_topics else []
-        top_topic = ""
-        for candidate in topic_keys:
-            if candidate != self._last_suggestion_topic:
-                top_topic = candidate
-                break
-        # 所有话题都推过了（只有一个），仍使用它
-        if not top_topic and topic_keys:
-            top_topic = topic_keys[0]
+        top_topic = next(iter(recent_topics), "") if recent_topics else ""
+        top_phrase = phrases[0][0] if phrases else ""
 
-        # 从任务风格中获取最高频同样轮换的任务类型
-        ts = obs.get("task_style", {})
-        task_types = ts.get("task_types", {})
-        sorted_tasks = sorted(task_types.items(), key=lambda x: -x[1])
-        top_task = ""
-        for t_name, t_count in sorted_tasks:
-            if t_count >= 3 and t_name != self._last_suggestion_topic:
-                top_task = t_name
-                break
-
-        if not top_topic and not top_task:
+        if not top_topic and not top_phrase:
             return None
 
-        if top_task:
-            picked = top_task
-            content = f"💡 我注意到你经常需要「{top_task}」，要不要创建一个快捷 Skill？"
-        elif top_topic:
-            picked = top_topic
+        if top_topic:
             content = f"💡 你经常使用 Koto 处理「{top_topic}」相关任务，要不要让我整理一份最佳实践？"
+        elif top_phrase:
+            content = f"💡 我注意到你经常需要「{top_phrase}」，要不要创建一个快捷 Skill？"
         else:
             return None
 
-        self._last_suggestion_topic = picked
         return _make_msg("suggestion", content, priority="low",
-                         triggered_by=f"topic:{picked}", ttl_hours=48)
+                         triggered_by=f"topic:{top_topic}", ttl_hours=48)
+
+    def _build_context_carry(
+        self, completed_task_text: str
+    ) -> Optional[Dict]:
+        """任务刚完成后，主动推断并提出可能的后续动作。"""
+        hint = "还有什么我可以继续帮你的吗？"
+        for kw, suggestion in _TASK_CARRY_HINTS.items():
+            if kw in completed_task_text:
+                hint = suggestion
+                break
+        content = f"✅ 「{completed_task_text[:40]}」完成了！{hint}"
+        return _make_msg(
+            "context_carry", content,
+            priority="medium",
+            triggered_by=f"task_done:{completed_task_text[:20]}",
+            ttl_hours=2,
+        )
+
+    def _build_session_summary(
+        self, obs: Dict, session_exchanges: int
+    ) -> Optional[Dict]:
+        """会话进行 10 轮以上时，主动提议生成摘要供用户保存。"""
+        recent_topics = obs.get("recent_topics_7d") or obs.get("topics", {})
+        top_topics = list(recent_topics.keys())[:3]
+        topics_str = "、".join(top_topics) if top_topics else "多个话题"
+        content = (
+            f"📋 我们已经聊了 {session_exchanges} 轮，主要围绕「{topics_str}」。"
+            "要不要我整理一份对话摘要，方便你保存或下次继续？"
+        )
+        return _make_msg(
+            "session_summary", content,
+            priority="low",
+            triggered_by="session_length",
+            ttl_hours=4,
+        )
+
+    def _build_insight(
+        self, obs: Dict
+    ) -> Optional[Dict]:
+        """基于高频话题 / 短语，主动提出效率优化建议（创建 Skill、工作流等）。"""
+        recent_topics = obs.get("recent_topics_7d") or {}
+        phrases = obs.get("recurring_phrases", {})
+
+        # 话题本周出现 5 次以上 → 提议建工作流
+        for topic, count in recent_topics.items():
+            if count >= 5:
+                content = (
+                    f"🔍 我注意到你这周已经处理了 {count} 次「{topic}」相关任务，"
+                    "要不要让我帮你建一个专属工作流，下次一键搞定？"
+                )
+                return _make_msg(
+                    "insight", content,
+                    priority="low",
+                    triggered_by=f"insight_topic:{topic}",
+                    ttl_hours=12,
+                )
+
+        # 某个短语被使用 8 次以上 → 提议创建 Skill
+        for phrase, count in sorted(phrases.items(), key=lambda x: -x[1]):
+            if count >= 8:
+                content = (
+                    f"💡 你已经用「{phrase}」请求了 {count} 次，"
+                    "要不要我把它做成一个快捷 Skill，以后触发更高效？"
+                )
+                return _make_msg(
+                    "insight", content,
+                    priority="low",
+                    triggered_by=f"insight_phrase:{phrase}",
+                    ttl_hours=12,
+                )
+
+        return None
 
     def _build_failed_retry(
         self, failed_tasks: List[Dict], llm_fn=None
@@ -354,8 +509,9 @@ class ProactiveAgent:
 
     # ── 队列管理 ──────────────────────────────────────────────────────────────
 
-    def _can_fire(self, msg_type: str) -> bool:
-        cooldown_h = _COOLDOWN_HOURS.get(msg_type, 6)
+    def _can_fire(self, msg_type: str, min_cooldown_h: Optional[float] = None) -> bool:
+        """检查该类型消息是否脱离冷却期。min_cooldown_h 可覆盖默认冷却时长（用于紧急触发）。"""
+        cooldown_h = min_cooldown_h if min_cooldown_h is not None else _COOLDOWN_HOURS.get(msg_type, 6)
         last = self._last_type_time.get(msg_type)
         if last and (datetime.now() - last).total_seconds() < cooldown_h * 3600:
             return False
@@ -370,29 +526,35 @@ class ProactiveAgent:
                 if not m.get("dismissed")
                 and datetime.fromisoformat(m["expires_at"]) > now
             ]
+            # 时效性单槽：淘汰同类旧消息，确保只保留最新的一条
+            if msg["type"] in _SINGLE_SLOT_TYPES:
+                for m in self._queue:
+                    if m["type"] == msg["type"]:
+                        m["dismissed"] = True
+                self._queue = [m for m in self._queue if not m.get("dismissed")]
             if len(self._queue) >= _MAX_QUEUE:
                 return
             self._queue.append(msg)
             self._last_type_time[msg["type"]] = datetime.now()
         self._save_queue()
         logger.info("[ProactiveAgent] 新消息入队: [%s] %s", msg["type"], msg["content"][:40])
+        # 实时推送给所有 SSE 订阅者
+        with self.__class__._sse_lock:
+            dead: List["queue.Queue[Dict]"] = []
+            for sub_q in self.__class__._sse_subs:
+                try:
+                    sub_q.put_nowait(msg)
+                except queue.Full:
+                    dead.append(sub_q)
+            for sub_q in dead:
+                self.__class__._sse_subs.remove(sub_q)
 
     def _save_queue(self):
         try:
             _BASE.mkdir(parents=True, exist_ok=True)
             with self._q_lock:
-                # 同时持久化冷却时间，防止重启后立即群发消息
-                cooldown_data = {
-                    k: v.isoformat(timespec="seconds")
-                    for k, v in self._last_type_time.items()
-                }
-                payload = {
-                    "queue": self._queue,
-                    "last_type_time": cooldown_data,
-                    "last_suggestion_topic": self._last_suggestion_topic,
-                }
                 _QUEUE_FILE.write_text(
-                    json.dumps(payload, ensure_ascii=False, indent=2),
+                    json.dumps(self._queue, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
         except Exception as exc:
@@ -401,27 +563,15 @@ class ProactiveAgent:
     def _load_queue(self):
         if _QUEUE_FILE.exists():
             try:
-                raw = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
-                now = datetime.now()
-                # 兼容旧格式（纯列表）和新格式（含冷却时间的字典）
-                if isinstance(raw, list):
-                    queue_raw = raw
-                elif isinstance(raw, dict):
-                    queue_raw = raw.get("queue", [])
-                    for k, v_str in raw.get("last_type_time", {}).items():
-                        try:
-                            self._last_type_time[k] = datetime.fromisoformat(v_str)
-                        except (ValueError, TypeError):
-                            pass
-                    self._last_suggestion_topic = raw.get("last_suggestion_topic", "")
-                else:
-                    queue_raw = []
-                # 过滤过期/已关闭条目
-                self._queue = [
-                    m for m in queue_raw
-                    if not m.get("dismissed")
-                    and datetime.fromisoformat(m.get("expires_at", "2000-01-01")) > now
-                ]
+                data = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    # Drop already-expired entries on load
+                    now = datetime.now()
+                    self._queue = [
+                        m for m in data
+                        if not m.get("dismissed")
+                        and datetime.fromisoformat(m.get("expires_at", "2000-01-01")) > now
+                    ]
             except Exception as exc:
                 logger.debug("[ProactiveAgent] 队列加载失败: %s", exc)
 
