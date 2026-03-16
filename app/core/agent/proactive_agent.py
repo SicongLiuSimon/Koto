@@ -561,8 +561,17 @@ class ProactiveAgent:
         try:
             _BASE.mkdir(parents=True, exist_ok=True)
             with self._q_lock:
+                # 同时持久化冷却时间，防止重启后立即群发消息
+                cooldown_data = {
+                    k: v.isoformat(timespec="seconds")
+                    for k, v in self._last_type_time.items()
+                }
+                payload = {
+                    "queue": self._queue,
+                    "last_type_time": cooldown_data,
+                }
                 _QUEUE_FILE.write_text(
-                    json.dumps(self._queue, ensure_ascii=False, indent=2),
+                    json.dumps(payload, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
         except Exception as exc:
@@ -571,15 +580,26 @@ class ProactiveAgent:
     def _load_queue(self):
         if _QUEUE_FILE.exists():
             try:
-                data = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
-                if isinstance(data, list):
-                    # Drop already-expired entries on load
-                    now = datetime.now()
-                    self._queue = [
-                        m for m in data
-                        if not m.get("dismissed")
-                        and datetime.fromisoformat(m.get("expires_at", "2000-01-01")) > now
-                    ]
+                raw = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
+                now = datetime.now()
+                # 兼容旧格式（纯列表）和新格式（含冷却时间的字典）
+                if isinstance(raw, list):
+                    queue_raw = raw
+                elif isinstance(raw, dict):
+                    queue_raw = raw.get("queue", [])
+                    for k, v_str in raw.get("last_type_time", {}).items():
+                        try:
+                            self._last_type_time[k] = datetime.fromisoformat(v_str)
+                        except (ValueError, TypeError):
+                            pass
+                else:
+                    queue_raw = []
+                # 过滤过期/已关闭条目
+                self._queue = [
+                    m for m in queue_raw
+                    if not m.get("dismissed")
+                    and datetime.fromisoformat(m.get("expires_at", "2000-01-01")) > now
+                ]
             except Exception as exc:
                 logger.debug("[ProactiveAgent] 队列加载失败: %s", exc)
 
