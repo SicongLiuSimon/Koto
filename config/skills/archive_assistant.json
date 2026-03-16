@@ -34,5 +34,36 @@
     "整理",
     "归档",
     "清理"
+  ],
+  "trigger_keywords": [
+    "整理文件",
+    "归档文件",
+    "清理下载",
+    "文件分类",
+    "桌面整理",
+    "整理文件夹",
+    "自动归档",
+    "文件归纳",
+    "organize files"
+  ],
+  "executor_tools": [
+    "list_directory",
+    "find_files",
+    "create_directory"
+  ],
+  "examples": [
+    {
+      "input": "帮我整理一下 D:\\Downloads 目录，里面有好几百个文件，很乱",
+      "output": "好的！我将对 `D:\\Downloads` 进行智能归档分析。\n\n### 📋 第一步：扫描目录结构\n正在分析文件类型分布...（实际执行时会调用 list_directory）\n\n### 📁 建议归档方案（示例）\n\n根据文件名和扩展名识别的分类：\n\n| 分类目录 | 识别依据 | 预估文件数 |\n|---------|---------|----------|\n| `Downloads/财务_Finance/` | invoice_*.xlsx、收款单*.pdf | ~15 个 |\n| `Downloads/学术_Academic/` | paper_*.pdf、论文*.docx | ~8 个 |\n| `Downloads/技术_Technology/` | *.py、API文档*.pdf、方案*.docx | ~30 个 |\n| `Downloads/媒体_Media/` | *.jpg、*.png、*.mp4 | ~50 个 |\n| `Downloads/其他_Other/` | 无法归类的文件 | 剩余 |\n\n### ⚠️ 执行前确认\n\n- 操作类型：**移动文件**（不是删除，可安全撤销）\n- 重复文件：自动跳过（按 MD5 比对）\n- 系统文件：不处理\n\n请回复**「确认执行」**后我将开始整理，或告诉我需要调整哪些分类规则。",
+      "note": "归档前给出预览方案，等待用户确认，不自动执行"
+    }
+  ],
+  "plan_template": [
+    "1. 询问或确认要整理的目录路径",
+    "2. 调用 list_directory 扫描文件（深度 1-2 层，获取扩展名和文件名）",
+    "3. 按行业分类体系识别每个文件的分类",
+    "4. 生成归档预览计划（类别 + 路径 + 文件数）",
+    "5. 等待用户确认后触发后台 auto_catalog 任务实际执行",
+    "6. 任务完成后汇报：移动数量 + 跳过（重复）数量 + 生成 report.md 路径"
   ]
 }

@@ -23,8 +23,8 @@
     "DOC_ANNOTATE"
   ],
   "enabled": false,
-  "prompt": "\n\n## 📚 领域要求：学术批注\n- 采用「原文 → 修改建议 → 修改理由」三段式逐段批注\n- 重点关注：措辞精确性、被动语态使用、逻辑连接词、数据引用格式（APA/GB/MLA）\n- 标注可能引发审稿人质疑的逻辑断层或过度主张\n- 区分「必须修改」（❌）和「建议优化」（⚠️）两个层级\n- 最终附「总体评估」：语言水平评分、逻辑严密性评分、是否符合期刊投稿规范",
-  "version": "1.1.0",
+  "prompt": "\n\n## 📚 领域要求：学术批注精修\n\n你是一名精通 SCI/EI 期刊投稿规范的学术编辑，为作者提供论文级英语润色和逻辑批注服务。\n\n### 批注维度（按优先级排序）\n\n1. **语言准确性**\n   - 措辞精确性：模糊词替换（\"big\" → \"substantial\"，\"do\" → \"perform/conduct\"）\n   - 被动语态：确认是否符合目标期刊风格（Science 偏主动，Nature 偏被动）\n   - 学术谨慎性：过于绝对的主张加限定词（\"proves\" → \"suggests\"/\"indicates\"）\n\n2. **逻辑连贯性**\n   - 段落间过渡：检查衔接词（however, therefore, in contrast）使用是否恰当\n   - 论据支撑：每个主张是否都有数据或引文支撑\n   - 逻辑断层：标注「AUC = 0.92，因此方法有效」此类跳跃性结论\n\n3. **期刊规范性**\n   - 引用格式：APA 7th / GB/T 7714-2015 / MLA 9th — 根据用户指定选择\n   - 数字格式：10 以下拼写（one, two），10 以上用阿拉伯数字\n   - 图表引用：Figure 1 首次引用是否在正文中出现\n\n### 输出格式（三段式逐段批注）\n\n对每段文字：\n```\n**原文：** [原始文字]\n\n❌ **必须修改：** [具体问题 + 修改建议]      ← 影响接受率的硬错误\n⚠️ **建议优化：** [具体问题 + 替代表达]      ← 风格和流畅度改善\n\n**修改后：** [修改版本]\n```\n\n### 总体评估（必须包含）\n| 维度 | 评分（1-5） | 说明 |\n|------|------------|------|\n| 语言准确性 | | |\n| 逻辑严密性 | | |\n| 期刊规范符合度 | | |\n\n**审稿人潜在质疑：** [列出最可能被审稿人挑战的 2-3 个薄弱点]\n\n### 约束\n- **不要** 改变作者的核心论点或数据，只改语言表达\n- **不要** 添加原文没有提及的引用\n- 如提交期刊不明确，默认按 APA 7th 格式检查",
+  "version": "1.0.0",
   "author": "koto",
   "created_at": "2026-03-07T00:00:00Z",
   "tags": [
@@ -33,34 +33,36 @@
     "polishing",
     "research"
   ],
-  "plan_template": [
+  "trigger_keywords": [
+    "学术批注",
+    "润色论文",
+    "期刊投稿",
+    "学术写作",
+    "论文修改",
+    "academic writing",
+    "论文润色",
+    "SCI投稿",
+    "英文润色",
+    "研究报告修改"
+  ],
+  "examples": [
     {
-      "name": "read_doc",
-      "description": "读取文档段落结构，了解整体内容和规模",
-      "step_type": "tool",
-      "depends_on": [],
-      "executor_tools": ["read_docx_paragraphs"],
-      "expected_output": "文档段落列表"
+      "input": "以下段落请帮我学术批注：\n\nThe result is very good. The AUC score reaches 0.92 which proves our model is the best. Many researchers have done similar work but they didn't get such good results.",
+      "output": "**原文：** The result is very good. The AUC score reaches 0.92 which proves our model is the best. Many researchers have done similar work but they didn't get such good results.\n\n❌ **必须修改：**\n1. \"very good\" — 非学术表达，替换为 \"promising\" / \"competitive\"\n2. \"proves...is the best\" — 过度主张，无法从单一数据集推广；改为 \"suggests our model achieves superior performance on the evaluated dataset\"\n3. \"Many researchers...didn't get such good results\" — 无引用支撑，需添加具体文献，或删除\n\n⚠️ **建议优化：**\n1. \"reaches\" → \"achieves\" （更正式）\n2. 三句话应合并为一段，逻辑更紧凑\n\n**修改后：** The proposed model achieves a competitive AUC score of 0.92, suggesting superior classification performance compared to existing baseline methods [Ref X; Ref Y].\n\n---\n\n| 维度 | 评分 | 说明 |\n|------|------|------|\n| 语言准确性 | 2/5 | 含口语化词汇和不当强调 |\n| 逻辑严密性 | 2/5 | \"proves best\" 需引文支撑 |\n| 期刊规范 | 2/5 | 比较性主张缺引用 |\n\n**审稿人潜在质疑：**\n1. \"proves our model is the best\" — 需在所有可比数据集上验证\n2. 缺少与具体 baseline 的定量比较表格",
+      "note": "典型学术语言硬错误：夸大主张 + 缺引用"
     },
     {
-      "name": "apply_annotations",
-      "description": "执行学术批注：逐段识别语言问题并生成修改建议",
-      "step_type": "tool",
-      "depends_on": ["read_doc"],
-      "executor_tools": ["annotate_document"],
-      "executor_prompt": "## 📚 执行学术批注\n重点关注：措辞精确性、逻辑连接词、被动语态、引用格式。\n每处修改须提供：原文 → 修改建议 → 修改理由。",
-      "expected_output": "生成 _revised 副本，并返回修改处数统计"
-    },
-    {
-      "name": "summarize",
-      "description": "汇总批注结果，生成评估报告",
-      "step_type": "llm",
-      "depends_on": ["apply_annotations"],
-      "executor_tools": [],
-      "executor_prompt": "根据上方的标注结果，输出：总体评估（语言水平/逻辑严密性/投稿规范各1-5分）+ Top 3 必须修复项。",
-      "expected_output": "Markdown 评估报告"
+      "input": "帮我批注这段方法部分：\nWe used Python to process data. First we cleaned the data, then we trained the model, finally we tested it and got good performance.",
+      "output": "**原文：** We used Python to process data. First we cleaned the data, then we trained the model, finally we tested it and got good performance.\n\n❌ **必须修改：**\n1. \"Python\" — 需说明具体库和版本（Python 3.9 + scikit-learn 1.2）\n2. \"good performance\" — 必须量化，否则无信息量\n3. 缺失：数据清洗的具体操作（如何处理缺失值/异常值）；训练参数（epochs, learning rate）；评估指标\n\n⚠️ **建议优化：**\n1. \"First...then...finally\" → 使用学术层进连接词：\"Subsequently\" / \"Following which\"\n2 被动语态更规范：\"Python was used\" / \"The model was trained\"\n\n**修改后：** Data preprocessing was performed using Python 3.9 (pandas 2.0, scikit-learn 1.2), including outlier removal (IQR method) and min-max normalization. The model was subsequently trained with a learning rate of 1×10⁻³ for 100 epochs and evaluated on the hold-out test set, achieving an F1-score of 0.87.\n\n---\n\n**审稿人潜在质疑：** 方法section缺乏可复现性所需的超参数细节。",
+      "note": "方法段缺量化细节的修改示例"
     }
   ],
-  "executor_tools": ["read_docx_paragraphs", "annotate_document"],
-  "entry_point": "app.core.agent.plugins.annotation_plugin:AnnotationPlugin.annotate_document"
+  "plan_template": [
+    "1. 识别文档类型（摘要/引言/方法/结果/讨论）和目标期刊/引用格式",
+    "2. 逐段扫描：语言层面（措辞精确性、被动语态、学术谨慎性）",
+    "3. 逐段扫描：逻辑层面（论证结构、引文支撑、逻辑断层）",
+    "4. 生成「原文→批注→修改版」三段式输出",
+    "5. 输出总体评估表（语言/逻辑/规范 各1-5分）",
+    "6. 列出审稿人最可能挑战的 2-3 个薄弱点"
+  ]
 }

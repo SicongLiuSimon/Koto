@@ -9,15 +9,25 @@
   "input_variables": [],
   "output_spec": {
     "format": "markdown",
-    "must_contain": ["重复组", "释放"],
+    "must_contain": [
+      "重复组",
+      "释放"
+    ],
     "must_not_contain": [],
     "min_chars": 100,
     "max_chars": null,
     "required_json_keys": [],
     "description": "重复文件分组报告，标明保留文件和建议删除文件，以及预计释放空间"
   },
-  "bound_tools": ["find_files", "file_info", "list_directory"],
-  "task_types": ["SYSTEM", "CHAT"],
+  "bound_tools": [
+    "find_files",
+    "file_info",
+    "list_directory"
+  ],
+  "task_types": [
+    "SYSTEM",
+    "CHAT"
+  ],
   "priority": 68,
   "conflict_with": [],
   "enabled": false,
@@ -25,5 +35,44 @@
   "version": "1.0.0",
   "author": "koto",
   "created_at": "2026-03-08T00:00:00Z",
-  "tags": ["duplicate", "clean", "disk", "space", "重复", "清理", "磁盘", "空间"]
+  "tags": [
+    "duplicate",
+    "clean",
+    "disk",
+    "space",
+    "重复",
+    "清理",
+    "磁盘",
+    "空间"
+  ],
+  "trigger_keywords": [
+    "清理重复文件",
+    "找重复文件",
+    "释放磁盘空间",
+    "重复图片",
+    "磁盘空间不足",
+    "清理磁盘",
+    "重复文档",
+    "duplicate files"
+  ],
+  "executor_tools": [
+    "find_files",
+    "file_info",
+    "list_directory"
+  ],
+  "examples": [
+    {
+      "input": "帮我扫描 D:\\Photos 目录找出重复的图片",
+      "output": "## 🎯 重复文件扫描报告\n\n**扫描目录**：D:\\Photos  \n**扫描文件数**：247 个  \n**发现重复组**：12 组，共 31 个冗余文件  \n**可释放空间**：约 1.8 GB  \n\n---\n\n### 重复组 #1（占用 450 MB）\n| 状态 | 路径 | 大小 | 修改时间 |\n|------|------|------|----------|\n| ✅ 保留 | D:\\Photos\\2024\\三亚旅行.jpg | 8.2MB | 2024-02-10 |\n| 🗑️ 建议删除 | D:\\Photos\\备份\\三亚旅行.jpg | 8.2MB | 2024-03-15 |\n| 🗑️ 建议删除 | D:\\Photos\\三亚旅行 (1).jpg | 8.2MB | 2024-03-20 |\n\n判断依据：MD5 完全一致；保留路径最短、创建时间最早的版本\n\n---\n\n**安全确认提示**：\n1. 所有删除操作只移入回收站，可随时恢复\n2. 请逐组确认，或回复「全部确认」一次执行所有删除\n3. 如需跳过某个重复组，告知我组号即可",
+      "note": "重复文件报告格式，保留/删除决策逻辑说明，安全确认"
+    }
+  ],
+  "plan_template": [
+    "1. 确认扫描目录路径",
+    "2. 调用 list_directory + file_info 获取文件大小和元信息",
+    "3. 按扫描策略分级：MD5完全重复 > 同名不同目录 > 含副本后缀",
+    "4. 生成重复组报告（保留/删除建议 + 释放空间估算）",
+    "5. 等待用户逐组或全部确认后再执行删除（移入回收站）",
+    "6. 报告执行结果：删除N个，跳过N个，释放N MB"
+  ]
 }

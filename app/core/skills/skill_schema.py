@@ -299,6 +299,14 @@ class SkillDefinition:
     # ── 新增：工具绑定 ───────────────────────────────────────────────────────
     bound_tools: List[str] = field(default_factory=list)
 
+    # ── 执行层增强（自定义 Skill 由 SkillRecorder LLM 分析自动填充）──────────
+    # 执行时建议调用的内部工具名列表，供 UnifiedAgent 执行层参考
+    executor_tools: List[str] = field(default_factory=list)
+    # 有序执行步骤描述，供 inject_into_prompt 注入给模型
+    plan_template: List[str] = field(default_factory=list)
+    # AutoMatcher 触发关键词，用于 SkillAutoMatcher._PATTERN_MAP 注册
+    trigger_keywords: List[str] = field(default_factory=list)
+
     # ── 原有字段（保留向后兼容）─────────────────────────────────────────────
     task_types: List[str] = field(default_factory=list)
     enabled: bool = False
@@ -536,6 +544,9 @@ class SkillDefinition:
                 "description": self.output_spec.description,
             },
             "bound_tools": self.bound_tools,
+            "executor_tools": self.executor_tools,
+            "plan_template": self.plan_template,
+            "trigger_keywords": self.trigger_keywords,
             "task_types": self.task_types,
             "enabled": self.enabled,
             "prompt": self.prompt,
@@ -598,6 +609,9 @@ class SkillDefinition:
             input_variables=input_variables,
             output_spec=output_spec,
             bound_tools=data.get("bound_tools", []),
+            executor_tools=data.get("executor_tools", []),
+            plan_template=data.get("plan_template", []),
+            trigger_keywords=data.get("trigger_keywords", []),
             task_types=data.get("task_types", []),
             enabled=data.get("enabled", False),
             prompt=data.get("prompt", ""),
@@ -638,7 +652,10 @@ class SkillDefinition:
             system_prompt_template=legacy.get("system_prompt_template", ""),
             input_variables=[],
             output_spec=OutputSpec(),
-            bound_tools=[],
+            bound_tools=legacy.get("bound_tools", []),
+            executor_tools=legacy.get("executor_tools", []),
+            plan_template=legacy.get("plan_template", []),
+            trigger_keywords=legacy.get("trigger_keywords", []),
             task_types=legacy.get("task_types", []),
             enabled=legacy.get("enabled", False),
             prompt=legacy.get(

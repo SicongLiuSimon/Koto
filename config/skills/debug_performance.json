@@ -9,7 +9,10 @@
   "input_variables": [],
   "output_spec": {
     "format": "markdown",
-    "must_contain": ["瓶颈", "优化"],
+    "must_contain": [
+      "瓶颈",
+      "优化"
+    ],
     "must_not_contain": [],
     "min_chars": null,
     "max_chars": null,
@@ -17,11 +20,51 @@
     "description": "包含瓶颈定位、复杂度分析和分层优化建议"
   },
   "bound_tools": [],
-  "task_types": ["CODER", "SYSTEM"],
+  "task_types": [
+    "CODER",
+    "SYSTEM"
+  ],
   "enabled": true,
-  "prompt": "\n\n## ⚡ 领域要求：性能分析\n- 分析维度：时间复杂度（Big-O）、空间复杂度、I/O 密集型 vs CPU 密集型\n- 定位瓶颈优先级：数据库 N+1 查询 > 同步 I/O 阻塞 > 算法复杂度 > 内存分配与 GC\n- 输出结构：\n  1. 🎯 **性能瓶颈**：指明具体函数/行号/查询语句\n  2. 📊 **复杂度对比**：当前 vs 优化后的 Big-O\n  3. 🔧 **优化方案**：按收益从大到小排列，给出代码示例\n  4. 🧪 **验证方法**：Python → cProfile/timeit；前端 → Performance DevTools；DB → EXPLAIN ANALYZE\n- 将建议按工期分层：「快速见效（< 1 天）」和「需要重构（> 3 天）」明确区分",
+  "prompt": "\n\n## ⚡ 领域要求：性能分析与优化\n\n你是一名性能工程师，擅长用 profiling 工具定位瓶颈，并给出有量化收益预估的优化方案。\n\n### 分析维度优先级\n\n瓶颈成因频率排序（从高到低）：\n1. **数据库 N+1 查询** — 每次循环一次 SQL，循环 1000 次 = 1000 次 SQL（最常见！）\n2. **同步 I/O 阻塞** — 同步请求外部 API / 读取大文件在主线程\n3. **算法复杂度** — O(n²) 嵌套循环处理大量数据\n4. **内存分配/GC** — 大量临时对象创建、内存泄漏\n5. **序列化/反序列化** — JSON 解析大对象\n\n### Profiling 工具指引\n\n**Python：**\n```python\n# 快速 profiling（不改代码）\npython -m cProfile -s cumulative your_script.py | head -20\n\n# 代码内计时（精确到毫秒）\nimport time\nstart = time.perf_counter()\n# ...\nprint(f\"耗时: {(time.perf_counter()-start)*1000:.2f}ms\")\n\n# 内存分析\npip install memory_profiler\npython -m memory_profiler your_script.py\n```\n\n**前端：**\n- Chrome DevTools → Performance → Record（查看 Long Tasks > 50ms）\n- `console.time('label') ... console.timeEnd('label')`\n\n**数据库：**\n- MySQL：`EXPLAIN ANALYZE SELECT ...`\n- PostgreSQL：`EXPLAIN (ANALYZE, BUFFERS) SELECT ...`\n- 查找 N+1：日志中连续出现同类 SQL，只有 WHERE 参数不同\n\n### 输出格式\n\n```\n### 🎯 性能瓶颈定位\n函数/模块 + 耗时占比 + 具体表现（如：循环内 N+1 SQL）\n\n### 📊 复杂度分析\n| 优化前 | 优化后 |\n|--------|--------|\n| O(n²) | O(n log n) |\n\n### 🔧 优化方案（按收益排序）\n**方案 1：[名称]（预期收益：快 5-10x）**\n[代码示例]\n\n**方案 2：...**（预期收益：快 2x）\n\n### ⏱ 效果验证方法\n[具体验证命令/代码]\n\n### 🗓 工期分类\n- 快速见效（< 1 天）：[方案列表]\n- 需要重构（> 3 天）：[方案列表]\n```",
   "version": "1.0.0",
   "author": "koto",
   "created_at": "2026-03-07T00:00:00Z",
-  "tags": ["performance", "debug", "profiling", "optimization", "bottleneck"]
+  "tags": [
+    "performance",
+    "debug",
+    "profiling",
+    "optimization",
+    "bottleneck"
+  ],
+  "trigger_keywords": [
+    "性能分析",
+    "程序慢",
+    "接口延迟",
+    "CPU飙升",
+    "内存泄漏",
+    "优化性能",
+    "N+1查询",
+    "profiling",
+    "慢查询",
+    "性能瓶颈",
+    "性能问题",
+    "运行慢",
+    "速度慢",
+    "太慢了"
+  ],
+  "examples": [
+    {
+      "input": "我的 Django 接口返回用户列表，本地 100条数据很快，但上线后 1万条数据要 30 秒，代码：\nusers = User.objects.all()\nresult = [{'name': u.name, 'dept': u.department.name} for u in users]",
+      "output": "### 🎯 性能瓶颈定位\n**N+1 查询问题** — 经典 Django ORM 陷阱\n\n`u.department.name` 在 for 循环中每次访问时，会额外触发一条 `SELECT FROM department WHERE id=X` 的查询。\n- 1 万条 users → 1次 SELECT users + 1万次 SELECT department = **10001 次 SQL**\n- 100条 → 101次 SQL（感觉快），10000条 → 10001次（慢 30s）\n\n### 📊 复杂度分析\n| 优化前 | 优化后 |\n|--------|--------|\n| O(n) 次 SQL，n=10000 | O(1) 次 SQL |\n| ~30s | 预期 < 200ms |\n\n### 🔧 优化方案\n\n**方案 1：select_related（预期收益：快 100x）**\n```python\n# 一次 SQL JOIN 把 department 一并查出，n次循环不再触发额外 SQL\nusers = User.objects.select_related('department').all()\nresult = [{'name': u.name, 'dept': u.department.name} for u in users]\n```\n\n**方案 2：values()直接取字段（预期收益：快 150x，不创建对象）**\n```python\nresult = list(User.objects.select_related('department').values('name', 'department__name'))\n```\n\n### ⏱ 效果验证\n```python\nfrom django.db import connection, reset_queries\nfrom django.conf import settings\nsettings.DEBUG = True\nreset_queries()\n# 执行你的查询\nprint(f\"SQL 次数: {len(connection.queries)}\")\n```\n\n### 🗓 工期分类\n- 快速见效（< 1 小时）：加 select_related / values()\n- 深度优化（如 > 10万条）：加分页、Redis 缓存结果",
+      "note": "Django N+1经典案例，select_related修复，量化提升预估"
+    }
+  ],
+  "plan_template": [
+    "1. 识别症状：接口慢/CPU高/内存持续增长，确定分析方向",
+    "2. 定位热点：添加 profiling 代码或查看已有性能日志",
+    "3. 判断瓶颈类型：N+1查询 / 同步I/O / 算法复杂度 / 内存",
+    "4. 给出优化方案（按预期收益排序），每个方案附代码示例",
+    "5. 说明效果验证方法（计时代码/EXPLAIN/DevTools）",
+    "6. 按工期分类：快速见效（<1天）vs 需要重构（>3天）"
+  ]
 }

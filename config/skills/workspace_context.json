@@ -16,8 +16,17 @@
     "required_json_keys": [],
     "description": "包含工作区文件结构摘要，让后续操作有精确上下文"
   },
-  "bound_tools": ["list_directory", "find_file", "get_file_info"],
-  "task_types": ["SYSTEM", "CHAT", "CODER", "FILE_GEN"],
+  "bound_tools": [
+    "list_directory",
+    "find_file",
+    "get_file_info"
+  ],
+  "task_types": [
+    "SYSTEM",
+    "CHAT",
+    "CODER",
+    "FILE_GEN"
+  ],
   "priority": 85,
   "conflict_with": [],
   "enabled": false,
@@ -25,5 +34,42 @@
   "version": "1.0.0",
   "author": "koto",
   "created_at": "2026-03-08T00:00:00Z",
-  "tags": ["file", "workspace", "directory", "context", "工作区", "目录", "项目结构"]
+  "tags": [
+    "file",
+    "workspace",
+    "directory",
+    "context",
+    "工作区",
+    "目录",
+    "项目结构"
+  ],
+  "trigger_keywords": [
+    "当前目录",
+    "项目结构",
+    "这个项目",
+    "我的文件夹",
+    "工作区",
+    "帮我看看目录",
+    "扫描项目",
+    "了解项目",
+    "项目文件"
+  ],
+  "executor_tools": [
+    "list_directory",
+    "find_files"
+  ],
+  "examples": [
+    {
+      "input": "帮我了解一下我的当前项目结构",
+      "output": "## 🗺️ 工作区扫描结果\n\n**工作目录**：D:\\Projects\\my_app（示例）  \n**扫描深度**：3 层  \n**文件总数**：87 个\n\n### 📁 目录结构\n```\nmy_app/\n├── src/\n│   ├── api/          (12 个 .py 文件)  ← 后端接口层\n│   ├── core/         (8 个 .py 文件)   ← 核心业务逻辑\n│   └── models/       (5 个 .py 文件)   ← 数据模型\n├── tests/            (15 个 .py 文件)  ← 测试文件\n├── docs/             (6 个 .md 文件)   ← 文档\n├── requirements.txt                    ← Python 依赖\n└── README.md                           ← 项目说明\n```\n\n### 📌 关键文件\n- `requirements.txt` — 最近修改：3天前\n- `src/api/user_api.py` — 最近修改：今天 14:32\n- `README.md` — 最近修改：1周前\n\n### 🔍 已建立上下文\n后续文件相关问题（如「修改登录接口」「查找用户模型」），我将优先在 `src/` 目录搜索，不再需要您提供完整路径。",
+      "note": "工作区结构扫描，建立后续对话的文件路径上下文"
+    }
+  ],
+  "plan_template": [
+    "1. 调用 list_directory 扫描工作目录（深度 ≤ 3 层）",
+    "2. 识别项目类型（Python/Node.js/Java等）和目录职责",
+    "3. 标注关键文件：配置文件、入口文件、最近修改文件",
+    "4. 以树形结构展示目录，附每个目录的文件数和职责说明",
+    "5. 声明「上下文已建立」，告知用户后续引用不需要完整路径"
+  ]
 }

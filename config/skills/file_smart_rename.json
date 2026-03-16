@@ -9,15 +9,25 @@
   "input_variables": [],
   "output_spec": {
     "format": "markdown",
-    "must_contain": ["→"],
+    "must_contain": [
+      "→"
+    ],
     "must_not_contain": [],
     "min_chars": null,
     "max_chars": null,
     "required_json_keys": [],
     "description": "输出「旧名 → 新名」对照表，用户确认后再执行"
   },
-  "bound_tools": ["list_directory", "find_files", "file_info", "rename_file"],
-  "task_types": ["SYSTEM", "CHAT"],
+  "bound_tools": [
+    "list_directory",
+    "find_files",
+    "file_info",
+    "rename_file"
+  ],
+  "task_types": [
+    "SYSTEM",
+    "CHAT"
+  ],
   "priority": 70,
   "conflict_with": [],
   "enabled": false,
@@ -25,5 +35,42 @@
   "version": "1.0.0",
   "author": "koto",
   "created_at": "2026-03-08T00:00:00Z",
-  "tags": ["rename", "file", "batch", "organize", "重命名", "整理", "批量"]
+  "tags": [
+    "rename",
+    "file",
+    "batch",
+    "organize",
+    "重命名",
+    "整理",
+    "批量"
+  ],
+  "trigger_keywords": [
+    "批量重命名",
+    "重命名文件",
+    "整理文件名",
+    "批量改名",
+    "照片重命名",
+    "文件名规范化",
+    "smart rename"
+  ],
+  "executor_tools": [
+    "list_directory",
+    "find_files",
+    "file_info"
+  ],
+  "examples": [
+    {
+      "input": "桌面有一堆截图文件：截图001.png，截图002.png，image_20240315.png，帮我改成更有意义的名字，我昨天在处理用户登录系统",
+      "output": "**原文件名 → 建议新名** 预览表：\n\n| 原文件名 | 建议新名 | 推断依据 |\n|---------|---------|---------|\n| 截图001.png | 20240315_登录系统_截图_001.png | 含序号，根据上下文推断内容 |\n| 截图002.png | 20240315_登录系统_截图_002.png | 同上 |\n| image_20240315.png | 20240315_登录系统_截图_003.png | 从文件名提取日期，统一命名 |\n\n**命名规则**：`{日期}_{项目}_{类型}_{序号}.{扩展名}`\n\n---\n✅ 如确认以上映射，请回复「**确认执行**」\n❌ 如需修改规则（如改用不同日期/项目名），请告诉我",
+      "note": "预览表 + 等待用户确认，防止误操作"
+    }
+  ],
+  "plan_template": [
+    "1. 确认目标目录路径和用户的命名偏好（如有）",
+    "2. 调用 list_directory 获取文件列表",
+    "3. 调用 file_info 获取每个文件的创建日期和元信息",
+    "4. 按文件类型选择命名策略：图片/文档/代码/视频",
+    "5. 生成「原名→新名」预览表，等待用户确认",
+    "6. 用户确认后逐个调用 rename_file 执行，处理同名冲突（加_02后缀）"
+  ]
 }
