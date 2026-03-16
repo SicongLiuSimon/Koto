@@ -373,7 +373,7 @@ class TestTokenTracker:
         today = date.today().isoformat()
         month = today[:7]
 
-        with patch.object(tt, "_save_if_dirty"):
+        with patch.object(tt, "_save_if_dirty"), patch.object(tt, "_load"):
             tt.record_usage("gemini-2.5-flash", 100, 50)
 
         assert today in tt._data["daily"]
@@ -387,7 +387,7 @@ class TestTokenTracker:
         import web.token_tracker as tt
         today = date.today().isoformat()
 
-        with patch.object(tt, "_save_if_dirty"):
+        with patch.object(tt, "_save_if_dirty"), patch.object(tt, "_load"):
             tt.record_usage("gemini-2.5-flash", 100, 50)
             tt.record_usage("gemini-2.5-flash", 200, 100)
 
@@ -418,9 +418,10 @@ class TestTokenTracker:
 
     def test_get_stats_returns_structure(self):
         import web.token_tracker as tt
-        with patch.object(tt, "_save_if_dirty"):
+        with patch.object(tt, "_save_if_dirty"), patch.object(tt, "_load"):
             tt.record_usage("gemini-2.5-flash", 100, 50)
-        stats = tt.get_stats()
+        with patch.object(tt, "_load"):
+            stats = tt.get_stats()
         assert "today" in stats
         assert "this_month" in stats
         assert "last_7_days" in stats

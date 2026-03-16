@@ -87,7 +87,7 @@ jobs:
             tests/test_unified_agent.py \
             -v --tb=short -q \
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
-            --cov-fail-under=39
+            --cov-fail-under=48
 
       - name: Upload coverage report
         if: always()
