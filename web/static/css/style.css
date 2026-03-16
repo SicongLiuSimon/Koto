@@ -367,25 +367,22 @@ a { color: var(--accent-primary); }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active { border-color: var(--accent-primary); box-shadow: 0 10px 20px rgba(99, 198, 255, 0.18); }
 .session-name { flex: 1; font-size: 14px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.session-item > svg { color: var(--text-muted); flex-shrink: 0; }
-.session-del-btn {
-    display: inline-flex !important;
-    visibility: visible !important;
-    align-items: center !important;
-    justify-content: center !important;
-    background: transparent !important;
-    border: none !important;
-    padding: 2px 6px !important;
-    cursor: pointer !important;
-    color: #aab4c0 !important;
-    font-size: 17px !important;
-    line-height: 1 !important;
-    flex-shrink: 0 !important;
-    border-radius: 4px !important;
-    transition: color .15s, background .15s !important;
-    min-width: 22px !important;
+.session-item svg { color: var(--text-muted); }
+.session-delete-btn {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    line-height: 1;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+    flex-shrink: 0;
 }
-.session-del-btn:hover { color: #e04545 !important; background: rgba(220,60,60,.12) !important; }
+.session-item:hover .session-delete-btn { opacity: 0.35; }
+.session-delete-btn:hover { opacity: 1 !important; color: #ef6b6b !important; background: rgba(239, 107, 107, 0.12); }
 
 .nav-section.compact { padding-top: 2px; }
 .nav-cta {
@@ -616,7 +613,7 @@ a { color: var(--accent-primary); }
     flex-direction: column;
     gap: 16px;
     min-height: 100%;
-    justify-content: flex-start;
+    justify-content: center;
     padding-top: 12px;
 }
 .welcome-card {
@@ -1524,6 +1521,62 @@ a { color: var(--accent-primary); }
     padding-left: 2px;
 }
 
+.proxy-help-details {
+    margin-top: 8px;
+}
+.proxy-help-details summary {
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.proxy-help-details summary::-webkit-details-marker { display: none; }
+.proxy-help-details summary::before {
+    content: "▶";
+    font-size: 9px;
+    transition: transform 0.15s;
+    display: inline-block;
+}
+.proxy-help-details[open] summary::before {
+    transform: rotate(90deg);
+}
+.proxy-help-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 11px;
+}
+.proxy-help-table th,
+.proxy-help-table td {
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.06));
+    color: var(--text-secondary, var(--text-muted));
+    white-space: nowrap;
+}
+.proxy-help-table th {
+    color: var(--text-muted);
+    font-weight: 500;
+    padding-bottom: 5px;
+}
+.proxy-help-tip {
+    margin: 8px 0 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.proxy-help-tip code {
+    background: rgba(255,255,255,0.07);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-family: monospace;
+    font-size: 11px;
+}
+
 /* ===== Desktop Performance Mode ===== */
 /* 针对桌面版 (QtWebEngine) 的性能优化 */
 /* 当 body 有 desktop-mode 类时，禁用所有昂贵的视觉效果 */
@@ -2374,6 +2427,7 @@ body.desktop-mode .pill-btn {
     font-size: 0.85em;
     color: var(--accent-primary, #63c6ff);
     margin-bottom: 8px;
+    flex-wrap: wrap;
 }
 .agent-status-bar .agent-spinner {
     width: 12px; height: 12px;
@@ -2381,6 +2435,22 @@ body.desktop-mode .pill-btn {
     border-top-color: var(--accent-primary, #63c6ff);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
+}
+.planning-skills {
+    display: inline-flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-left: 4px;
+}
+.skill-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    background: rgba(99, 198, 255, 0.15);
+    border: 1px solid rgba(99, 198, 255, 0.4);
+    font-size: 0.78em;
+    color: var(--accent-primary, #63c6ff);
+    white-space: nowrap;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -2440,7 +2510,134 @@ body.desktop-mode .pill-btn {
     flex-shrink: 0;
 }
 
-/* Agent confirm dialog theme-aware */
+/* ========== Koto Steps — 动态进度时间线 ========== */
+.koto-steps {
+    margin: 0 0 10px 0;
+}
+.koto-steps-summary {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 0;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    outline: none;
+}
+.koto-steps-summary::-webkit-details-marker { display: none; }
+.koto-steps-spinner {
+    width: 12px; height: 12px;
+    border: 1.5px solid rgba(99,198,255,0.25);
+    border-top-color: var(--accent-primary, #63c6ff);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+.koto-steps-label {
+    font-size: 0.82em;
+    color: var(--accent-primary, #63c6ff);
+    font-weight: 500;
+}
+.koto-steps-skills {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    margin-left: 2px;
+}
+.koto-steps-done-icon {
+    color: #4ade80;
+    font-size: 0.85em;
+}
+.koto-steps-meta {
+    font-size: 0.80em;
+    color: var(--text-muted);
+}
+.koto-steps[open] .koto-steps-summary {
+    margin-bottom: 5px;
+}
+.koto-steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-left: 2px;
+}
+.koto-step {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    font-size: 0.83em;
+    animation: kotoStepIn 0.18s ease;
+}
+@keyframes kotoStepIn {
+    from { opacity: 0; transform: translateY(-3px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.koto-step.pending {
+    background: rgba(99,198,255,0.06);
+    border-left: 2px solid var(--accent-primary, #63c6ff);
+}
+.koto-step.done {
+    background: rgba(74,222,128,0.04);
+    border-left: 2px solid rgba(74,222,128,0.55);
+    opacity: 0.82;
+}
+.koto-step.failed {
+    background: rgba(255,85,85,0.05);
+    border-left: 2px solid rgba(255,85,85,0.5);
+}
+.koto-step.thought {
+    background: transparent;
+    border-left: 1px solid rgba(128,128,128,0.3);
+    opacity: 0.65;
+    font-style: italic;
+}
+.koto-step-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+    min-width: 16px;
+    text-align: center;
+}
+.koto-step-ok { color: #4ade80; }
+.koto-step-desc {
+    flex: 1;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 340px;
+}
+.koto-step.thought .koto-step-desc {
+    color: var(--text-muted);
+    font-size: 0.93em;
+}
+.koto-step-result {
+    color: var(--text-muted);
+    font-size: 0.80em;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.koto-step-time {
+    color: var(--text-muted);
+    font-size: 0.76em;
+    font-feature-settings: "tnum";
+    min-width: 28px;
+    text-align: right;
+    flex-shrink: 0;
+}
+.koto-mini-spin {
+    display: inline-block;
+    width: 11px; height: 11px;
+    border: 1.5px solid rgba(99,198,255,0.25);
+    border-top-color: var(--accent-primary, #63c6ff);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: middle;
+}
+
+
 .agent-dialog-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.6); z-index: 9999;
