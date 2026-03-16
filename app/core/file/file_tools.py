@@ -1427,7 +1427,7 @@ class FileToolsPlugin(AgentPlugin):
             llm = GeminiProvider()
             resp = llm.generate_content(
                 prompt=prompt,
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 system_instruction="你是一个专业的文件摘要助手，输出简洁精准的中文摘要。",
             )
             text = ""

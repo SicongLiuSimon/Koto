@@ -151,15 +151,6 @@ class ChartVisionPlugin(AgentPlugin):
         if not os.path.isfile(filepath):
             return f"Error: 找不到图片文件：{filepath}"
 
-        # ── sandbox: restrict to workspace/uploads/dist ────────────────
-        resolved = os.path.realpath(filepath)
-        safe_dirs = [
-            os.path.realpath(os.path.join(os.getcwd(), d))
-            for d in ("workspace", "uploads", "dist")
-        ]
-        if not any(resolved.startswith(d + os.sep) for d in safe_dirs):
-            return f"Error: 文件路径不在允许的目录范围内: {filepath}"
-
         mime_type = ChartVisionPlugin._resolve_mime(filepath)
         if mime_type not in _SUPPORTED_MIME:
             return (

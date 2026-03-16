@@ -68,7 +68,7 @@ class UnifiedAgent(Agent):
         self,
         llm_provider: LLMProvider,
         tool_registry: Optional[ToolRegistry] = None,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "gemini-3-flash-preview",
         system_instruction: Optional[str] = None,
         # ── v2 参数 ──────────────────────────────────────────────
         skill_id: Optional[str] = None,
@@ -132,6 +132,8 @@ class UnifiedAgent(Agent):
         # 运行时可覆盖 skill_id / task_type
         skill_id: Optional[str] = None,
         task_type: Optional[str] = None,
+        # v4: 多轮对话语义上下文注入（来自 ConversationTracker / CWM）
+        system_context: Optional[str] = None,
     ) -> Generator[AgentStep, None, None]:
         """
         Executes the agent loop. Yields AgentStep objects to track progress.
@@ -142,6 +144,11 @@ class UnifiedAgent(Agent):
         2. ReAct 循环（不变）
         3. 最终答案输出验收 → PASS/REFORMAT/RETRY/BLOCK
         4. PII 还原  → 用户看到含原始信息的答案
+
+        v4 新增
+        ───────
+        - system_context: 来自 ConversationTracker 和 ContextWindowManager 的
+          对话上下文摘要，追加到 system_instruction 末尾，增强多轮语义连贯性
         """
         _skill_id = skill_id or self.skill_id
         _task_type = task_type or self.task_type
@@ -221,6 +228,7 @@ class UnifiedAgent(Agent):
 
         # ── Skill 注入：将启用的 Skills 注入到 system_instruction ──────────────
         _effective_instruction = self.base_system_instruction
+        _auto_skill_ids: list = []   # 提前初始化保证后续规划步骤可引用
         try:
             from app.core.skills.skill_manager import SkillManager
 
@@ -242,6 +250,23 @@ class UnifiedAgent(Agent):
             except Exception as _ame:
                 logger.debug(f"[UnifiedAgent] AutoMatcher 跳过: {_ame}")
 
+            # ── TriggerBinding 补充匹配：将用户配置的意图绑定合并进来 ──────────
+            try:
+                from app.core.skills.skill_trigger_binding import SkillBindingManager
+                _binding_mgr = SkillBindingManager()
+                _binding_mgr.ensure_recommended_bindings()
+                _binding_ids = _binding_mgr.match_intent(safe_input)
+                if _binding_ids:
+                    # 去重并合并，AutoMatcher 推荐优先，Binding 补充在后
+                    _merged = list(dict.fromkeys(_auto_skill_ids + _binding_ids))
+                    _auto_skill_ids = _merged[:6]
+                    logger.info(
+                        f"[UnifiedAgent] 🔗 TriggerBinding 补充: "
+                        f"{_binding_ids} → 合并后: {_auto_skill_ids}"
+                    )
+            except Exception as _tbe:
+                logger.debug(f"[UnifiedAgent] TriggerBinding 跳过: {_tbe}")
+
             _effective_instruction = SkillManager.inject_into_prompt(
                 self.base_system_instruction,
                 task_type=_task_type,
@@ -257,13 +282,7 @@ class UnifiedAgent(Agent):
                 runtime_enabled = bool(runtime_state.get("enabled", False))
                 runtime_skill = SkillManager.get_definition(_skill_id)
                 if runtime_skill and not runtime_enabled:
-                    _is_domain = (
-                        getattr(runtime_skill.category, "value", runtime_skill.category) == "domain"
-                    )
-                    runtime_prompt = runtime_skill.render_prompt(
-                        with_examples=_is_domain,
-                        with_output_spec=_is_domain,
-                    ).strip()
+                    runtime_prompt = runtime_skill.render_prompt().strip()
                     if runtime_prompt:
                         _effective_instruction = (
                             _effective_instruction
@@ -274,6 +293,23 @@ class UnifiedAgent(Agent):
         except Exception as _se:
             logger.debug(f"[UnifiedAgent] Skill 注入跳过: {_se}")
 
+        # ── executor_tools 过滤：收集显式激活 Skill 的工具白名单 ─────────────
+        # 只对用户显式指定的 _skill_id 做强制过滤（精确任务场景）
+        # auto-matched 的临时 skill 不做强制限制（保持完整工具集以支持通用对话）
+        _executor_tool_whitelist: Optional[set] = None
+        if _skill_id:
+            try:
+                from app.core.skills.skill_manager import SkillManager as _SM_et
+                _active_def = _SM_et.get_definition(_skill_id)
+                if _active_def and getattr(_active_def, "executor_tools", None):
+                    _executor_tool_whitelist = set(_active_def.executor_tools)
+                    logger.info(
+                        f"[UnifiedAgent] 🔧 executor_tools 过滤激活 ({_skill_id}): "
+                        f"{sorted(_executor_tool_whitelist)}"
+                    )
+            except Exception as _ete:
+                logger.debug(f"[UnifiedAgent] executor_tools 收集跳过: {_ete}")
+
         # ── 注入本地时间（每次请求动态注入，确保模型感知当前时间）──────────────
         _now = datetime.now()
         _weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][_now.weekday()]
@@ -281,6 +317,43 @@ class UnifiedAgent(Agent):
             f"当前本地时间：{_now.strftime('%Y年%m月%d日 %H:%M')}（{_weekday}）\n\n"
         )
         _effective_instruction = _time_prefix + _effective_instruction
+
+        # ── v4: 多轮对话上下文注入（来自 ConversationTracker / CWM paged-in）──
+        if system_context and system_context.strip():
+            _effective_instruction = (
+                _effective_instruction
+                + "\n\n"
+                + system_context.strip()
+            )
+            logger.debug("[UnifiedAgent] 注入对话上下文 (%d chars)", len(system_context))
+
+        # ── 0. 规划反馈：立即向用户报告初始化状态 ────────────────────────────────
+        try:
+            _tool_count = len(self.registry.get_definitions()) if self.registry else 0
+            # 尝试获取技能显示名称
+            _skill_display: list = []
+            if _auto_skill_ids:
+                try:
+                    from app.core.skills.skill_manager import SkillManager as _SM_p
+                    _SM_p._ensure_init()
+                    for _sid in _auto_skill_ids:
+                        _entry = _SM_p._registry.get(_sid, {})
+                        _icon = _entry.get("icon", "")
+                        _name = _entry.get("name", _sid)
+                        _skill_display.append(f"{_icon}{_name}" if _icon else _name)
+                except Exception:
+                    _skill_display = list(_auto_skill_ids)
+            _skill_part = ("，技能: " + " · ".join(_skill_display)) if _skill_display else ""
+            _tool_part = (f"，{_tool_count} 个工具可用") if _tool_count else ""
+            _planning_msg = "正在分析请求" + _skill_part + _tool_part
+            yield AgentStep(
+                step_type=AgentStepType.THOUGHT,
+                content=_planning_msg,
+                metadata={"phase": "planning", "skill_ids": _auto_skill_ids, "skill_labels": _skill_display}
+            )
+            _pub("THOUGHT", _planning_msg)
+        except Exception:
+            pass
 
         while steps_taken < self.MAX_STEPS:
             steps_taken += 1
@@ -291,25 +364,14 @@ class UnifiedAgent(Agent):
                 tools_def = self._tool_router.select(all_tools_def, safe_input)
             else:
                 tools_def = all_tools_def
-
-            # v4: skill executor_tools 精确工具集（优先级高于 ToolRouter）
-            # 当 Skill 声明了 executor_tools，只向 LLM 暴露该子集，
-            # 避免无关工具稀释 context 并让模型精确使用设计好的工具。
-            if _skill_id:
-                try:
-                    from app.core.skills.skill_manager import SkillManager as _SM
-                    _sk_def = _SM.get_definition(_skill_id)
-                    if _sk_def and _sk_def.executor_tools:
-                        _allowed = set(_sk_def.executor_tools)
-                        _et_filtered = [t for t in tools_def if t.get("name") in _allowed]
-                        if _et_filtered:
-                            tools_def = _et_filtered
-                            logger.debug(
-                                "[UnifiedAgent] 🎯 Skill '%s' executor_tools 过滤: %d → %d 工具",
-                                _skill_id, len(all_tools_def), len(tools_def),
-                            )
-                except Exception as _ste:
-                    logger.debug("[UnifiedAgent] executor_tools 过滤跳过: %s", _ste)
+            # v3.1: executor_tools 白名单过滤（Skill 显式声明时生效）
+            if _executor_tool_whitelist and tools_def:
+                filtered = [t for t in tools_def if t.get("name") in _executor_tool_whitelist]
+                if filtered:  # 非空才应用，防止白名单与 ToolRouter 结果完全不重叠时工具断供
+                    tools_def = filtered
+                    logger.debug(
+                        f"[UnifiedAgent] 工具白名单过滤后: {[t.get('name') for t in tools_def]}"
+                    )
 
             # v4: skill executor_tools 精确工具集（优先级高于 ToolRouter）
             # 当 Skill 声明了 executor_tools，只向 LLM 暴露该子集，
@@ -331,29 +393,13 @@ class UnifiedAgent(Agent):
                     logger.debug("[UnifiedAgent] executor_tools 过滤跳过: %s", _ste)
 
             try:
-                # 使用 ModelFallbackExecutor：首选 self.model_id，失败时自动降级
-                try:
-                    from app.core.llm.model_fallback import get_fallback_executor
-                    _executor = get_fallback_executor()
-                    response = _executor.generate_with_fallback(
-                        provider=self.llm,
-                        prompt=current_history,
-                        preferred_model=self.model_id,
-                        task_type=getattr(self, "_task_type", "CHAT") or "CHAT",
-                        system_instruction=_effective_instruction,
-                        tools=tools_def if tools_def else None,
-                        stream=False,
-                    )
-                    # 如果执行器选了不同的模型，同步更新当前 model_id
-                    # （不修改 self.model_id，避免影响外部状态）
-                except ImportError:
-                    response = self.llm.generate_content(
-                        prompt=current_history,
-                        model=self.model_id,
-                        system_instruction=_effective_instruction,
-                        tools=tools_def if tools_def else None,
-                        stream=False,
-                    )
+                response = self.llm.generate_content(
+                    prompt=current_history,
+                    model=self.model_id,
+                    system_instruction=_effective_instruction,
+                    tools=tools_def if tools_def else None,
+                    stream=False
+                )
                 
                 content_text = response.get("content", "")
                 tool_calls = response.get("tool_calls", [])
