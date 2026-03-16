@@ -81,7 +81,9 @@ def full_app(_koto_tmp_db):
     from app.api.file_hub_routes import file_hub_bp
     from app.api.goal_routes import goal_bp
     from app.api.job_routes import job_bp
+    from app.api.macro_routes import macro_bp
     from app.api.ops_routes import ops_bp
+    from app.api.shadow_routes import shadow_bp
     from app.api.skill_marketplace_routes import marketplace_bp
     from app.api.skill_routes import skill_bp
     from app.api.task_routes import task_bp
@@ -91,6 +93,8 @@ def full_app(_koto_tmp_db):
     application.register_blueprint(job_bp)
     application.register_blueprint(ops_bp)
     application.register_blueprint(marketplace_bp)
+    application.register_blueprint(macro_bp)
+    application.register_blueprint(shadow_bp)
     # Blueprints without built-in url_prefix need it provided here
     application.register_blueprint(task_bp, url_prefix="/api/tasks")
     application.register_blueprint(goal_bp, url_prefix="/api/goals")
