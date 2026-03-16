@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-Koto Shadow Routes — 影子追踪 REST API
+"""Koto Shadow Routes — 影子追踪 REST API
 =======================================
 挂载前缀: /api/shadow
 
@@ -8,7 +7,8 @@ Koto Shadow Routes — 影子追踪 REST API
   GET  /api/shadow/status           — 启用状态 + 统计摘要
   POST /api/shadow/toggle           — 开启 / 关闭
   GET  /api/shadow/observations     — 全部观察数据（调试用）
-  GET  /api/shadow/pending          — 待展示的主动消息
+  GET  /api/shadow/pending          — 待展示的主动消息（轮询）
+  GET  /api/shadow/stream           — SSE 实时推送（EventSource 长连接）
   POST /api/shadow/dismiss/<id>     — 关闭单条消息
   POST /api/shadow/dismiss-all      — 全部关闭
   POST /api/shadow/tick             — 手动触发一次主动检查（测试用）
@@ -17,9 +17,11 @@ Koto Shadow Routes — 影子追踪 REST API
 
 from __future__ import annotations
 
+import json as _json
 import logging
+import queue as _queue
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +143,44 @@ def shadow_pending():
         return _ok(msgs)
     except Exception as exc:
         return _err(str(exc), 500)
+
+
+@shadow_bp.get("/stream")
+def shadow_stream():
+    """
+    SSE 实时推送端点。客户端连接后，新的主动消息会在入队时立即推送，无需轮询。
+
+    前端用法:
+        const es = new EventSource('/api/shadow/stream');
+        es.onmessage = (e) => {
+            const msg = JSON.parse(e.data);
+            // msg.type: greeting | follow_up | suggestion | reminder | failed_retry
+            showProactiveNotification(msg);
+        };
+
+    协议:
+      - 数据帧:   data: <JSON 消息体>\n\n
+      - 心跳帧:   : keepalive\n\n  （每 30 秒发送一次，防止连接超时）
+    """
+    agent = _get_agent()
+    sub_q = agent.subscribe_sse()
+
+    def _generate():
+        try:
+            while True:
+                try:
+                    msg = sub_q.get(timeout=30)
+                    yield f"data: {_json.dumps(msg, ensure_ascii=False)}\n\n"
+                except _queue.Empty:
+                    yield ": keepalive\n\n"
+        finally:
+            agent.unsubscribe_sse(sub_q)
+
+    return Response(
+        stream_with_context(_generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @shadow_bp.post("/dismiss/<msg_id>")

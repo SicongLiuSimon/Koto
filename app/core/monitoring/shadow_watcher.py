@@ -262,7 +262,8 @@ class ShadowWatcher:
     def __init__(self):
         self._obs_lock = threading.Lock()
         self._obs: Dict[str, Any] = _default_obs()
-        self._dirty_count = 0  # 累积变更计数，每5次才写盘
+        # 会话轮次计数（内存中，重启清零）
+        self._session_exchanges: Dict[str, int] = {}
         self._load()
 
     # ── 单例 ──────────────────────────────────────────────────────────────────
@@ -351,6 +352,7 @@ class ShadowWatcher:
 
     def _process(self, user_msg: str, ai_msg: str, session_id: str):
         now = datetime.now()
+        _should_trigger = False
         try:
             with self._obs_lock:
                 self._obs["total_observations"] = (
@@ -374,20 +376,73 @@ class ShadowWatcher:
                 self._analyze_conversation_style(user_msg)
                 self._analyze_task_style(user_msg)
 
+                # 记录任务/失败事件的变更前快照
+                _prev_failed = len(self._obs.get("failed_tasks", []))
+                _prev_open = sum(
+                    1 for t in self._obs.get("open_tasks", []) if not t.get("done")
+                )
+
                 # 开放任务
                 self._extract_open_tasks(user_msg, session_id, now)
 
-                # 任务完成/失败追踪
-                self._check_task_followup(user_msg, ai_msg, session_id, now)
+                # 任务完成/失败追踪（返回刚完成的任务文本）
+                _completed_task_text = self._check_task_followup(user_msg, ai_msg, session_id, now)
                 self._detect_failed_request(user_msg, ai_msg, session_id, now)
+
+                # 检测是否新增了重要事件（新失败请求 / 新开放任务），用于立即唤醒 ProactiveAgent
+                _new_failed = len(self._obs.get("failed_tasks", [])) > _prev_failed
+                _new_open = (
+                    sum(1 for t in self._obs.get("open_tasks", []) if not t.get("done"))
+                    > _prev_open
+                )
+                _should_trigger = _new_failed or _new_open
 
                 # 工作会话统计
                 wp = self._obs.setdefault("work_pattern", {})
                 wp["sessions_last_30d"] = wp.get("sessions_last_30d", 0) + 1
 
-            self._dirty_save()
+            # 会话轮次计数（无需持锁）
+            _session_ex = self._inc_session_exchanges(session_id)
+
+            self._save()
+            # 有新的未完成任务或失败请求时，立即（绕过定时 interval）唤醒 ProactiveAgent
+            if _should_trigger:
+                self._trigger_proactive_tick()
+            # 每次对话完成后都调用 per-exchange 主动训练
+            self._trigger_after_exchange(_session_ex, _completed_task_text)
         except Exception as exc:
             logger.debug("[ShadowWatcher] 处理异常: %s", exc)
+
+    def _trigger_proactive_tick(self):
+        """在后台线程中立即触发 ProactiveAgent（绕过定时 interval）。"""
+        def _run():
+            try:
+                from app.core.agent.proactive_agent import get_proactive_agent
+                get_proactive_agent().tick_immediate()
+            except Exception as e:
+                logger.debug("[ShadowWatcher] 立即触发 ProactiveAgent 失败: %s", e)
+        threading.Thread(target=_run, daemon=True, name="sw_proactive_immediate").start()
+
+    def _inc_session_exchanges(self, session_id: str) -> int:
+        """为指定会话累加轮次计数（内存，重启清零）。"""
+        count = self._session_exchanges.get(session_id, 0) + 1
+        self._session_exchanges[session_id] = count
+        return count
+
+    def _trigger_after_exchange(
+        self, session_exchanges: int, completed_task_text: Optional[str]
+    ):
+        """每次对话完成后在后台线程调用 tick_after_exchange，实现真正的「随时主动」行为。"""
+        _session_ex = session_exchanges
+        _completed = completed_task_text
+        def _run():
+            try:
+                from app.core.agent.proactive_agent import get_proactive_agent
+                obs = self.get_observations()
+                get_proactive_agent().tick_after_exchange(_session_ex, _completed, obs)
+            except Exception as e:
+                logger.debug("[ShadowWatcher] tick_after_exchange 失败: %s", e)
+        threading.Thread(target=_run, daemon=True, name="sw_after_exchange").start()
 
     def _update_streak(self, today: date):
         streak = self._obs.setdefault("streak", {"days": 0, "last_date": None})
@@ -507,8 +562,10 @@ class ShadowWatcher:
 
     def _check_task_followup(
         self, user_msg: str, ai_msg: str, session_id: str, now: datetime
-    ):
-        """检测当前对话是否在跟进/完成之前的开放或失败任务，并更新状态。"""
+    ) -> Optional[str]:
+        """检测当前对话是否在跟进/完成之前的开放或失败任务，并更新状态。
+        返回刚完成的任务文本（若本轮完成了某个任务），否则返回 None。"""
+        completed_text: Optional[str] = None
         for task in self._obs.get("open_tasks", []):
             if task.get("done"):
                 continue
@@ -517,6 +574,7 @@ class ShadowWatcher:
                 if not self._is_ai_failure(ai_msg):
                     task["done"] = True
                     task["completed_at"] = now.isoformat(timespec="seconds")
+                    completed_text = task["text"]
 
         for ftask in self._obs.get("failed_tasks", []):
             if ftask.get("resolved"):
@@ -526,6 +584,8 @@ class ShadowWatcher:
                 ftask["retried_at"] = now.isoformat(timespec="seconds")
                 if not self._is_ai_failure(ai_msg):
                     ftask["resolved"] = True
+
+        return completed_text
 
     def _task_matches_msg(self, task_text: str, user_msg: str) -> bool:
         """判断用户消息是否在跟进某个任务（基于双字符/词元重叠）。"""

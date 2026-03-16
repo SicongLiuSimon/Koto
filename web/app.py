@@ -1242,11 +1242,11 @@ def _call_interactions_api_sync(
     if sys_instruction:
         full_input = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{user_prompt}"
 
-    rc = create_research_client()
-
-    _log.info(
-        "[Interactions] 🚀 提交 job  model=%s  input_chars=%d",
-        model_id, len(full_input),
+    interaction = rc.interactions.create(
+        agent=model_id,
+        input=full_input[:80000],   # 支持大文档（gemini-3 上下文窗口 >1M tokens）
+        background=model_id not in _NO_BACKGROUND_MODELS,
+        stream=False,
     )
     # Interactions API 区分两种调用方式：
     #   agent=  → deep-research 等真正的 Agent
@@ -1649,23 +1649,46 @@ _blueprints_lock = threading.Lock()
 
 
 def _register_blueprints_deferred():
-    """在后台线程中注册所有蓝图，避免阻塞主线程启动."""
+    """注册所有蓝图（必须在 app.run() 前调用）。
+    阶段1: 用线程池并行预导入各蓝图模块（重叠 I/O 等待，加速启动）。
+    阶段2: 串行注册到 Flask app（线程安全要求）。
+    """
     global _blueprints_registered, agent_bp
     with _blueprints_lock:
         if _blueprints_registered:
             return
         _blueprints_registered = True
 
-    # 注册健康检查 API（/api/health + /api/ping）
-    try:
-        from web.routes.health import health_bp
+    # ── 阶段 1：并行预导入（各模块互相独立，可同时加载）────────────────
+    import importlib
+    import concurrent.futures
 
-        app.register_blueprint(health_bp)
-        _app_logger.info("[HealthAPI] ✅ 健康检查 API 已注册: /api/health, /api/ping")
-    except ImportError as e:
-        _app_logger.warning(f"[HealthAPI] ⚠️ 未能导入健康检查蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[HealthAPI] ❌ 健康检查 API 注册失败: {e}")
+    _preload_modules = [
+        'app.api.task_routes',
+        'app.api',
+        'app.api.skill_routes',
+        'app.api.skill_marketplace_routes',
+        'app.api.goal_routes',
+        'app.api.file_hub_routes',
+        'app.api.job_routes',
+        'app.api.ops_routes',
+        'app.api.shadow_routes',
+        'app.api.macro_routes',
+    ]
+
+    def _safe_preload(mod_name):
+        try:
+            importlib.import_module(mod_name)
+        except Exception:
+            pass  # 导入失败时静默忽略，注册阶段会再次尝试并输出日志
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(6, len(_preload_modules)),
+        thread_name_prefix='BpPreload'
+    ) as _pool:
+        list(_pool.map(_safe_preload, _preload_modules))
+
+    # ── 阶段 2：串行注册蓝图（此时模块已在 sys.modules 中，import 为 O(1)）──
 
     # 注册任务管理 API（任务台账 + 进度总线 + 打断控制）
     try:
@@ -1977,46 +2000,31 @@ except ImportError:
         _MODEL_REGISTRY = {}
 
 # 静态默认值（API 不可用时的兜底，也是启动时的初始值）
+# 注意：只有 deep-research-pro-preview-* 是 Interactions API agent，其他模型均用 generate_content
 MODEL_MAP = {
     "CHAT":        "gemini-3-flash-preview",
-    "CODER":       "gemini-3.1-pro-preview",   # generate_content 兼容，最强直调模型
+    "CODER":       "gemini-3.1-pro-preview",
     "WEB_SEARCH":  "gemini-2.5-flash",
-    "VISION":      "gemini-3-flash-preview",
-    "RESEARCH":    "deep-research-pro-preview-12-2025",
+    "VISION":      "gemini-2.5-flash",
+    "RESEARCH":    "gemini-3.1-pro-preview",
     "FILE_GEN":    "gemini-3-flash-preview",
     "PAINTER":     "gemini-3.1-flash-image-preview",
     "SYSTEM":      "local-executor",
     "FILE_OP":     "local-executor",
     "AGENT":       "gemini-3-flash-preview",
-    "FILE_SEARCH": "gemini-3-flash-preview",  # 文件搜索/整理始终 Flash
-    "DOC_ANNOTATE":"gemini-3.1-pro-preview",  # 强模型标注，complex 由 get_model_for_task 确认
-    "COMPLEX":     "gemini-3.1-pro-preview",  # 复杂度升级兜底：3.1 Pro
+    "FILE_SEARCH": "gemini-3-flash-preview",
+    "DOC_ANNOTATE":"gemini-3-flash-preview",
+    "COMPLEX":     "gemini-3.1-pro-preview",
 }
 
 # ─── Interactions-API-only 模型（动态更新，静态默认兜底）──────────────────────
 # 这些模型不支持 client.models.generate_content()，必须走 Interactions API
+# 注意：gemini-3-flash-preview 和 gemini-3-pro-preview 是普通模型，直接用 generate_content，不在此列表中
 _INTERACTIONS_ONLY_MODELS = {
-    "gemini-3-flash-preview",
-    "gemini-3-pro-preview",
-    "deep-research-pro-preview-12-2025",  # 实际也是 interactions-only，错误调用 generate_content 会返回 400
+    "deep-research-pro-preview-12-2025",  # 深度研究 Agent，仅支持 Interactions API
 }
-
-# ─── Interactions API 字段区分 ─────────────────────────────────────────────
-# 真正的 Agent（deep-research 等）需要 interactions.create(agent=...)；
-# 普通模型（gemini-3-pro/flash-preview）走同一端点但必须用 model= 字段。
-# 错误用 agent= 传普通模型 ID 会得到 400: "refers to a model, not an agent"。
-_INTERACTIONS_AGENT_MODELS = frozenset({
-    "deep-research-pro-preview-12-2025",
-})
-
-
-def _is_interactions_agent(model_id: str) -> bool:
-    """True = 该模型需要用 agent= 字段（真正的 Interactions Agent）；
-    False = 该模型是普通模型，需要用 model= 字段。"""
-    mid = str(model_id or "")
-    return mid in _INTERACTIONS_AGENT_MODELS or mid.startswith("deep-research-pro-preview")
-
-
+# 当前 Interactions API 模型均支持 background=True
+_NO_BACKGROUND_MODELS: set = set()
 # 当 Interactions API 也失败时的最终降级模型
 _INTERACTIONS_FALLBACK_MODEL = "gemini-2.5-flash"
 
@@ -5216,7 +5224,7 @@ class TaskOrchestrator:
 
     @classmethod
     async def _execute_coder(cls, user_input: str, context: dict, progress_callback=None) -> dict:
-        """执行代码生成子任务 - 使用 gemini-3.1-pro-preview（generate_content 直调）"""
+        """执行代码生成子任务 - 使用最佳可用 Gemini 模型"""
 
         def _report(msg: str, detail: str = ""):
             _app_logger.debug(f"[CODER] {msg} | {detail}")
@@ -7501,6 +7509,7 @@ def chat_stream():
     # 🕵️‍♀️ 检测是否有最近上传的文件 (5分钟内)
     has_recent_upload = False
     recent_file_type = None
+    recent_file_path = None  # 保存路径以便后续注入文件内容
     try:
         upload_scan_dirs = ["web/uploads", "uploads", "workspace/documents"]
         recent_threshold = time.time() - 300  # 5分钟内
@@ -7512,7 +7521,8 @@ def chat_stream():
                         has_recent_upload = True
                         _, ext = os.path.splitext(f)
                         recent_file_type = ext.lower()
-                        _app_logger.debug(f"[STREAM] Found recent upload: {f} ({recent_file_type})")
+                        recent_file_path = fp  # 记录完整路径
+                        print(f"[STREAM] Found recent upload: {f} ({recent_file_type})")
                         break
             if has_recent_upload:
                 break
@@ -7627,10 +7637,14 @@ def chat_stream():
 
     # ── 🔮 LangGraph 高级工作流路由（RESEARCH / FILE_GEN / MULTI_STEP）─────────
     # resolve_workflow() 检测用户意图，决定是否用 WorkflowEngine 替代旧路径
+    # 注意：有近期上传文件时传入 has_file=True，防止 LangGraph 工作流被错误激活
+    # （LangGraph 工作流没有文件字节上下文，无法处理文件分析任务）
     _wf_route = "legacy"
     if task_type in ("RESEARCH", "FILE_GEN", "MULTI_STEP"):
         try:
-            _wf_route = SmartDispatcher.resolve_workflow(task_type, user_input)
+            _wf_route = SmartDispatcher.resolve_workflow(
+                task_type, user_input, has_file=has_recent_upload
+            )
             if _wf_route != "legacy":
                 _app_logger.debug(f"[STREAM] 🔮 LangGraph 工作流路由: {_wf_route}")
         except Exception as _wf_err:
@@ -9888,9 +9902,8 @@ def chat_stream():
 
                 try:
                     from web.document_feedback import DocumentFeedbackSystem
-
-                    feedback_system = DocumentFeedbackSystem(gemini_client=client)
-
+                    feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
+                    
                     # 使用流式分析系统，逐步反馈进度
                     yield f"data: {json.dumps({'type': 'progress', 'stage': 'processing_start', 'message': '🔍 开始处理文档...', 'detail': '这个过程会涉及多个阶段'})}\n\n"
 
@@ -10085,6 +10098,130 @@ def chat_stream():
                 total_time = time.time() - start_time
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                 return
+            
+            # === 🗂️ 文件分析直通：有近期上传文件 + RESEARCH/CHAT/FILE_GEN + legacy ═════
+            # chat_stream 检测到近期上传文件时，直接读取文件内容并传给模型，
+            # 避免走不带文件字节的 RESEARCH/ToT 路径（那条路没有文件上下文，给出错误结果）
+            if (
+                has_recent_upload
+                and recent_file_path
+                and os.path.isfile(recent_file_path)
+                and task_type in ("RESEARCH", "CHAT", "FILE_GEN")
+                and _wf_route == "legacy"
+            ):
+                _rfile_ext  = os.path.splitext(recent_file_path)[1].lower()
+                _rfile_name = os.path.basename(recent_file_path)
+                _is_binary_doc = _rfile_ext in (".pdf", ".docx", ".doc", ".pptx", ".xlsx")
+                _is_image_file = _rfile_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+
+                # 图片 → 交给后续 VISION 路径，不在这里拦截
+                if not _is_image_file:
+                    print(f"[STREAM] 🗂️ 文件分析直通: {_rfile_name} ({_rfile_ext}) task={task_type}")
+                    yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'model': model_id, 'message': f'📄 文件分析模式: {_rfile_name}'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'📂 正在读取文件: {_rfile_name}', 'stage': 'file_ready', 'progress': 15})}\n\n"
+
+                    try:
+                        import time as _rft_mod
+                        _rf_start = _rft_mod.time()
+
+                        _rf_task_label = {'RESEARCH': '🔬 深度分析', 'FILE_GEN': '📝 内容生成', 'CHAT': '💬 文件问答'}.get(task_type, task_type)
+                        yield f"data: {json.dumps({'type': 'progress', 'message': f'🎯 任务类型: {_rf_task_label}', 'stage': 'routing_complete', 'progress': 25})}\n\n"
+
+                        if task_type == "RESEARCH":
+                            _rf_sys = (
+                                "你是一位专业的文档分析助手，擅长深度解读各类文件（商业计划书、研究报告、技术文档等）。\n"
+                                "请仔细阅读用户提供的文件内容，并按以下结构输出分析报告：\n\n"
+                                "## 核心摘要\n- 用 3-5 条要点概括文件核心内容\n\n"
+                                "## 详细解读\n### 背景与目标\n### 关键内容分析\n### 数据与证据\n\n"
+                                "## 结论与建议\n- 综合评判与可行性/价值判断\n\n"
+                                "要求：用中文，条理清晰，避免冗余，不输出代码块标记。"
+                            )
+                        else:
+                            _rf_sys = (
+                                "你是一位专业的文档阅读与分析助手。用户上传了一份文件并提出了问题，"
+                                "请认真阅读文件的完整内容，用中文给出详细、准确的分析和回答。\n"
+                                "注意：直接回答用户的具体问题，引用文件中的具体数据和信息支撑你的判断，"
+                                "用清晰的结构输出，避免空泛表述。"
+                            )
+
+                        # 二进制文档需要能处理文件字节的模型
+                        _rf_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash")
+                        if _is_binary_doc:
+                            _rf_model = globals().get("_INTERACTIONS_FALLBACK_MODEL") or "gemini-2.5-flash"
+
+                        yield f"data: {json.dumps({'type': 'progress', 'message': f'⚡ 正在请求 {_rf_model}，请稍候...', 'stage': 'api_calling', 'progress': 35})}\n\n"
+
+                        # 构建请求内容（文本 + 文件字节 或 提取文本）
+                        _rf_contents = user_input
+                        if _is_binary_doc:
+                            try:
+                                with open(recent_file_path, "rb") as _rfh:
+                                    _rf_bytes = _rfh.read()
+                                _rf_mime_map = {
+                                    ".pdf":  "application/pdf",
+                                    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    ".doc":  "application/msword",
+                                    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                }
+                                _rf_mime = _rf_mime_map.get(_rfile_ext, "application/octet-stream")
+                                _rf_doc_part = types.Part.from_bytes(data=_rf_bytes, mime_type=_rf_mime)
+                                _rf_contents = [user_input, _rf_doc_part]
+                                print(f"[STREAM] 📄 ByteDoc-Read: model={_rf_model}, bytes={len(_rf_bytes)}, mime={_rf_mime}")
+                            except Exception as _rfb_err:
+                                print(f"[STREAM] ⚠️ 文件字节读取失败，回退文本模式: {_rfb_err}")
+                                try:
+                                    from web.file_processor import process_uploaded_file
+                                    _rf_contents, _ = process_uploaded_file(recent_file_path, user_input)
+                                except Exception:
+                                    pass  # 用 user_input 作兜底
+                        else:
+                            # 文本类文件：提取内容后注入
+                            try:
+                                from web.file_processor import process_uploaded_file
+                                _rf_contents, _ = process_uploaded_file(recent_file_path, user_input)
+                            except Exception as _rft_err:
+                                print(f"[STREAM] ⚠️ 文本文件提取失败: {_rft_err}")
+
+                        _rf_stream = client.models.generate_content_stream(
+                            model=_rf_model,
+                            contents=_rf_contents,
+                            config=types.GenerateContentConfig(
+                                system_instruction=_rf_sys,
+                                temperature=0.7,
+                                max_output_tokens=8000,
+                            )
+                        )
+
+                        _rf_full_text = ""
+                        _rf_first_token = True
+                        for _rf_chunk in _rf_stream:
+                            _rf_t = getattr(_rf_chunk, "text", None)
+                            if _rf_t:
+                                if _rf_first_token:
+                                    yield f"data: {json.dumps({'type': 'progress', 'message': '✍️ 模型正在生成回复...', 'stage': 'generating', 'progress': 55})}\n\n"
+                                    _rf_first_token = False
+                                _rf_full_text += _rf_t
+                                yield f"data: {json.dumps({'type': 'token', 'content': _rf_t}, ensure_ascii=False)}\n\n"
+
+                        _rf_elapsed = round(_rft_mod.time() - _rf_start, 2)
+                        try:
+                            session_manager.append_and_save(
+                                f"{session_name}.json", user_input, _rf_full_text,
+                                task=task_type, model_name=_rf_model
+                            )
+                        except Exception:
+                            pass
+                        total_time = time.time() - start_time
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                        return
+
+                    except Exception as _rf_err:
+                        import traceback as _rf_tb
+                        print(f"[STREAM] ⚠️ 文件分析直通失败，降级标准路径: {_rf_tb.format_exc()}")
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 文件读取遇到问题，切换至标准模式...', 'detail': str(_rf_err)[:100]})}\n\n"
+                        # 降级：继续向下走 ToT / RESEARCH 标准路径
+            # ═══════════════════════════════════════════════════════════════════════════
 
             # === 🌳 Tree of Thought Mode (RESEARCH / FILE_GEN 并行多路推理选优) ===
             # 触发条件：legacy 路由 + RESEARCH/FILE_GEN + 非 Deep-Research-Pro + ToT 未被用户禁用
@@ -10097,12 +10234,8 @@ def chat_stream():
             )
 
             if _tot_enabled:
-                _tot_model = model_id or MODEL_MAP.get(
-                    task_type, "gemini-2.5-flash-preview-05-20"
-                )
-                _tot_n = (
-                    2 if task_type == "FILE_GEN" else 3
-                )  # FILE_GEN 用 2 路，RESEARCH 用 3 路
+                _tot_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash")
+                _tot_n     = 2 if task_type == "FILE_GEN" else 3   # FILE_GEN 用 2 路，RESEARCH 用 3 路
                 _tot_label = "📄 文档生成" if task_type == "FILE_GEN" else "🔬 深度研究"
                 yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'route_method': 'TreeOfThought', 'message': f'🌳 Tree of Thought 启动：{_tot_n} 条并行推理分支 ({_tot_label})'}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'progress', 'message': f'🌳 Tree of Thought 启动 ({_tot_n} 分支并行推理)...', 'detail': f'模型: {_tot_model}'})}\n\n"
@@ -13845,7 +13978,7 @@ def chat_with_file():
                             import shutil as _bsh
 
                             _bsh.copy2(_batch_filepath, _batch_target)
-                        _bt_feedback = DocumentFeedbackSystem(gemini_client=client)
+                        _bt_feedback = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
                         _bt_final = None
                         for _bt_evt in _bt_feedback.full_annotation_loop_streaming(
                             _batch_target, user_input
@@ -14376,8 +14509,7 @@ def chat_with_file():
                 complexity = context_info["complexity"]
 
             if task_type == "DOC_ANNOTATE":
-                # 文档标注需要强模型：优先使用 gemini-3.1-pro-preview（如可用），回退 gemini-2.5-pro
-                # 注意：gemini-3-pro-preview / gemini-3-flash-preview 仅支持 Interactions API，不能用于 generate_content
+                # 文档标注需要强模型：优先使用 gemini-3.1-pro-preview或 gemini-3-pro-preview
                 model_to_use = "gemini-3.1-pro-preview"
             elif task_type == "FILE_GEN":
                 model_to_use = SmartDispatcher.get_model_for_task(
@@ -14502,9 +14634,8 @@ def chat_with_file():
 
                 try:
                     from web.document_feedback import DocumentFeedbackSystem
-
-                    feedback_system = DocumentFeedbackSystem(gemini_client=_ann_client)
-
+                    feedback_system = DocumentFeedbackSystem(gemini_client=_ann_client, default_model_id="gemini-3.1-pro-preview")
+                    
                     # 发送分类信息（若上方转换块已发送则跳过重复）
                     if not _classif_sent:
                         yield f"data: {json.dumps({'type': 'classification', 'task_type': 'DOC_ANNOTATE', 'route_method': _ann_route_method, 'model': _ann_model, 'task_id': task_id, 'message': '📄 DOC_ANNOTATE'})}\n\n"
@@ -14941,23 +15072,28 @@ def chat_with_file():
                         file_data is not None
                         and not (file_data.get("mime_type") or "").lower().startswith("image/")
                     )
-                    if _has_binary_doc and _captured_task in ("CHAT", "RESEARCH"):
-                        # 强制降级到支持文件字节的模型（Interactions API 不支持附件字节）
+                    # 需要降级到 generate_content 兼容模型的条件：
+                    # 1. 二进制文件（PDF/Word）+ CHAT/RESEARCH 任务
+                    # 2. 所选模型是 Interactions-only 模型（如 deep-research），不支持 generate_content_stream
+                    _need_fallback = (
+                        (_has_binary_doc and _captured_task in ("CHAT", "RESEARCH"))
+                        or _stream_model in _INTERACTIONS_ONLY_MODELS
+                    )
+                    if _need_fallback:
+                        if _stream_model in _INTERACTIONS_ONLY_MODELS:
+                            print(f"[FILE STREAM] interactions-only 模型 {_stream_model} 不支持文件流，降级到 {_INTERACTIONS_FALLBACK_MODEL}")
                         _stream_model = _INTERACTIONS_FALLBACK_MODEL
-                        try:
-                            _doc_part = types.Part.from_bytes(
-                                data=file_data["data"],
-                                mime_type=file_data.get("mime_type", "application/pdf"),
-                            )
-                            _stream_contents = [formatted_message, _doc_part]
-                            _app_logger.info(
-                                f"[FILE STREAM] 📄 Binary-Doc-Read: model={_stream_model}, bytes={len(file_data['data'])}"
-                            )
-                        except Exception as _bp_err:
-                            _app_logger.warning(
-                                f"[FILE STREAM] ⚠️ 无法创建 doc_part，回退到文本模式: {_bp_err}"
-                            )
-                            _stream_contents = formatted_message
+                        if _has_binary_doc:
+                            try:
+                                _doc_part = types.Part.from_bytes(
+                                    data=file_data["data"],
+                                    mime_type=file_data.get("mime_type", "application/pdf")
+                                )
+                                _stream_contents = [formatted_message, _doc_part]
+                                print(f"[FILE STREAM] 📄 Binary-Doc-Read: model={_stream_model}, bytes={len(file_data['data'])}")
+                            except Exception as _bp_err:
+                                print(f"[FILE STREAM] ⚠️ 无法创建 doc_part，回退到文本模式: {_bp_err}")
+                                _stream_contents = formatted_message
 
                     yield f"data: {json.dumps({'type': 'classification', 'task_type': _captured_task, 'model': _stream_model, 'message': f'📄 正在分析: {filename}'})}\n\n"
                     yield f"data: {json.dumps({'type': 'progress', 'message': '📂 文件内容已就绪', 'stage': 'file_ready_complete', 'progress': 15})}\n\n"
@@ -17328,9 +17464,8 @@ def _call_document_annotate(file_path: str, requirement: str):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
 
         from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
-
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
+        
         result = feedback_system.full_annotation_loop(
             file_path=file_path,
             user_requirement=requirement,
@@ -17397,9 +17532,8 @@ def document_feedback():
 
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
-
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
+        
         # 执行完整反馈闭环
         result = feedback_system.full_feedback_loop(
             file_path=file_path,
@@ -17436,9 +17570,8 @@ def document_analyze():
 
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
-
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
+        
         # 仅分析
         result = feedback_system.analyze_and_suggest(
             file_path=file_path, user_requirement=user_requirement
@@ -17475,9 +17608,8 @@ def document_apply():
 
         # 应用修改
         from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
-
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
+        
         result = feedback_system.apply_suggestions(
             file_path=file_path, modifications=modifications
         )
@@ -17509,9 +17641,8 @@ def document_annotate():
 
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
-
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
+        
         # 执行完整标注闭环
         result = feedback_system.full_annotation_loop(
             file_path=file_path, user_requirement=user_requirement, model_id=model_id
@@ -17651,9 +17782,8 @@ def document_apply_annotations():
 
         # 应用标注
         from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
-
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
+        
         result = feedback_system.annotate_document(file_path, annotations)
 
         return jsonify(result)
