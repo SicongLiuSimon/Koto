@@ -410,9 +410,9 @@ class DocumentFeedbackSystem:
         except Exception:
             return "AI建议已生成"
 
-    # Interactions-only 模型：仅支持 Interactions API，不支持 generate_content
-    # document_feedback.py 所有 generate_content 调用必须排除这些模型
-    _INTERACTIONS_ONLY_MODELS = {"gemini-3-flash-preview", "gemini-3-pro-preview"}
+    # 仅支持 Interactions API 的模型：所有 generate_content 调用必须排除这些模型
+    # 注意：gemini-3-flash/pro-preview 是普通 generate_content 模型，不应列在此
+    _INTERACTIONS_ONLY_MODELS = {"deep-research-pro-preview-12-2025"}
 
     def _list_available_models(self) -> List[Dict[str, str]]:
         """列出当前 API 可用模型（仅包含支持 generateContent 的模型，排除 Interactions-only）"""
@@ -474,10 +474,12 @@ class DocumentFeedbackSystem:
 
         priority = [
             safe_preferred,
-            # gemini-3.1-pro-preview 是目前最强的可用模型（支持 generate_content）
+            # gemini-3-flash-preview / gemini-3-pro-preview 是 generate_content 模型，可正常使用
+            "gemini-3-flash-preview",
+            "gemini-3-pro-preview",
+            # gemini-3.1-pro-preview 是目前最强的可用模型
             "gemini-3.1-pro-preview",
             "gemini-3.1-pro-preview-customtools",
-            # gemini-3-flash-preview / gemini-3-pro-preview 已排除（Interactions API only，不支持 generate_content）
             "gemini-3-flash",
             "gemini-3-pro",
             "gemini-2.5-pro",
@@ -1509,7 +1511,7 @@ class DocumentFeedbackSystem:
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-3.1-pro-preview"
+        model_id: str = "gemini-2.5-pro"
     ) -> Dict[str, Any]:
         """
         分析文档，生成标注格式的建议

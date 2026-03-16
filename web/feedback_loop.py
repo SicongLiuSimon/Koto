@@ -31,7 +31,7 @@ class FeedbackLoopManager:
         evaluation_result: Dict[str, Any],
         document_title: str,
         progress_callback: Optional[Callable] = None,
-        model_id: str = "gemini-2.5-flash"
+        model_id: str = "gemini-3.1-pro-preview"
     ) -> Dict[str, Any]:
         """根据评分结果改进文档内容
         
@@ -166,7 +166,7 @@ class FeedbackLoopManager:
         evaluation_result: Dict[str, Any],
         title: str,
         progress_callback: Optional[Callable] = None,
-        model_id: str = "gemini-2.5-flash"
+        model_id: str = "gemini-3.1-pro-preview"
     ) -> Dict[str, Any]:
         """根据 PPT 评分结果改进 PPT 大纲
         
@@ -327,7 +327,7 @@ class FeedbackLoopManager:
         
         return prompt
     
-    def _call_gemini_for_improvement(self, prompt: str, model_id: str = "gemini-2.5-flash") -> Optional[str]:
+    def _call_gemini_for_improvement(self, prompt: str, model_id: str = "gemini-3.1-pro-preview") -> Optional[str]:
         """调用 Gemini 模型进行改进"""
         try:
             client = self.get_client()

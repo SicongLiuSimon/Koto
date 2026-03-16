@@ -1,1137 +1,564 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Koto 言 — Gemini-Powered AI Assistant</title>
-  <meta name="description" content="Koto is an open-source AI assistant powered by Gemini and Ollama — intelligent routing, multi-agent orchestration, RAG memory, and voice interaction, all in one interface." />
-  <meta property="og:title" content="Koto 言 — Gemini-Powered AI Assistant" />
-  <meta property="og:description" content="Gemini-powered AI assistant with smart task routing, LangGraph multi-agent, FAISS RAG memory, and full Ollama local support." />
-  <meta property="og:type" content="website" />
-  <meta name="twitter:card" content="summary_large_image" />
-
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koto (言) — AI 桌面助手</title>
+  <meta name="description" content="Koto 是运行在你自己电脑上的 AI 桌面助手，支持多模型对话、文档分析、技能系统与工作流自动化。">
   <style>
-    /* ─────────────────────────────────────────
-       DESIGN TOKENS
-    ───────────────────────────────────────── */
-    :root {
-      --bg-0:   #030710;
-      --bg-1:   #080f1e;
-      --bg-2:   #0d1728;
-      --bg-3:   #121f32;
-      --cyan:   #63c6ff;
-      --teal:   #76f7d4;
-      --purple: #a78bfa;
-      --pink:   #f472b6;
-      --amber:  #fbbf24;
-      --green:  #4ade80;
-      --grad:   linear-gradient(135deg, #63c6ff 0%, #76f7d4 100%);
-      --grad-alt: linear-gradient(135deg, #a78bfa 0%, #63c6ff 100%);
-      --t1: #eef2ff;
-      --t2: #8fa3c8;
-      --t3: #4a5a78;
-      --border: rgba(255,255,255,0.07);
-      --glow:   rgba(99,198,255,0.22);
-      --r1: 10px; --r2: 14px; --r3: 20px; --r4: 28px;
-      --ease: all .3s cubic-bezier(.4,0,.2,1);
-    }
-
-    /* ─────────────────────────────────────────
-       RESET
-    ───────────────────────────────────────── */
+    /* ── Reset & Base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:      #05080f;
+      --bg2:     #0b111d;
+      --bg3:     #111a2a;
+      --border:  rgba(255,255,255,.08);
+      --t1:      #e8eefc;
+      --t2:      #8896b3;
+      --t3:      #556076;
+      --cyan:    #63c6ff;
+      --teal:    #76f7d4;
+      --grad:    linear-gradient(135deg, #63c6ff, #76f7d4);
+      --r1: 10px; --r2: 16px;
+      --ease: all .25s ease;
+    }
     html { scroll-behavior: smooth; }
     body {
-      font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--bg-0);
-      color: var(--t1);
-      overflow-x: hidden;
-      line-height: 1.65;
+      font-family: 'Segoe UI', -apple-system, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+      background: var(--bg); color: var(--t1);
+      min-height: 100vh; overflow-x: hidden;
+      font-size: 15px; line-height: 1.6;
     }
-    a { text-decoration: none; color: inherit; }
+    a { color: inherit; text-decoration: none; }
 
-    /* ─────────────────────────────────────────
-       BACKGROUND
-    ───────────────────────────────────────── */
+    /* ── Background grid ── */
     .bg-wrap {
-      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+    }
+    .grid-bg {
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(99,198,255,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,198,255,.04) 1px, transparent 1px);
+      background-size: 48px 48px;
     }
     .bg-radial {
       position: absolute; border-radius: 50%;
-      filter: blur(120px); pointer-events: none;
+      filter: blur(100px); opacity: .45;
     }
-    .bg-radial-1 { width: 700px; height: 700px; top: -200px; left: -150px; background: rgba(99,198,255,0.07); animation: orb 30s ease-in-out infinite; }
-    .bg-radial-2 { width: 500px; height: 500px; bottom: 5%; right: -100px; background: rgba(118,247,212,0.05); animation: orb 24s ease-in-out infinite reverse; }
-    .bg-radial-3 { width: 300px; height: 300px; top: 50%; left: 55%; background: rgba(167,139,250,0.04); animation: orb 18s ease-in-out infinite; animation-delay: -8s; }
-    @keyframes orb {
-      0%,100% { transform: translate(0,0) scale(1); }
-      33%  { transform: translate(50px,-50px) scale(1.07); }
-      66%  { transform: translate(-30px,40px) scale(0.95); }
-    }
-    .grid-bg {
-      position: absolute; inset: 0; opacity: 0.02;
-      background-image: linear-gradient(var(--cyan) 1px, transparent 1px),
-                        linear-gradient(90deg, var(--cyan) 1px, transparent 1px);
-      background-size: 70px 70px;
-    }
+    .bg-r1 { width: 600px; height: 600px; top: -180px; left: -100px; background: rgba(99,198,255,.08); }
+    .bg-r2 { width: 500px; height: 500px; bottom: -100px; right: -80px; background: rgba(118,247,212,.06); }
 
-    /* ─────────────────────────────────────────
-       LAYOUT HELPERS
-    ───────────────────────────────────────── */
-    .wrap { max-width: 1180px; margin: 0 auto; padding: 0 40px; position: relative; z-index: 1; }
-    .gt  { background: var(--grad);     -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-    .gta { background: var(--grad-alt); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
-    .sec { padding: 120px 0; position: relative; z-index: 1; }
-    .sec-eye { display: flex; justify-content: center; margin-bottom: 18px; }
+    /* ── Utilities ── */
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 36px; position: relative; z-index: 1; }
+    .gt  { background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
     .pill {
-      display: inline-flex; align-items: center; gap: 7px;
-      padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 500;
-      border: 1px solid rgba(99,198,255,0.2); background: rgba(99,198,255,0.07); color: var(--cyan);
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
+      border: 1px solid rgba(99,198,255,.2); background: rgba(99,198,255,.07); color: var(--cyan);
     }
-    .pill-teal   { border-color: rgba(118,247,212,0.2); background: rgba(118,247,212,0.07); color: var(--teal); }
-    .pill-purple { border-color: rgba(167,139,250,0.2); background: rgba(167,139,250,0.07); color: var(--purple); }
-    .pill-pink   { border-color: rgba(244,114,182,0.2); background: rgba(244,114,182,0.07); color: var(--pink); }
-    .sec-h2 { font-size: clamp(28px,4vw,44px); font-weight: 900; text-align: center; line-height: 1.12; margin-bottom: 14px; }
-    .sec-p  { text-align: center; color: var(--t2); font-size: 17px; max-width: 560px; margin: 0 auto 64px; }
-
-    /* ─────────────────────────────────────────
-       BUTTONS
-    ───────────────────────────────────────── */
     .btn {
-      display: inline-flex; align-items: center; gap: 9px;
-      padding: 13px 28px; border-radius: var(--r2); font-size: 15px; font-weight: 600;
-      cursor: pointer; border: none; white-space: nowrap; transition: var(--ease);
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 22px; border-radius: var(--r1); font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: var(--ease); border: none;
     }
     .btn-prime {
-      background: var(--grad); color: #03060d;
-      box-shadow: 0 4px 22px rgba(99,198,255,0.3);
+      background: var(--grad); color: #05080f;
+      box-shadow: 0 0 24px rgba(99,198,255,.25);
     }
-    .btn-prime:hover { transform: translateY(-2px); box-shadow: 0 8px 36px rgba(99,198,255,0.45); }
+    .btn-prime:hover { transform: translateY(-2px); box-shadow: 0 4px 32px rgba(99,198,255,.38); }
     .btn-ghost {
       background: transparent; color: var(--t1);
-      border: 1px solid var(--border); backdrop-filter: blur(8px);
+      border: 1px solid var(--border);
     }
-    .btn-ghost:hover { border-color: var(--glow); background: rgba(99,198,255,0.05); }
-    .btn-lg { padding: 15px 36px; font-size: 16px; border-radius: var(--r3); }
+    .btn-ghost:hover { border-color: rgba(99,198,255,.35); color: var(--cyan); }
 
-    /* ─────────────────────────────────────────
-       NAV
-    ───────────────────────────────────────── */
+    /* ── Nav ── */
     .nav {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 200;
-      height: 64px; display: flex; align-items: center;
-      padding: 0 40px;
-      background: rgba(3,7,16,0.72); backdrop-filter: blur(24px) saturate(180%);
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      height: 60px;
+      display: flex; align-items: center;
+      background: rgba(5,8,15,.75); backdrop-filter: blur(18px);
       border-bottom: 1px solid var(--border);
     }
-    .nav-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; }
+    .nav .wrap { display: flex; align-items: center; width: 100%; }
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+      font-size: 17px; font-weight: 700;
+    }
     .brand-mark {
-      width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
-      background: var(--grad); display: flex; align-items: center; justify-content: center;
-      font-size: 17px; font-weight: 900; color: #03060d;
-      box-shadow: 0 0 22px rgba(99,198,255,0.32);
+      width: 34px; height: 34px; border-radius: 9px;
+      background: var(--grad);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 800; color: #05080f;
     }
-    .nav-links { display: flex; gap: 2px; margin: 0 auto 0 40px; }
+    .nav-links {
+      display: flex; align-items: center; gap: 28px;
+      margin-left: auto; margin-right: 20px;
+    }
     .nav-links a {
-      padding: 7px 14px; color: var(--t2); font-size: 14px; font-weight: 500;
-      border-radius: var(--r1); transition: var(--ease);
+      font-size: 14px; color: var(--t2); transition: var(--ease);
     }
-    .nav-links a:hover { color: var(--t1); background: rgba(255,255,255,0.05); }
-    .nav-links a.active { color: var(--cyan); }
-    .nav-cta { display: flex; gap: 10px; align-items: center; }
-    .nav-gh {
-      display: flex; align-items: center; gap: 7px;
-      padding: 7px 14px; border-radius: var(--r1);
-      color: var(--t2); font-size: 14px; font-weight: 500;
-      border: 1px solid var(--border); transition: var(--ease);
-    }
-    .nav-gh:hover { color: var(--t1); border-color: var(--glow); }
-    .ico-gh { width: 17px; height: 17px; fill: currentColor; flex-shrink: 0; }
-
-    /* Language toggle button */
-    #lang-btn {
-      padding: 6px 16px;
-      border-radius: 20px;
-      border: 1px solid rgba(99,198,255,0.2);
-      background: rgba(99,198,255,0.07);
-      color: var(--cyan);
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
+    .nav-links a:hover { color: var(--t1); }
+    .lang-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: 6px; color: var(--t2); cursor: pointer;
+      padding: 4px 10px; font-size: 12px; font-family: inherit;
       transition: var(--ease);
     }
-    #lang-btn:hover { background: rgba(99,198,255,0.14); border-color: rgba(99,198,255,0.4); }
+    .lang-btn:hover { color: var(--t1); border-color: rgba(99,198,255,.3); }
 
-    /* ─────────────────────────────────────────
-       HERO
-    ───────────────────────────────────────── */
+    /* ── Hero ── */
     .hero {
-      padding: 160px 40px 100px;
+      padding: 148px 0 88px;
       display: flex; flex-direction: column; align-items: center;
-      position: relative; z-index: 1;
+      text-align: center;
     }
-    .hero-pill { margin-bottom: 28px; }
+    .hero-pill { margin-bottom: 24px; }
     .hero-h1 {
-      font-size: clamp(46px,7.5vw,88px); font-weight: 900;
-      line-height: 1.04; letter-spacing: -0.03em;
-      text-align: center; max-width: 920px; margin-bottom: 26px;
+      font-size: clamp(40px, 6.5vw, 80px); font-weight: 900;
+      line-height: 1.05; letter-spacing: -.03em;
+      max-width: 860px; margin-bottom: 22px;
     }
     .hero-sub {
-      font-size: 19px; color: var(--t2);
-      text-align: center; max-width: 600px; margin-bottom: 48px; line-height: 1.78;
+      font-size: 17px; color: var(--t2);
+      max-width: 560px; margin-bottom: 40px; line-height: 1.75;
     }
-    .hero-btns { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin-bottom: 76px; }
-    .cur { display: inline-block; width: 3px; height: .88em; background: var(--cyan); border-radius: 2px; vertical-align: middle; margin-left: 3px; animation: blink 1.1s step-end infinite; }
-    @keyframes blink { 0%,100%{opacity:1}50%{opacity:0} }
+    .hero-btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-bottom: 64px; }
 
-    /* Hide the line-break in ZH mode so "专为你打造的[typed]" stays on one line */
-    body.lang-zh .hero-br { display: none; }
-
-    /* ── APP WINDOW MOCKUP ── */
-    .app-window {
-      width: 100%; max-width: 900px;
-      border-radius: var(--r4); overflow: hidden;
-      border: 1px solid rgba(99,198,255,0.18);
-      background: var(--bg-1);
-      box-shadow: 0 50px 120px rgba(0,0,0,.65), 0 0 100px rgba(99,198,255,.07);
+    /* App window mockup */
+    .aw {
+      width: min(820px, 92vw); border-radius: var(--r2);
+      border: 1px solid var(--border);
+      background: var(--bg2);
+      overflow: hidden;
+      box-shadow: 0 32px 80px rgba(0,0,0,.55), 0 0 0 1px var(--border);
     }
     .aw-bar {
-      display: flex; align-items: center; gap: 7px;
-      padding: 13px 18px; background: rgba(255,255,255,.025); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px;
+      padding: 10px 16px; background: var(--bg3);
+      border-bottom: 1px solid var(--border);
     }
     .dot { width: 11px; height: 11px; border-radius: 50%; }
-    .dot-r{background:#ff5f57} .dot-y{background:#febc2e} .dot-g{background:#28c840}
-    .aw-title { color: var(--t3); font-size: 13px; margin-left: 8px; }
-    .aw-body { display: flex; height: 380px; }
+    .dot-r { background: #ff5f57; }
+    .dot-y { background: #ffbd2e; }
+    .dot-g { background: #27c93f; }
+    .aw-title { font-size: 12px; color: var(--t3); margin-left: 8px; }
+    .aw-body {
+      display: grid; grid-template-columns: 200px 1fr;
+      height: 280px;
+    }
     .aw-sidebar {
-      width: 210px; padding: 16px 10px; border-right: 1px solid var(--border);
-      display: flex; flex-direction: column; gap: 4px; flex-shrink: 0;
+      border-right: 1px solid var(--border);
+      padding: 14px 0;
     }
-    .aw-section-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--t3); padding: 4px 10px; margin: 8px 0 4px; }
-    .aw-item {
-      padding: 8px 12px; border-radius: var(--r1); font-size: 13px; color: var(--t2);
-      display: flex; align-items: center; gap: 9px; cursor: pointer; transition: var(--ease);
+    .aw-s-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--t3);
+      padding: 0 14px; margin-bottom: 8px;
     }
-    .aw-item:hover  { background: rgba(255,255,255,.04); color: var(--t1); }
-    .aw-item.on     { background: rgba(99,198,255,.08); color: var(--t1); border-left: 2px solid var(--cyan); }
-    .aw-item .ic    { width: 14px; text-align: center; font-size: 13px; }
+    .aw-s-item {
+      padding: 7px 14px; font-size: 12px; color: var(--t2);
+      cursor: default; border-radius: 0;
+    }
+    .aw-s-item.active { background: rgba(99,198,255,.1); color: var(--cyan); }
+    .aw-s-item .dot-sm {
+      display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--teal); margin-right: 6px;
+    }
     .aw-chat {
-      flex: 1; padding: 22px 20px; display: flex; flex-direction: column; gap: 14px; overflow: hidden;
+      display: flex; flex-direction: column;
+      padding: 16px; gap: 12px; overflow: hidden;
     }
-    .cm { display: flex; gap: 9px; max-width: 88%; }
-    .cm.u { align-self: flex-end; flex-direction: row-reverse; }
-    .av {
-      width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    .aw-msg {
+      display: flex; gap: 9px; align-items: flex-start;
+    }
+    .aw-av {
+      width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700;
+    }
+    .aw-av.ai  { background: var(--grad); color: #05080f; }
+    .aw-av.usr { background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; }
+    .aw-bubble {
+      padding: 8px 12px; border-radius: 12px; font-size: 12px; line-height: 1.5;
+      max-width: 360px;
+    }
+    .aw-bubble.ai  { background: var(--bg3); color: var(--t1); border: 1px solid var(--border); }
+    .aw-bubble.usr { background: linear-gradient(135deg,rgba(99,198,255,.18),rgba(118,247,212,.12)); color: var(--t1); }
+    .aw-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 6px; font-size: 10px;
+      background: rgba(118,247,212,.12); color: var(--teal);
+      border: 1px solid rgba(118,247,212,.2); margin-top: 4px;
+    }
+    .aw-cursor {
+      display: inline-block; width: 2px; height: 12px;
+      background: var(--cyan); margin-left: 2px; vertical-align: middle;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── Features ── */
+    .sec { padding: 96px 0; }
+    .sec-eye { display: flex; justify-content: center; margin-bottom: 16px; }
+    .sec-h2 {
+      font-size: clamp(28px,4vw,44px); font-weight: 800;
+      text-align: center; letter-spacing: -.02em; margin-bottom: 14px;
+    }
+    .sec-sub { text-align: center; color: var(--t2); font-size: 15px; max-width: 480px; margin: 0 auto 56px; }
+
+    .feat-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(300px,1fr)); gap: 20px;
+    }
+    .feat-card {
+      padding: 26px 24px; border-radius: var(--r2);
+      background: var(--bg2); border: 1px solid var(--border);
+      transition: var(--ease);
+    }
+    .feat-card:hover {
+      border-color: rgba(99,198,255,.25);
+      transform: translateY(-3px);
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    .feat-icon {
+      width: 44px; height: 44px; border-radius: 12px;
+      background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.15);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; margin-bottom: 16px;
+    }
+    .feat-card h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+    .feat-card p  { font-size: 13px; color: var(--t2); line-height: 1.65; }
+    .feat-tags {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px;
+    }
+    .tag {
+      padding: 2px 9px; border-radius: 5px; font-size: 11px;
+      background: rgba(99,198,255,.07); color: var(--cyan);
+      border: 1px solid rgba(99,198,255,.15);
+    }
+
+    /* ── Setup ── */
+    .setup-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 16px;
+    }
+    .step {
+      display: flex; gap: 16px; align-items: flex-start;
+      padding: 22px; border-radius: var(--r2);
+      background: var(--bg2); border: 1px solid var(--border);
+    }
+    .step-num {
+      width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+      background: var(--grad); color: #05080f;
       display: flex; align-items: center; justify-content: center;
       font-size: 13px; font-weight: 800;
     }
-    .av-ai   { background: var(--grad); color: #03060d; }
-    .av-user { background: rgba(167,139,250,.18); color: var(--purple); font-size: 11px; }
-    .cb {
-      padding: 10px 14px; border-radius: 13px; font-size: 13px; line-height: 1.55;
-    }
-    .cb-ai   { background: var(--bg-2); border-radius: 4px 13px 13px 13px; }
-    .cb-user { background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.18); border-radius: 13px 4px 13px 13px; }
-    .cb-code {
-      font-family: 'Consolas', 'Courier New', monospace; font-size: 11.5px;
-      background: rgba(0,0,0,.35); border-radius: 7px; padding: 8px 12px; margin-top: 7px; color: var(--teal);
-    }
-    .dots { display: flex; gap: 4px; align-items: center; padding: 4px 0; }
-    .dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); animation: dotbounce 1.2s ease-in-out infinite; }
-    .dots span:nth-child(2){animation-delay:.15s} .dots span:nth-child(3){animation-delay:.3s}
-    @keyframes dotbounce { 0%,60%,100%{transform:translateY(0);opacity:.4} 30%{transform:translateY(-6px);opacity:1} }
-    .fbadge {
-      position: absolute;
-      padding: 9px 16px; border-radius: 13px;
-      background: rgba(8,15,30,.88); border: 1px solid rgba(99,198,255,.2);
-      backdrop-filter: blur(16px); font-size: 13px; font-weight: 500;
-      display: flex; align-items: center; gap: 9px;
-      box-shadow: 0 8px 32px rgba(0,0,0,.4);
-      animation: fbfloat 6s ease-in-out infinite;
-    }
-    .fb1 { top: 14%; left: -68px; animation-delay: 0s; }
-    .fb2 { bottom: 18%; right: -62px; animation-delay: -3s; }
-    @keyframes fbfloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-9px)} }
-    .fb-dot { width: 8px; height: 8px; border-radius: 50%; }
-
-    /* ─────────────────────────────────────────
-       SOCIAL PROOF STRIP
-    ───────────────────────────────────────── */
-    .strip {
-      position: relative; z-index: 1;
-      border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
-      background: rgba(8,15,30,.5); padding: 20px 0;
-    }
-    .strip-inner {
-      display: flex; gap: 48px; flex-wrap: wrap; justify-content: center; align-items: center;
-      padding: 0 40px;
-    }
-    .strip-item {
-      display: flex; align-items: center; gap: 9px;
-      color: var(--t3); font-size: 14px; font-weight: 500; transition: var(--ease);
-    }
-    .strip-item:hover { color: var(--t2); }
-    .strip-ic { font-size: 18px; }
-
-    /* ─────────────────────────────────────────
-       FEATURES
-    ───────────────────────────────────────── */
-    .feat-grid { display: grid; gap: 18px; grid-template-columns: repeat(3,1fr); }
-    .fc {
-      padding: 30px; border-radius: var(--r3);
-      background: linear-gradient(145deg, var(--bg-1), var(--bg-2));
-      border: 1px solid var(--border); transition: var(--ease); position: relative; overflow: hidden;
-    }
-    .fc::after { content:''; position:absolute; inset:0; background:var(--grad); opacity:0; border-radius:inherit; transition:var(--ease); }
-    .fc:hover { transform:translateY(-5px); border-color:rgba(99,198,255,.28); box-shadow:0 0 40px rgba(99,198,255,.12), 0 20px 50px rgba(0,0,0,.4); }
-    .fc:hover::after { opacity:.025; }
-    .fi {
-      width: 50px; height: 50px; border-radius: 14px; margin-bottom: 18px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 22px; position: relative; z-index: 1;
-    }
-    .fi-c  { background: rgba(99,198,255,.1); }
-    .fi-t  { background: rgba(118,247,212,.1); }
-    .fi-p  { background: rgba(167,139,250,.1); }
-    .fi-pk { background: rgba(244,114,182,.1); }
-    .fi-o  { background: rgba(251,146,60,.1);  }
-    .fi-g  { background: rgba(74,222,128,.1);  }
-    .fc h3 { font-size: 17px; font-weight: 700; margin-bottom: 9px; position:relative;z-index:1; }
-    .fc p  { color: var(--t2); font-size: 14px; line-height: 1.7; position:relative;z-index:1; }
-    .fc-tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:14px; position:relative;z-index:1; }
-    .tag { font-size:11px; padding:3px 10px; border-radius:20px; background:rgba(255,255,255,.05); color:var(--t3); border:1px solid var(--border); }
-
-    /* ─────────────────────────────────────────
-       HOW IT WORKS
-    ───────────────────────────────────────── */
-    .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:28px; }
-    .step {
-      padding:36px 28px; border-radius:var(--r3); border:1px solid var(--border);
-      background:var(--bg-1); text-align:center; transition:var(--ease);
-    }
-    .step:hover { border-color:var(--glow); box-shadow:0 0 40px rgba(99,198,255,.1); }
-    .step-n {
-      width:50px; height:50px; border-radius:14px; margin:0 auto 18px;
-      background:var(--grad); color:#03060d;
-      display:flex; align-items:center; justify-content:center;
-      font-size:20px; font-weight:900;
-    }
-    .step h3 { font-size:17px; font-weight:700; margin-bottom:9px; }
-    .step p  { color:var(--t2); font-size:14px; line-height:1.7; }
-    .step code { background:var(--bg-2); padding:2px 7px; border-radius:5px; font-size:12.5px; color:var(--teal); font-family:'Consolas','Courier New',monospace; }
-
-    /* ─────────────────────────────────────────
-       SPOTLIGHT (alternating)
-    ───────────────────────────────────────── */
-    .spot { padding: 60px 0; }
-    .spot-grid { display:grid; grid-template-columns:1fr 1fr; gap:80px; align-items:center; }
-    .spot-grid.rev { direction:rtl; }
-    .spot-grid.rev > * { direction:ltr; }
-    .spot h2 { font-size:clamp(26px,3.5vw,40px); font-weight:800; line-height:1.14; margin-bottom:14px; }
-    .spot-p { color:var(--t2); font-size:16px; line-height:1.78; margin-bottom:24px; }
-    .spot-list { display:flex; flex-direction:column; gap:11px; }
-    .sl-item { display:flex; align-items:flex-start; gap:11px; font-size:14px; color:var(--t2); }
-    .sl-check { color:var(--teal); flex-shrink:0; margin-top:2px; font-size:15px; }
-    .spot-vis {
-      border-radius:var(--r4); overflow:hidden; border:1px solid rgba(99,198,255,.15);
-      background:var(--bg-1); box-shadow:0 30px 80px rgba(0,0,0,.5);
+    .step h4 { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
+    .step p  { font-size: 12.5px; color: var(--t2); line-height: 1.6; }
+    .step code {
+      display: inline-block; padding: 2px 7px; border-radius: 5px;
+      background: rgba(99,198,255,.08); color: var(--cyan);
+      font-family: 'Consolas', monospace; font-size: 11.5px;
     }
 
-    /* mini chat */
-    .mc { padding:20px; }
-    .mc-head { display:flex; align-items:center; gap:10px; padding-bottom:14px; margin-bottom:14px; border-bottom:1px solid var(--border); }
-    .mc-av { width:32px;height:32px;border-radius:50%;background:var(--grad);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#03060d; }
-    .mc-name { font-size:14px;font-weight:600; }
-    .mc-status { font-size:11px;color:var(--teal); }
-    .mc-msgs { display:flex;flex-direction:column;gap:11px; }
-    .mm { display:flex; gap:8px; }
-    .mm.um { flex-direction:row-reverse; }
-    .ma { width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0; }
-    .ma-ai { background:var(--grad);color:#03060d; }
-    .ma-u  { background:rgba(167,139,250,.18);color:var(--purple); }
-    .mb { padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.55;max-width:240px; }
-    .mb-ai { background:var(--bg-2); }
-    .mb-u  { background:rgba(99,198,255,.1);border:1px solid rgba(99,198,255,.15); }
-    .hl { color:var(--cyan);font-weight:600; }
+    /* ── Requirement note ── */
+    .req-box {
+      margin: 48px 0 0;
+      padding: 18px 22px; border-radius: var(--r2);
+      background: rgba(99,198,255,.05); border: 1px solid rgba(99,198,255,.18);
+    }
+    .req-box h4 { font-size: 13px; font-weight: 700; color: var(--cyan); margin-bottom: 10px; }
+    .req-list {
+      display: flex; flex-wrap: wrap; gap: 20px;
+    }
+    .req-item { font-size: 13px; color: var(--t2); }
+    .req-item strong { color: var(--t1); }
 
-    /* ppt preview */
-    .ppt { padding:20px; }
-    .ppt-slide {
-      border-radius:10px; overflow:hidden; margin-bottom:10px;
-      background:linear-gradient(135deg,#1a1060,#0d1a40);
-      padding:22px 26px; position:relative;
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border); padding: 36px 0;
     }
-    .ppt-slide::after { content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(99,198,255,.07),transparent); }
-    .ppt-slide-t { font-size:15px;font-weight:700;margin-bottom:7px; }
-    .ppt-slide-c { font-size:12px;color:var(--t2);line-height:1.6; }
-    .ppt-thumbs { display:flex;gap:8px;margin-bottom:12px; }
-    .ppt-thumb { flex:1;border-radius:8px;padding:14px 16px;background:linear-gradient(135deg,#160e50,#0b1535); }
-    .ppt-thumb-t { font-size:12px;font-weight:600;margin-bottom:5px; }
-    .ppt-thumb-c { font-size:10.5px;color:var(--t2); }
-    .ppt-progress { display:flex;gap:4px; }
-    .pd { height:4px;flex:1;border-radius:2px;background:var(--border); }
-    .pd.d { background:var(--cyan); }
-    .pd.a { background:var(--teal);animation:ppulse 1s ease-in-out infinite; }
-    @keyframes ppulse { 0%,100%{opacity:.7} 50%{opacity:1} }
-    .ppt-stat { display:flex;align-items:center;gap:7px;font-size:12px;color:var(--t2);margin-top:10px; }
-    .ppt-stat .s-dot { width:7px;height:7px;border-radius:50%;background:var(--teal);animation:ppulse 1s infinite; }
+    .fg { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    .fg-brand { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; }
+    .fg p { font-size: 13px; color: var(--t3); }
+    .fg-links { display: flex; gap: 18px; }
+    .fg-links a { font-size: 13px; color: var(--t3); transition: var(--ease); }
+    .fg-links a:hover { color: var(--t1); }
 
-    /* ─────────────────────────────────────────
-       STATS
-    ───────────────────────────────────────── */
-    .stats-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:20px; }
-    .sc {
-      text-align:center;padding:40px 20px;border-radius:var(--r3);
-      border:1px solid var(--border);background:var(--bg-1);transition:var(--ease);
-    }
-    .sc:hover { border-color:var(--glow); }
-    .sn { font-size:52px;font-weight:900;line-height:1;margin-bottom:7px; }
-    .sl { color:var(--t2);font-size:14px; }
+    /* ── Scroll reveal ── */
+    .rv { opacity: 0; transform: translateY(22px); transition: opacity .55s ease, transform .55s ease; }
+    .rv.vis { opacity: 1; transform: none; }
 
-    /* ─────────────────────────────────────────
-       MODELS
-    ───────────────────────────────────────── */
-    .models-wrap { display:flex;flex-wrap:wrap;gap:12px;justify-content:center; }
-    .model-chip {
-      padding:10px 20px;border-radius:30px;
-      border:1px solid var(--border);background:var(--bg-1);
-      display:flex;align-items:center;gap:9px;
-      font-size:14px;font-weight:500;transition:var(--ease);
-    }
-    .model-chip:hover { border-color:var(--glow);background:rgba(99,198,255,.04); }
-    .m-dot { width:8px;height:8px;border-radius:50%; }
-    .md-g { background:#4285f4; }
-    .md-o { background:#10a37f; }
-    .md-a { background:#cc785c; }
-    .md-l { background:var(--teal); }
-
-    /* ─────────────────────────────────────────
-       DEPLOY
-    ───────────────────────────────────────── */
-    .deploy-grid { display:grid;grid-template-columns:repeat(2,1fr);gap:22px; }
-    .dc {
-      padding:38px;border-radius:var(--r4);
-      border:1px solid var(--border);background:var(--bg-1);
-      transition:var(--ease);position:relative;overflow:hidden;
-    }
-    .dc:hover { border-color:var(--glow);box-shadow:0 0 40px rgba(99,198,255,.1); }
-    .dc.feat { border-color:rgba(99,198,255,.22);background:linear-gradient(145deg,var(--bg-1),var(--bg-2)); }
-    /* .dc-badge replaces the original CSS ::before pseudo-element for bilingual support */
-    .dc-badge {
-      position:absolute; top:20px; right:-30px;
-      background:var(--grad); color:#03060d; font-size:10px; font-weight:800;
-      padding:4px 44px; transform:rotate(45deg); letter-spacing:.1em;
-      white-space:nowrap; pointer-events:none;
-    }
-    .dc-icon { font-size:34px;margin-bottom:18px; }
-    .dc h3 { font-size:21px;font-weight:800;margin-bottom:8px; }
-    .dc-desc { color:var(--t2);font-size:14px;line-height:1.7;margin-bottom:22px; }
-    .dc-feats { display:flex;flex-direction:column;gap:10px; }
-    .dfi { display:flex;align-items:center;gap:10px;font-size:14px; }
-    .dfi .check { color:var(--teal);font-size:13px;flex-shrink:0; }
-
-    /* ─────────────────────────────────────────
-       CTA BANNER
-    ───────────────────────────────────────── */
-    .cta-box {
-      border-radius:var(--r4);padding:80px 60px;text-align:center;position:relative;overflow:hidden;
-      background:linear-gradient(135deg,rgba(99,198,255,.07),rgba(118,247,212,.04));
-      border:1px solid rgba(99,198,255,.18);
-    }
-    .cta-box::before { content:'';position:absolute;inset:0;background:radial-gradient(ellipse 700px 350px at 50% 50%,rgba(99,198,255,.055),transparent); }
-    .cta-box h2 { font-size:clamp(28px,4.5vw,52px);font-weight:900;margin-bottom:14px;position:relative; }
-    .cta-box p  { color:var(--t2);font-size:17px;max-width:520px;margin:0 auto 38px;position:relative; }
-    .cta-btns   { display:flex;gap:14px;justify-content:center;flex-wrap:wrap;position:relative; }
-
-    /* ─────────────────────────────────────────
-       FOOTER
-    ───────────────────────────────────────── */
-    .footer { position:relative;z-index:1;border-top:1px solid var(--border);padding:60px 0 36px; }
-    .footer-grid { display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px; }
-    .fg-brand p { color:var(--t3);font-size:13px;line-height:1.7;max-width:260px;margin-top:12px; }
-    .fg-col h4 { font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--t3);margin-bottom:14px; }
-    .fg-col a { display:block;color:var(--t2);font-size:14px;margin-bottom:9px;transition:var(--ease); }
-    .fg-col a:hover { color:var(--t1); }
-    .footer-bot {
-      border-top:1px solid var(--border);padding-top:22px;margin-top:40px;
-      display:flex;justify-content:space-between;align-items:center;
-    }
-    .footer-bot p { color:var(--t3);font-size:13px; }
-    .f-gh-btn {
-      display:flex;align-items:center;gap:7px;
-      padding:7px 14px;border-radius:var(--r1);border:1px solid var(--border);
-      color:var(--t2);font-size:13px;transition:var(--ease);
-    }
-    .f-gh-btn:hover { color:var(--t1);border-color:var(--glow); }
-
-    /* ─────────────────────────────────────────
-       REVEAL ANIMATION
-    ───────────────────────────────────────── */
-    .rv { opacity:0;transform:translateY(30px);transition:opacity .7s ease,transform .7s ease; }
-    .rv.d1{transition-delay:.1s} .rv.d2{transition-delay:.2s} .rv.d3{transition-delay:.3s} .rv.d4{transition-delay:.4s}
-    .rv.in { opacity:1;transform:translateY(0); }
-
-    /* ─────────────────────────────────────────
-       RESPONSIVE
-    ───────────────────────────────────────── */
-    @media(max-width:1024px) {
-      .feat-grid    { grid-template-columns:repeat(2,1fr); }
-      .spot-grid    { grid-template-columns:1fr; gap:44px; }
-      .spot-grid.rev{ direction:ltr; }
-      .stats-grid   { grid-template-columns:repeat(2,1fr); }
-      .footer-grid  { grid-template-columns:1fr 1fr; }
-    }
-    @media(max-width:768px) {
-      .wrap { padding:0 20px; }
-      .nav  { padding:0 20px; }
-      .hero { padding:110px 20px 70px; }
-      .nav-links { display:none; }
-      .feat-grid  { grid-template-columns:1fr; }
-      .steps      { grid-template-columns:1fr; }
-      .deploy-grid{ grid-template-columns:1fr; }
-      .footer-grid{ grid-template-columns:1fr; }
-      .footer-bot { flex-direction:column;gap:14px;text-align:center; }
-      .aw-sidebar  { display:none; }
-      .fb1,.fb2   { display:none; }
-      .cta-box     { padding:48px 24px; }
-      .sec { padding:80px 0; }
-    }
-    @media(max-width:480px) {
-      .hero-h1 { font-size:38px; }
-      .hero-sub{ font-size:16px; }
-      .stats-grid { grid-template-columns:repeat(2,1fr); }
+    /* ── Responsive ── */
+    @media (max-width: 700px) {
+      .aw-body { grid-template-columns: 1fr; }
+      .aw-sidebar { display: none; }
+      .nav-links { display: none; }
+      .wrap { padding: 0 20px; }
+      .hero { padding: 120px 0 64px; }
     }
   </style>
 </head>
 <body>
 
-<!-- BG -->
+<!-- Background -->
 <div class="bg-wrap" aria-hidden="true">
   <div class="grid-bg"></div>
-  <div class="bg-radial bg-radial-1"></div>
-  <div class="bg-radial bg-radial-2"></div>
-  <div class="bg-radial bg-radial-3"></div>
+  <div class="bg-radial bg-r1"></div>
+  <div class="bg-radial bg-r2"></div>
 </div>
 
-<!-- ══════════════ NAV ══════════════ -->
+<!-- ══ NAV ══ -->
 <nav class="nav" aria-label="Main navigation">
-  <a href="#" class="nav-brand">
-    <div class="brand-mark" aria-hidden="true">言</div>
-    Koto
-  </a>
-  <div class="nav-links">
-    <a href="#features" data-en="Features" data-zh="功能特性">Features</a>
-    <a href="#how-it-works" data-en="Quick Start" data-zh="快速入门">Quick Start</a>
-    <a href="#models" data-en="Models" data-zh="支持模型">Models</a>
-    <a href="#deploy" data-en="Deploy" data-zh="部署方式">Deploy</a>
-  </div>
-  <div class="nav-cta">
-    <!-- Language toggle: shows "中文" when in EN, "English" when in ZH -->
-    <button id="lang-btn" onclick="toggleLang()" aria-label="Toggle language">中文</button>
-    <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="nav-gh">
-      <svg class="ico-gh" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
-      <span data-en="GitHub" data-zh="GitHub">GitHub</span>
+  <div class="wrap">
+    <a href="#" class="nav-brand">
+      <div class="brand-mark" aria-hidden="true">言</div>
+      Koto
     </a>
-    <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-prime">
-      <span data-en="Get Started ↗" data-zh="立即开始 ↗">Get Started ↗</span>
-    </a>
+    <div class="nav-links">
+      <a href="#features"  data-en="Features"  data-zh="功能特性">功能特性</a>
+      <a href="#setup"     data-en="Setup"      data-zh="快速开始">快速开始</a>
+      <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <button class="lang-btn" onclick="toggleLang()" aria-label="Switch language">EN</button>
   </div>
 </nav>
 
-<!-- ══════════════ HERO ══════════════ -->
+<!-- ══ HERO ══ -->
 <section class="hero" aria-labelledby="hero-heading">
-  <div class="hero-pill">
-    <span class="pill">✨ &nbsp;<span data-en="Open source · Local + Cloud · 100% free" data-zh="开源免费 · 本地+云端 · 完全免费">Open source · Local + Cloud · 100% free</span></span>
-  </div>
-
-  <h1 class="hero-h1" id="hero-heading">
-    <span data-en="The AI workspace" data-zh="专为你打造的">The AI workspace</span><br class="hero-br">
-    <span data-en="that " data-zh="">that </span><span class="gt" id="typed"></span><span class="cur" aria-hidden="true"></span>
-  </h1>
-  <p class="hero-sub" data-en="Koto combines intelligent chat, document understanding, presentation generation, voice interaction, and knowledge graphs — all in one beautiful interface that works on your machine or in the cloud." data-zh="Koto 将智能对话、文档理解、幻灯片生成、语音交互和知识图谱融为一体 —— 一个优雅的界面，既可在本地运行，也可部署到云端。">
-    Koto combines intelligent chat, document understanding, presentation generation, voice interaction, and knowledge graphs — all in one beautiful interface that works on your machine or in the cloud.
-  </p>
-  <div class="hero-btns">
-    <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-prime btn-lg">
-      <svg class="ico-gh" style="width:18px;height:18px" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
-      <span data-en="View on GitHub" data-zh="查看 GitHub">View on GitHub</span>
-    </a>
-    <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-ghost btn-lg">
-      ⬇&nbsp;<span data-en="Download" data-zh="下载">Download</span>
-    </a>
-  </div>
-
-  <!-- App window mockup -->
-  <div class="app-window rv" style="position:relative">
-    <div class="fbadge fb1" aria-hidden="true">
-      <div class="fb-dot" style="background:var(--teal)"></div>
-      Local model active
-    </div>
-    <div class="fbadge fb2" aria-hidden="true">
-      ⚡ Streaming response
+  <div class="wrap">
+    <div class="hero-pill">
+      <span class="pill">✦ &nbsp;<span data-en="Open source · Python · Runs locally" data-zh="开源 · Python · 本地运行">开源 · Python · 本地运行</span></span>
     </div>
 
-    <div class="aw-bar">
-      <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
-      <span class="aw-title">Koto — AI Workspace</span>
+    <h1 class="hero-h1 rv" id="hero-heading">
+      <span data-en="Your personal" data-zh="属于你的">属于你的</span><br>
+      <span class="gt" data-en="AI Desktop Workspace" data-zh="AI 桌面工作台">AI 桌面工作台</span>
+    </h1>
+
+    <p class="hero-sub rv" data-en="Koto runs on your own machine — multi-model chat, document analysis, Skills automation and long-term memory. Your data stays local." data-zh="Koto 运行在你自己的电脑上——多模型对话、文档分析、技能自动化与长期记忆。数据不离本地。">
+      Koto 运行在你自己的电脑上——多模型对话、文档分析、技能自动化与长期记忆。数据不离本地。
+    </p>
+
+    <div class="hero-btns rv">
+      <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-prime">
+        ⬇&nbsp;<span data-en="Download" data-zh="下载">下载</span>
+      </a>
+      <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-ghost">
+        <span data-en="View on GitHub" data-zh="查看 GitHub">查看 GitHub</span>
+      </a>
     </div>
-    <div class="aw-body">
-      <div class="aw-sidebar" aria-hidden="true">
-        <span class="aw-section-label">Sessions</span>
-        <div class="aw-item on"><span class="ic">💬</span> Market Analysis</div>
-        <div class="aw-item"><span class="ic">📄</span> Q4 Report</div>
-        <div class="aw-item"><span class="ic">💻</span> Code Review</div>
-        <div class="aw-item"><span class="ic">📊</span> Data Deep-Dive</div>
-        <span class="aw-section-label" style="margin-top:14px">Tools</span>
-        <div class="aw-item"><span class="ic">📎</span> Upload Doc</div>
-        <div class="aw-item"><span class="ic">🎯</span> Generate PPT</div>
-        <div class="aw-item"><span class="ic">🗺️</span> Knowledge Map</div>
+
+    <!-- App window preview -->
+    <div class="aw rv" role="img" aria-label="Koto app window preview">
+      <div class="aw-bar">
+        <div class="dot dot-r"></div>
+        <div class="dot dot-y"></div>
+        <div class="dot dot-g"></div>
+        <span class="aw-title">Koto (言) — AI Workspace</span>
       </div>
-      <div class="aw-chat" aria-label="Chat demo">
-        <div class="cm">
-          <div class="av av-ai">K</div>
-          <div class="cb cb-ai">
-            I've analysed your uploaded report. Key findings:
-            <div class="cb-code">• Revenue +23 % YoY (Q3 2024)<br>• Enterprise segment: +41 %<br>• Churn dropped 3.4 % → 2.1 %</div>
+      <div class="aw-body">
+        <div class="aw-sidebar">
+          <div class="aw-s-label" data-en="Sessions" data-zh="会话">会话</div>
+          <div class="aw-s-item active"><span class="dot-sm"></span><span data-en="New chat" data-zh="新对话">新对话</span></div>
+          <div class="aw-s-item"><span data-en="Document review" data-zh="合同审阅">合同审阅</span></div>
+          <div class="aw-s-item"><span data-en="Weekly report" data-zh="周报生成">周报生成</span></div>
+          <div class="aw-s-label" style="margin-top:16px;" data-en="Skills" data-zh="技能">技能</div>
+          <div class="aw-s-item"><span data-en="Summarizer" data-zh="摘要助手">摘要助手</span></div>
+          <div class="aw-s-item"><span data-en="Code reviewer" data-zh="代码审查">代码审查</span></div>
+        </div>
+        <div class="aw-chat">
+          <div class="aw-msg">
+            <div class="aw-av usr">U</div>
+            <div class="aw-bubble usr" data-en="Summarize this PDF for me" data-zh="帮我总结一下这份 PDF">帮我总结一下这份 PDF</div>
           </div>
-        </div>
-        <div class="cm u">
-          <div class="av av-user">U</div>
-          <div class="cb cb-user">Generate a board-ready PPT from this</div>
-        </div>
-        <div class="cm">
-          <div class="av av-ai">K</div>
-          <div class="cb cb-ai">
-            Building your presentation…
-            <div class="cb-code" style="color:var(--teal)">✓ 8 slides · exec layout · 3 data charts</div>
+          <div class="aw-msg">
+            <div class="aw-av ai">言</div>
+            <div>
+              <div class="aw-bubble ai">
+                <span data-en="The document covers 3 key points: ①…②…③…" data-zh="这份文档涵盖 3 个核心要点：①…②…③…">这份文档涵盖 3 个核心要点：①…②…③…</span><span class="aw-cursor"></span>
+              </div>
+              <div class="aw-badge" data-en="⚡ Streaming · Gemini Flash" data-zh="⚡ 流式输出 · Gemini Flash">⚡ 流式输出 · Gemini Flash</div>
+            </div>
           </div>
-        </div>
-        <div class="cm">
-          <div class="av av-ai">K</div>
-          <div class="cb cb-ai"><div class="dots"><span></span><span></span><span></span></div></div>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ══════════════ SOCIAL PROOF STRIP ══════════════ -->
-<div class="strip">
-  <div class="strip-inner">
-    <span class="strip-item"><span class="strip-ic">🔵</span> Gemini 2.5 Flash</span>
-    <span class="strip-item"><span class="strip-ic">🔵</span> Gemini 3 Preview</span>
-    <span class="strip-item"><span class="strip-ic">🖥️</span> Ollama Local</span>
-    <span class="strip-item"><span class="strip-ic">🐳</span> Docker Ready</span>
-    <span class="strip-item"><span class="strip-ic">🔒</span> Privacy-first</span>
-    <span class="strip-item"><span class="strip-ic">⚡</span> Real-time Streaming</span>
-    <span class="strip-item"><span class="strip-ic">🌐</span> EN / ZH / JA</span>
-  </div>
-</div>
-
-<!-- ══════════════ FEATURES ══════════════ -->
+<!-- ══ FEATURES ══ -->
 <section class="sec" id="features" aria-labelledby="feat-heading">
   <div class="wrap">
     <div class="sec-eye">
-      <span class="pill" data-en="Everything you need" data-zh="一切所需">Everything you need</span>
+      <span class="pill" data-en="What Koto can do" data-zh="Koto 能做什么">Koto 能做什么</span>
     </div>
-    <h2 class="sec-h2 rv" id="feat-heading">
-      <span data-en="Powerful capabilities," data-zh="强大功能，">Powerful capabilities,</span><br>
-      <span class="gt" data-en="beautifully integrated" data-zh="优雅集成">beautifully integrated</span>
-    </h2>
-    <p class="sec-p rv d1" data-en="From quick questions to complex document workflows — Koto handles it all in one elegant interface." data-zh="从简单问答到复杂文档工作流 —— Koto 在一个优雅的界面中为你搞定一切。">From quick questions to complex document workflows — Koto handles it all in one elegant interface.</p>
+    <h2 class="sec-h2 rv" id="feat-heading" data-en="Real capabilities" data-zh="真实功能">真实功能</h2>
+    <p class="sec-sub rv" data-en="Everything below works out of the box after setup." data-zh="以下所有功能配置完成后开箱即用。">以下所有功能配置完成后开箱即用。</p>
 
     <div class="feat-grid">
-      <!-- Card 1: Intelligent Chat -->
-      <div class="fc rv d1">
-        <div class="fi fi-c">💬</div>
-        <h3 data-en="Intelligent Chat" data-zh="智能对话">Intelligent Chat</h3>
-        <p data-en="Multi-turn conversations with long-term memory. Koto remembers context across sessions and injects relevant history automatically." data-zh="多轮对话，拥有长期记忆。Koto 跨会话记住上下文，自动注入相关历史记录。">Multi-turn conversations with long-term memory. Koto remembers context across sessions and injects relevant history automatically.</p>
-        <div class="fc-tags">
-          <span class="tag" data-en="8 Themes" data-zh="8种主题">8 Themes</span>
-          <span class="tag" data-en="Streaming SSE" data-zh="流式响应">Streaming SSE</span>
-          <span class="tag" data-en="Memory" data-zh="记忆">Memory</span>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">💬</div>
+        <h3 data-en="Multi-model Chat" data-zh="多模型对话">多模型对话</h3>
+        <p data-en="Stream responses from Gemini Flash / Pro / Ultra or locally-running Ollama models. Switch models per session." data-zh="流式调用 Gemini Flash / Pro / Ultra，或本机运行的 Ollama 模型。每个会话可独立切换模型。">流式调用 Gemini Flash / Pro / Ultra，或本机运行的 Ollama 模型。每个会话可独立切换模型。</p>
+        <div class="feat-tags">
+          <span class="tag">Gemini</span>
+          <span class="tag">Ollama</span>
+          <span class="tag" data-en="Streaming" data-zh="流式输出">流式输出</span>
         </div>
       </div>
-      <!-- Card 2: Document Intelligence -->
-      <div class="fc rv d2">
-        <div class="fi fi-t">📄</div>
-        <h3 data-en="Document Intelligence" data-zh="文档智能">Document Intelligence</h3>
-        <p data-en="Upload Word, PDF, Excel, or PowerPoint files. Koto reads, annotates, summarises and answers detailed questions from your content." data-zh="上传 Word、PDF、Excel 或 PPT，Koto 自动阅读、注释、摘要并回答文档相关问题。">Upload Word, PDF, Excel, or PowerPoint files. Koto reads, annotates, summarises and answers detailed questions from your content.</p>
-        <div class="fc-tags">
-          <span class="tag" data-en="PDF · DOCX · XLSX" data-zh="PDF·DOCX·XLSX">PDF · DOCX · XLSX</span>
-          <span class="tag" data-en="Q&amp;A" data-zh="问答">Q&amp;A</span>
-          <span class="tag" data-en="Batch" data-zh="批量">Batch</span>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">📄</div>
+        <h3 data-en="Document Analysis" data-zh="文档分析">文档分析</h3>
+        <p data-en="Upload Word / PDF / Excel / PPT and ask questions, generate summaries, add annotations, or convert formats directly in chat." data-zh="上传 Word / PDF / Excel / PPT，在对话中提问、生成摘要、添加批注或转换格式。">上传 Word / PDF / Excel / PPT，在对话中提问、生成摘要、添加批注或转换格式。</p>
+        <div class="feat-tags">
+          <span class="tag">Word</span><span class="tag">PDF</span>
+          <span class="tag">Excel</span><span class="tag">PPT</span>
         </div>
       </div>
-      <!-- Card 3: PPT Generation -->
-      <div class="fc rv d3">
-        <div class="fi fi-p">📊</div>
-        <h3 data-en="PPT Generation" data-zh="PPT 生成">PPT Generation</h3>
-        <p data-en="Type a topic or paste your data — Koto generates a complete, professionally designed PowerPoint presentation in seconds." data-zh="输入主题或粘贴数据 —— Koto 在几秒内生成完整的专业 PowerPoint 演示文稿。">Type a topic or paste your data — Koto generates a complete, professionally designed PowerPoint presentation in seconds.</p>
-        <div class="fc-tags">
-          <span class="tag" data-en="Auto Layout" data-zh="自动排版">Auto Layout</span>
-          <span class="tag" data-en="Charts" data-zh="图表">Charts</span>
-          <span class="tag" data-en="Templates" data-zh="模板">Templates</span>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">🧩</div>
+        <h3 data-en="Skills System" data-zh="技能系统">技能系统</h3>
+        <p data-en="Define custom AI behaviors with a system prompt, bind them to shortcuts, and switch context instantly. Includes a built-in Skill marketplace." data-zh="用 System Prompt 定义 AI 行为，绑定快捷方式，即时切换上下文。内置 Skill 市场可浏览和安装社区技能。">用 System Prompt 定义 AI 行为，绑定快捷方式，即时切换上下文。内置 Skill 市场。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="Custom prompts" data-zh="自定义提示词">自定义提示词</span>
+          <span class="tag" data-en="Marketplace" data-zh="技能市场">技能市场</span>
         </div>
       </div>
-      <!-- Card 4: Voice Interaction -->
-      <div class="fc rv d1">
-        <div class="fi fi-pk">🎙️</div>
-        <h3 data-en="Voice Interaction" data-zh="语音交互">Voice Interaction</h3>
-        <p data-en="Speak naturally in English, Chinese, or Japanese. Real-time speech recognition and TTS playback for hands-free AI." data-zh="用中文、英文或日语自然交流。实时语音识别和 TTS 播报，体验完全解放双手的 AI。">Speak naturally in English, Chinese, or Japanese. Real-time speech recognition and TTS playback for hands-free AI.</p>
-        <div class="fc-tags">
-          <span class="tag" data-en="EN / ZH / JA" data-zh="中/英/日">EN / ZH / JA</span>
-          <span class="tag" data-en="TTS" data-zh="TTS">TTS</span>
-          <span class="tag" data-en="Wake Word" data-zh="唤醒词">Wake Word</span>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">🧠</div>
+        <h3 data-en="Long-term Memory" data-zh="长期记忆">长期记忆</h3>
+        <p data-en="Koto builds a user profile and stores preferences, facts, and recurring context across sessions — no need to repeat yourself." data-zh="Koto 构建用户画像，跨会话存储偏好、事实与常用上下文，无需重复解释背景。">Koto 构建用户画像，跨会话存储偏好、事实与常用上下文，无需重复解释背景。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="User profile" data-zh="用户画像">用户画像</span>
+          <span class="tag" data-en="Persistent context" data-zh="持久上下文">持久上下文</span>
         </div>
       </div>
-      <!-- Card 5: Smart Task Routing -->
-      <div class="fc rv d2">
-        <div class="fi fi-o">🔀</div>
-        <h3 data-en="Smart Task Routing" data-zh="智能任务路由">Smart Task Routing</h3>
-        <p data-en="Koto automatically classifies every request into one of 10 task types — chat, research, coding, file generation, document annotation, image creation, and more — routing to the optimal model." data-zh="Koto 自动将请求分类为 10 种任务类型（对话、研究、编码、文件生成、文档批注、图像创作等），并路由到最优模型。">Koto automatically classifies every request into one of 10 task types — chat, research, coding, file generation, document annotation, image creation, and more — routing to the optimal model.</p>
-        <div class="fc-tags">
-          <span class="tag" data-en="10 Task Types" data-zh="10 种任务类型">10 Task Types</span>
-          <span class="tag" data-en="Auto-Routing" data-zh="自动路由">Auto-Routing</span>
-          <span class="tag" data-en="Model Fallback" data-zh="模型降级">Model Fallback</span>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">🔁</div>
+        <h3 data-en="Automation &amp; Triggers" data-zh="自动化与触发器">自动化与触发器</h3>
+        <p data-en="Schedule recurring tasks — daily summaries, file watchers, timed reminders. Background jobs run silently without interrupting your work." data-zh="设置定时任务——每日摘要、文件监控、定时提醒。后台作业静默运行，不打断你的工作。">设置定时任务——每日摘要、文件监控、定时提醒。后台作业静默运行。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="Scheduler" data-zh="定时器">定时器</span>
+          <span class="tag" data-en="Background jobs" data-zh="后台任务">后台任务</span>
         </div>
       </div>
-      <!-- Card 6: Multi-Agent & Skills -->
-      <div class="fc rv d3">
-        <div class="fi fi-g">🤖</div>
-        <h3 data-en="Multi-Agent &amp; Skills" data-zh="多智能体与技能">Multi-Agent &amp; Skills</h3>
-        <p data-en="LangGraph-powered multi-agent orchestration runs sub-agents in sequential or parallel pipelines, with a critic loop for quality assurance — plus custom skills for any domain." data-zh="基于 LangGraph 的多智能体编排支持串行或并行子智能体流水线，内置 Critic Loop 质量校验，并支持任意领域的自定义技能。">LangGraph-powered multi-agent orchestration runs sub-agents in sequential or parallel pipelines, with a critic loop for quality assurance — plus custom skills for any domain.</p>
-        <div class="fc-tags">
-          <span class="tag" data-en="LangGraph" data-zh="LangGraph">LangGraph</span>
-          <span class="tag" data-en="Parallel Agents" data-zh="并行智能体">Parallel Agents</span>
-          <span class="tag" data-en="Critic Loop" data-zh="Critic Loop">Critic Loop</span>
+
+      <div class="feat-card rv">
+        <div class="feat-icon">🎙️</div>
+        <h3 data-en="Voice I/O" data-zh="语音交互">语音交互</h3>
+        <p data-en="Speak your message with the microphone button or use TTS to have responses read aloud. Optional; requires voice dependencies." data-zh="点击麦克风说话，或开启 TTS 语音朗读回复。可选功能，需额外安装语音依赖。">点击麦克风说话，或开启 TTS 语音朗读回复。可选功能，需额外安装语音依赖。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="Speech-to-text" data-zh="语音输入">语音输入</span>
+          <span class="tag">TTS</span>
         </div>
       </div>
+
     </div>
   </div>
 </section>
 
-<!-- ══════════════ SPOTLIGHT 1 — Chat ══════════════ -->
-<section class="spot" aria-labelledby="spot1-heading">
-  <div class="wrap">
-    <div class="spot-grid">
-      <div class="rv">
-        <div style="margin-bottom:14px">
-          <span class="pill pill-teal" data-en="Context-Aware AI" data-zh="上下文感知 AI">Context-Aware AI</span>
-        </div>
-        <h2 id="spot1-heading">
-          <span data-en="Conversations that " data-zh="">Conversations that </span><span class="gt" data-en="actually remember" data-zh="真正记住你的">actually remember</span><span data-en=" you" data-zh="对话"> you</span>
-        </h2>
-        <p class="spot-p" data-en="Koto builds a persistent memory of your preferences, past work and important facts — automatically injecting relevant context into every response without you lifting a finger." data-zh="Koto 会持续记录你的偏好、过往工作和重要信息 —— 自动将相关上下文注入每一次回复，无需你做任何操作。">Koto builds a persistent memory of your preferences, past work and important facts — automatically injecting relevant context into every response without you lifting a finger.</p>
-        <div class="spot-list">
-          <div class="sl-item">
-            <span class="sl-check">✓</span>
-            <span data-en="Cross-session long-term memory with FAISS vector index" data-zh="跨会话长期记忆，基于 FAISS 向量索引">Cross-session long-term memory with FAISS vector index</span>
-          </div>
-          <div class="sl-item">
-            <span class="sl-check">✓</span>
-            <span data-en="Smart history trimming — keeps context fresh, not bloated" data-zh="智能历史压缩 —— 保持上下文新鲜，而非臃肿">Smart history trimming — keeps context fresh, not bloated</span>
-          </div>
-          <div class="sl-item">
-            <span class="sl-check">✓</span>
-            <span data-en="8 beautiful themes including dark, ocean, forest, and auto" data-zh="8 款精美主题，包括深色、海洋、森林和自动模式">8 beautiful themes including dark, ocean, forest, and auto</span>
-          </div>
-          <div class="sl-item">
-            <span class="sl-check">✓</span>
-            <span data-en="Real-time streaming with interrupt support" data-zh="实时流式传输，支持中断">Real-time streaming with interrupt support</span>
-          </div>
-        </div>
-      </div>
-      <div class="spot-vis rv d2">
-        <div class="mc">
-          <div class="mc-head">
-            <div class="mc-av">K</div>
-            <div><div class="mc-name">Koto AI</div><div class="mc-status">● Gemini 2.0 Flash</div></div>
-          </div>
-          <div class="mc-msgs">
-            <div class="mm">
-              <div class="ma ma-ai">K</div>
-              <div class="mb mb-ai">Based on our <span class="hl">previous discussion about your Q3 report</span>, the new data shows continued enterprise growth. Want me to update the summary?</div>
-            </div>
-            <div class="mm um">
-              <div class="ma ma-u">U</div>
-              <div class="mb mb-u">Yes, and include the competitor analysis from last week</div>
-            </div>
-            <div class="mm">
-              <div class="ma ma-ai">K</div>
-              <div class="mb mb-ai">Found it — <span class="hl">competitor_analysis_nov.pdf</span> from your workspace. Integrating now…</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════ SPOTLIGHT 2 — PPT ══════════════ -->
-<section class="spot" style="padding-top:0" aria-labelledby="spot2-heading">
-  <div class="wrap">
-    <div class="spot-grid rev">
-      <div class="rv">
-        <div style="margin-bottom:14px">
-          <span class="pill pill-purple" data-en="Presentation AI" data-zh="演示文稿 AI">Presentation AI</span>
-        </div>
-        <h2 id="spot2-heading">
-          <span data-en="From idea to " data-zh="从想法到">From idea to </span><span class="gta" data-en="polished slides" data-zh="精美幻灯片">polished slides</span><span data-en=" in seconds" data-zh="，只需几秒"> in seconds</span>
-        </h2>
-        <p class="spot-p" data-en="Describe your topic or paste your data. Koto's AI pipeline designs the structure, writes the content, and formats a complete presentation ready to present." data-zh="描述你的主题或粘贴数据，Koto 的 AI 流水线自动设计结构、编写内容，并格式化为可直接呈现的完整演示文稿。">Describe your topic or paste your data. Koto's AI pipeline designs the structure, writes the content, and formats a complete presentation ready to present.</p>
-        <div class="spot-list">
-          <div class="sl-item">
-            <span class="sl-check">✓</span>
-            <span data-en="Automatic slide structure and content generation" data-zh="自动生成幻灯片结构与内容">Automatic slide structure and content generation</span>
-          </div>
-          <div class="sl-item">
-            <span class="sl-check">✓</span>
-            <span data-en="Professional layouts with charts and visual elements" data-zh="专业排版，含图表和视觉元素">Professional layouts with charts and visual elements</span>
-          </div>
-          <div class="sl-item">
-            <span class="sl-check">✓</span>
-            <span data-en="Edit and customise in the built-in slide editor" data-zh="在内置幻灯片编辑器中编辑和自定义">Edit and customise in the built-in slide editor</span>
-          </div>
-          <div class="sl-item">
-            <span class="sl-check">✓</span>
-            <span data-en="Download as .pptx instantly" data-zh="即时下载为 .pptx 格式">Download as .pptx instantly</span>
-          </div>
-        </div>
-      </div>
-      <div class="spot-vis rv d2">
-        <div class="ppt">
-          <div class="ppt-slide">
-            <div class="ppt-slide-t">Q4 2024 Business Review</div>
-            <div class="ppt-slide-c">• Revenue: $4.2 M (+23% YoY)<br>• Enterprise: +41% growth<br>• Churn: 2.1% ↓ from 3.4%</div>
-          </div>
-          <div class="ppt-thumbs">
-            <div class="ppt-thumb"><div class="ppt-thumb-t">Market Share</div><div class="ppt-thumb-c">Growing 3% MoM…</div></div>
-            <div class="ppt-thumb"><div class="ppt-thumb-t">Roadmap 2025</div><div class="ppt-thumb-c">API · Mobile…</div></div>
-          </div>
-          <div class="ppt-progress">
-            <div class="pd d"></div><div class="pd d"></div><div class="pd d"></div>
-            <div class="pd a"></div><div class="pd"></div><div class="pd"></div><div class="pd"></div><div class="pd"></div>
-          </div>
-          <div class="ppt-stat"><div class="s-dot"></div><span data-en=" Generating slide 4 of 8…" data-zh=" 正在生成第 4 / 8 张幻灯片…"> Generating slide 4 of 8…</span></div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════ HOW IT WORKS ══════════════ -->
-<section class="sec" id="how-it-works" aria-labelledby="how-heading">
+<!-- ══ SETUP ══ -->
+<section class="sec" id="setup" style="padding-top:0;" aria-labelledby="setup-heading">
   <div class="wrap">
     <div class="sec-eye">
-      <span class="pill" data-en="Simple setup" data-zh="极简安装">Simple setup</span>
+      <span class="pill" data-en="Getting started" data-zh="快速开始">快速开始</span>
     </div>
-    <h2 class="sec-h2 rv" id="how-heading">
-      <span data-en="Up and running in " data-zh="3 步即可">Up and running in </span><span class="gt" data-en="3 steps" data-zh="启动">3 steps</span>
-    </h2>
-    <p class="sec-p rv d1" data-en="No complex configuration. Start locally in under 2 minutes." data-zh="无需复杂配置，2 分钟内本地启动。">No complex configuration. Start locally in under 2 minutes.</p>
-    <div class="steps">
-      <div class="step rv d1">
-        <div class="step-n">1</div>
-        <h3 data-en="Clone &amp; Install" data-zh="克隆并安装">Clone &amp; Install</h3>
-        <p>
-          <span data-en="Clone the repo and run " data-zh="克隆仓库并运行 ">Clone the repo and run </span><code>pip install -r config/requirements.txt</code><span data-en=". Python 3.11+ is all you need." data-zh="，Python 3.11+ 即可。">. Python 3.11+ is all you need.</span>
-        </p>
-      </div>
-      <div class="step rv d2">
-        <div class="step-n">2</div>
-        <h3 data-en="Add Your API Key" data-zh="添加 API Key">Add Your API Key</h3>
-        <p>
-          <span data-en="Copy " data-zh="复制 ">Copy </span><code>config/gemini_config.env.example</code><span data-en=" and add your Gemini API key. Free tier works great." data-zh="，填入你的 Gemini API Key，免费额度即可运行。"> and add your Gemini API key. Free tier works great.</span>
-        </p>
-      </div>
-      <div class="step rv d3">
-        <div class="step-n">3</div>
-        <h3 data-en="Run &amp; Chat" data-zh="运行并开始对话">Run &amp; Chat</h3>
-        <p>
-          <span data-en="Run " data-zh="运行 ">Run </span><code>python src/server.py</code><span data-en=" and open " data-zh=" 并打开 "> and open </span><code>localhost:5000</code><span data-en=". Your AI workspace is ready." data-zh="，你的 AI 工作台已就绪。">. Your AI workspace is ready.</span>
-        </p>
-      </div>
-    </div>
-  </div>
-</section>
+    <h2 class="sec-h2 rv" id="setup-heading" data-en="Up and running in minutes" data-zh="几分钟内跑起来">几分钟内跑起来</h2>
+    <p class="sec-sub rv" data-en="Koto is a Python app. Clone, install, configure your API key, run." data-zh="Koto 是 Python 应用。克隆、安装、填 API Key、启动。">Koto 是 Python 应用。克隆、安装、填 API Key、启动。</p>
 
-<!-- ══════════════ STATS ══════════════ -->
-<section class="sec" style="padding:80px 0" aria-label="Project stats">
-  <div class="wrap">
-    <div class="stats-grid">
-      <div class="sc rv d1"><div class="sn gt" data-count="487" data-suffix="+">487+</div><div class="sl" data-en="Automated tests" data-zh="自动化测试">Automated tests</div></div>
-      <div class="sc rv d2"><div class="sn gt" data-count="10"  data-suffix="">10</div><div class="sl" data-en="Routing task types" data-zh="路由任务类型">Routing task types</div></div>
-      <div class="sc rv d3"><div class="sn gt" data-count="8"   data-suffix="">8</div><div class="sl" data-en="Beautiful UI themes" data-zh="精美 UI 主题">Beautiful UI themes</div></div>
-      <div class="sc rv d4"><div class="sn gt" data-count="100" data-suffix="%">100%</div><div class="sl" data-en="Open source" data-zh="完全开源">Open source</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════ MODELS ══════════════ -->
-<section class="sec" id="models" style="padding:80px 0" aria-labelledby="models-heading">
-  <div class="wrap">
-    <div class="sec-eye">
-      <span class="pill" data-en="Multi-model" data-zh="多模型支持">Multi-model</span>
-    </div>
-    <h2 class="sec-h2 rv" id="models-heading">
-      <span data-en="Gemini-powered cloud," data-zh="Gemini 云端驱动，">Gemini-powered cloud,</span><br>
-      <span class="gt" data-en="Ollama for full privacy" data-zh="Ollama 本地全隐私">Ollama for full privacy</span>
-    </h2>
-    <p class="sec-p rv d1" data-en="Koto runs on the full Gemini family for cloud intelligence and any Ollama model for complete local privacy — zero data leaves your machine." data-zh="Koto 支持完整 Gemini 系列云端智能，以及任意 Ollama 模型实现完全本地隐私 —— 数据零上传。">Koto runs on the full Gemini family for cloud intelligence and any Ollama model for complete local privacy — zero data leaves your machine.</p>
-    <div class="models-wrap rv d2">
-      <div class="model-chip"><div class="m-dot md-g"></div> Gemini 3 Flash Preview</div>
-      <div class="model-chip"><div class="m-dot md-g"></div> Gemini 2.5 Flash <span style="font-size:10px;background:rgba(99,198,255,.15);color:#63c6ff;padding:1px 6px;border-radius:4px;margin-left:4px">default</span></div>
-      <div class="model-chip"><div class="m-dot md-g"></div> Gemini 2.5 Pro Preview</div>
-      <div class="model-chip"><div class="m-dot md-g"></div> Gemini 2.0 Flash</div>
-      <div class="model-chip"><div class="m-dot md-g"></div> Gemini 1.5 Pro</div>
-      <div class="model-chip"><div class="m-dot md-g"></div> Gemini 1.5 Flash</div>
-      <div class="model-chip"><div class="m-dot md-l"></div> Llama 3 (Ollama)</div>
-      <div class="model-chip"><div class="m-dot md-l"></div> Mistral (Local)</div>
-      <div class="model-chip"><div class="m-dot md-l"></div> Qwen 2.5 (Local)</div>
-      <div class="model-chip"><div class="m-dot md-l"></div> Any Ollama model</div>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════ DEPLOY ══════════════ -->
-<section class="sec" id="deploy" aria-labelledby="deploy-heading">
-  <div class="wrap">
-    <div class="sec-eye">
-      <span class="pill" data-en="Flexible deployment" data-zh="灵活部署">Flexible deployment</span>
-    </div>
-    <h2 class="sec-h2 rv" id="deploy-heading">
-      <span data-en="Run it your way —" data-zh="随心部署 ——">Run it your way —</span><br>
-      <span class="gt" data-en="local or cloud" data-zh="本地或云端">local or cloud</span>
-    </h2>
-    <p class="sec-p rv d1" data-en="Designed to work perfectly on your laptop and scale to a multi-user cloud service." data-zh="既可在笔记本电脑上完美运行，也可扩展为多用户云服务。">Designed to work perfectly on your laptop and scale to a multi-user cloud service.</p>
-    <div class="deploy-grid">
-      <!-- Local card -->
-      <div class="dc rv d1">
-        <div class="dc-icon">🖥️</div>
-        <h3 data-en="Local / Desktop" data-zh="本地/桌面版">Local / Desktop</h3>
-        <p class="dc-desc" data-en="Run entirely on your machine. Full privacy — your data never leaves your computer. No account required." data-zh="完全在本地运行，全程隐私保护 —— 数据不离开你的电脑，无需注册账号。">Run entirely on your machine. Full privacy — your data never leaves your computer. No account required.</p>
-        <div class="dc-feats">
-          <div class="dfi"><span class="check">✓</span><span data-en="Zero-config startup" data-zh="零配置启动">Zero-config startup</span></div>
-          <div class="dfi"><span class="check">✓</span><span data-en="Works offline with Ollama" data-zh="支持 Ollama 离线使用">Works offline with Ollama</span></div>
-          <div class="dfi"><span class="check">✓</span><span data-en="No account needed" data-zh="无需账号">No account needed</span></div>
-          <div class="dfi"><span class="check">✓</span><span data-en="Windows installer (.exe) available" data-zh="提供 Windows 安装程序（.exe）">Windows installer (.exe) available</span></div>
+    <div class="setup-grid">
+      <div class="step rv">
+        <div class="step-num">1</div>
+        <div>
+          <h4 data-en="Clone &amp; install" data-zh="克隆并安装">克隆并安装</h4>
+          <p><code>git clone</code> <span data-en="the repo, create a venv, then" data-zh="仓库，创建虚拟环境，然后">仓库，创建虚拟环境，然后</span> <code>pip install -r config/requirements.txt</code></p>
         </div>
       </div>
-      <!-- Cloud card (featured) -->
-      <div class="dc feat rv d2">
-        <!-- Real element replaces the CSS ::before pseudo-element for i18n support -->
-        <span class="dc-badge" data-en="RECOMMENDED" data-zh="推荐">RECOMMENDED</span>
-        <div class="dc-icon">☁️</div>
-        <h3 data-en="Cloud / SaaS" data-zh="云端/SaaS">Cloud / SaaS</h3>
-        <p class="dc-desc" data-en="Deploy to Railway, Render, Fly.io or Docker Compose. Multi-user with JWT auth and rate limiting." data-zh="部署至 Railway、Render、Fly.io 或 Docker Compose，支持 JWT 认证和限流的多用户模式。">Deploy to Railway, Render, Fly.io or Docker Compose. Multi-user with JWT auth and rate limiting.</p>
-        <div class="dc-feats">
-          <div class="dfi"><span class="check">✓</span><span data-en="Docker-ready with one command" data-zh="一键 Docker 部署">Docker-ready with one command</span></div>
-          <div class="dfi"><span class="check">✓</span><span data-en="JWT auth &amp; user management" data-zh="JWT 认证与用户管理">JWT auth &amp; user management</span></div>
-          <div class="dfi"><span class="check">✓</span><span data-en="Prometheus metrics + Sentry" data-zh="Prometheus 监控 + Sentry 错误追踪">Prometheus metrics + Sentry</span></div>
-          <div class="dfi"><span class="check">✓</span><span data-en="Swagger API docs included" data-zh="内置 Swagger API 文档">Swagger API docs included</span></div>
+      <div class="step rv">
+        <div class="step-num">2</div>
+        <div>
+          <h4 data-en="Set your API key" data-zh="填入 API Key">填入 API Key</h4>
+          <p data-en="Copy " data-zh="复制 "><span data-en="Copy " data-zh="复制 ">复制 </span><code>config/gemini_config.env.example</code><span data-en=" to " data-zh=" 为 "> 为 </span><code>gemini_config.env</code><span data-en=" and fill in your Gemini API key." data-zh="，填入 Gemini API Key。">，填入 Gemini API Key。</span></p>
+        </div>
+      </div>
+      <div class="step rv">
+        <div class="step-num">3</div>
+        <div>
+          <h4 data-en="Launch Koto" data-zh="启动 Koto">启动 Koto</h4>
+          <p><span data-en="Run " data-zh="运行 ">运行 </span><code>Koto_Start.bat</code><span data-en=" (Windows) or " data-zh="（Windows）或 ">（Windows）或 </span><code>python src/koto_app.py</code><span data-en=" directly." data-zh="。">。</span></p>
+        </div>
+      </div>
+      <div class="step rv">
+        <div class="step-num">4</div>
+        <div>
+          <h4 data-en="(Optional) Local model" data-zh="（可选）本地模型">（可选）本地模型</h4>
+          <p data-en="Install Ollama and pull any model. Koto detects it automatically." data-zh="安装 Ollama 并 pull 任意模型，Koto 自动识别。">安装 Ollama 并 pull 任意模型，Koto 自动识别。</p>
         </div>
       </div>
     </div>
-  </div>
-</section>
 
-<!-- ══════════════ CTA ══════════════ -->
-<section class="sec" aria-labelledby="cta-heading">
-  <div class="wrap">
-    <div class="cta-box rv">
-      <h2 id="cta-heading">
-        <span data-en="Ready to supercharge" data-zh="准备好提升你的">Ready to supercharge</span><br>
-        <span data-en="your workflow?" data-zh="工作效率了吗？">your workflow?</span>
-      </h2>
-      <p data-en="Koto is free, open source, and takes less than 2 minutes to set up. Start building smarter today." data-zh="Koto 完全免费、开源，安装只需不到 2 分钟，立即开始更智能地工作。">Koto is free, open source, and takes less than 2 minutes to set up. Start building smarter today.</p>
-      <div class="cta-btns">
-        <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-prime btn-lg">
-          <svg class="ico-gh" style="width:18px;height:18px" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
-          <span data-en="View on GitHub" data-zh="查看 GitHub">View on GitHub</span>
-        </a>
-        <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-ghost btn-lg">
-          ⬇&nbsp;<span data-en="Download Release" data-zh="下载版本">Download Release</span>
-        </a>
+    <!-- Requirements note -->
+    <div class="req-box rv">
+      <h4 data-en="Requirements" data-zh="环境要求">环境要求</h4>
+      <div class="req-list">
+        <div class="req-item"><strong>Python</strong> 3.11+</div>
+        <div class="req-item"><strong data-en="Gemini API Key" data-zh="Gemini API Key">Gemini API Key</strong> <span data-en="(required for cloud models)" data-zh="（云端模型必需）">（云端模型必需）</span></div>
+        <div class="req-item"><strong>Ollama</strong> <span data-en="(optional, local models)" data-zh="（可选，本地模型）">（可选，本地模型）</span></div>
+        <div class="req-item"><strong>Windows 10+</strong> / macOS / Linux</div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ══════════════ FOOTER ══════════════ -->
-<footer class="footer">
+<!-- ══ FOOTER ══ -->
+<footer>
   <div class="wrap">
-    <div class="footer-grid">
+    <div class="fg">
       <div class="fg-brand">
-        <div class="nav-brand">
-          <div class="brand-mark" aria-hidden="true">言</div>
-          Koto
-        </div>
-        <p data-en="An AI-powered workspace combining chat, documents, presentations, voice and knowledge graphs — built for privacy and productivity." data-zh="融合对话、文档、演示文稿、语音和知识图谱的 AI 工作台 —— 为隐私保护和工作效率而生。">An AI-powered workspace combining chat, documents, presentations, voice and knowledge graphs — built for privacy and productivity.</p>
+        <div class="brand-mark" aria-hidden="true">言</div>
+        Koto
       </div>
-      <div class="fg-col">
-        <h4 data-en="Product" data-zh="产品">Product</h4>
-        <a href="#features" data-en="Features" data-zh="功能特性">Features</a>
-        <a href="#how-it-works" data-en="Quick Start" data-zh="快速入门">Quick Start</a>
-        <a href="#models" data-en="Models" data-zh="支持模型">Models</a>
-        <a href="#deploy" data-en="Deployment" data-zh="部署方式">Deployment</a>
+      <p>© 2026 Koto · <span data-en="Open source on" data-zh="开源于">开源于</span> GitHub</p>
+      <div class="fg-links">
+        <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" data-en="Releases" data-zh="发布">发布</a>
+        <a href="https://github.com/Loganwon/Koto/issues" target="_blank" rel="noopener" data-en="Issues" data-zh="问题反馈">问题反馈</a>
       </div>
-      <div class="fg-col">
-        <h4 data-en="Resources" data-zh="资源">Resources</h4>
-        <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" data-en="GitHub" data-zh="GitHub">GitHub</a>
-        <a href="https://github.com/Loganwon/Koto/blob/main/README.md" target="_blank" rel="noopener" data-en="Documentation" data-zh="文档">Documentation</a>
-        <a href="https://github.com/Loganwon/Koto/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-en="Changelog" data-zh="更新日志">Changelog</a>
-        <a href="https://github.com/Loganwon/Koto/issues" target="_blank" rel="noopener" data-en="Bug Reports" data-zh="问题反馈">Bug Reports</a>
-      </div>
-      <div class="fg-col">
-        <h4 data-en="Releases" data-zh="版本">Releases</h4>
-        <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" data-en="All Releases" data-zh="所有版本">All Releases</a>
-        <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener" data-en="Latest Release" data-zh="最新版本">Latest Release</a>
-        <a href="https://github.com/Loganwon/Koto/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-en="What's New" data-zh="新功能">What's New</a>
-      </div>
-    </div>
-    <div class="footer-bot">
-      <p data-en="© 2026 Koto. Open source under the MIT License." data-zh="© 2026 Koto. 基于 MIT 许可证开源。">© 2026 Koto. Open source under the MIT License.</p>
-      <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="f-gh-btn">
-        <svg class="ico-gh" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
-        <span data-en="Star on GitHub" data-zh="给我们 Star ⭐">Star on GitHub</span>
-      </a>
     </div>
   </div>
 </footer>
 
 <script>
-  /* ── Typed animation word lists ─────────────────────────── */
-  const WORDS_EN = [
-    'remembers everything',
-    'reads your documents',
-    'builds your slides',
-    'speaks your language',
-    'runs on your machine',
-    'supercharges your work'
-  ];
-  const WORDS_ZH = [
-    '记住一切',
-    '读懂你的文档',
-    '生成精美幻灯片',
-    '懂你的语言',
-    '运行在你的机器上',
-    '加速你的工作'
-  ];
+  /* ── Language toggle ──────────────────────────────── */
+  let lang = localStorage.getItem('koto-lang') || 'zh';
 
-  let currentLang = localStorage.getItem('koto-lang') || 'en';
-  let typeVersion = 0;
-  let wi = 0, ci = 0, del = false;
-
-  function getWords() {
-    return currentLang === 'zh' ? WORDS_ZH : WORDS_EN;
-  }
-
-  function type(version) {
-    if (version !== typeVersion) return;
-    const typedEl = document.getElementById('typed');
-    if (!typedEl) return;
-    const words = getWords();
-    const w = words[wi % words.length];
-    if (!del) {
-      ci++;
-      typedEl.textContent = w.slice(0, ci);
-      if (ci === w.length) { del = true; setTimeout(() => type(version), 2200); return; }
-      setTimeout(() => type(version), 55);
-    } else {
-      ci--;
-      typedEl.textContent = w.slice(0, ci);
-      if (ci === 0) { del = false; wi = (wi + 1) % words.length; setTimeout(() => type(version), 300); return; }
-      setTimeout(() => type(version), 28);
-    }
-  }
-
-  /* ── Language switching ──────────────────────────────────── */
-  function setLang(lang) {
-    currentLang = lang;
-
-    document.documentElement.lang = lang;
-    document.body.classList.toggle('lang-zh', lang === 'zh');
-    document.body.style.fontFamily = lang === 'zh'
-      ? "'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif"
-      : "'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif";
-
-    document.querySelectorAll('[data-en]').forEach(el => {
-      el.textContent = lang === 'zh' ? (el.dataset.zh || '') : el.dataset.en;
+  function applyLang() {
+    document.querySelectorAll('[data-en][data-zh]').forEach(el => {
+      el.textContent = el.getAttribute('data-' + lang);
     });
-
-    const btn = document.getElementById('lang-btn');
-    if (btn) btn.textContent = lang === 'zh' ? 'English' : '中文';
-
-    localStorage.setItem('koto-lang', lang);
-
-    /* Restart typed animation in new language */
-    typeVersion++;
-    wi = 0; ci = 0; del = false;
-    const typedEl = document.getElementById('typed');
-    if (typedEl) typedEl.textContent = '';
-    setTimeout(() => type(typeVersion), 120);
+    document.querySelector('.lang-btn').textContent = lang === 'zh' ? 'EN' : '中';
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
   }
 
   function toggleLang() {
-    setLang(currentLang === 'zh' ? 'en' : 'zh');
+    lang = lang === 'zh' ? 'en' : 'zh';
+    localStorage.setItem('koto-lang', lang);
+    applyLang();
   }
 
-  /* ── Apply saved language on load (before animation starts) */
-  if (currentLang === 'zh') {
-    document.documentElement.lang = 'zh';
-    document.body.classList.add('lang-zh');
-    document.body.style.fontFamily = "'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif";
-    document.querySelectorAll('[data-en]').forEach(el => {
-      el.textContent = el.dataset.zh || '';
-    });
-    const btn = document.getElementById('lang-btn');
-    if (btn) btn.textContent = 'English';
-  }
+  applyLang();
 
-  /* ── Start typing animation ─────────────────────────────── */
-  setTimeout(() => type(typeVersion), 900);
-
-  /* ── Scroll reveal ──────────────────────────────────────── */
-  const io = new IntersectionObserver(entries => {
-    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  /* ── Scroll reveal ───────────────────────────────── */
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('vis'); observer.unobserve(e.target); } });
   }, { threshold: 0.12 });
-  document.querySelectorAll('.rv').forEach(el => io.observe(el));
-
-  /* ── Nav active link ────────────────────────────────────── */
-  const secs = document.querySelectorAll('section[id]');
-  const links = document.querySelectorAll('.nav-links a');
-  window.addEventListener('scroll', () => {
-    let cur = '';
-    secs.forEach(s => { if (window.scrollY >= s.offsetTop - 80) cur = s.id; });
-    links.forEach(a => { a.classList.toggle('active', a.getAttribute('href') === '#' + cur); });
-  }, { passive: true });
-
-  /* ── Stat counters ──────────────────────────────────────── */
-  const ctrIO = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (!e.isIntersecting) return;
-      e.target.querySelectorAll('[data-count]').forEach(n => {
-        const target = +n.dataset.count, suf = n.dataset.suffix || '';
-        const t0 = performance.now(), dur = 1100;
-        const tick = now => {
-          const p = Math.min((now - t0) / dur, 1);
-          const ease = 1 - (1 - p) ** 3;
-          n.textContent = Math.round(ease * target) + suf;
-          if (p < 1) requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      });
-      ctrIO.unobserve(e.target);
-    });
-  }, { threshold: 0.3 });
-  const sg = document.querySelector('.stats-grid');
-  if (sg) ctrIO.observe(sg);
+  document.querySelectorAll('.rv').forEach(el => observer.observe(el));
 </script>
-
 </body>
 </html>
