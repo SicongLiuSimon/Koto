@@ -60,39 +60,37 @@ _MODEL_NOT_FOUND_PATTERNS = [
 
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
-    "gemini-3-flash-preview",      # interactions-only，generate_with_fallback 会自动跳过
-    "gemini-2.5-flash",            # 首选快速路径
-    "gemini-3.1-pro-preview",      # 高质量 generate_content 兼容
+    "gemini-3-flash-preview",      # 首选：最新 Gemini 3 Flash（generate_content）
+    "gemini-2.5-flash",            # 次选：快速路径
+    "gemini-3.1-pro-preview",      # 高质量
+    "gemini-3-pro-preview",        # Gemini 3 Pro（generate_content）
     "gemini-2.5-pro-preview",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
 ]
 
 # ── 按任务类型的专属降级链 ──────────────────────────────────────────────────────
-# 注意：每条链内 generate_content 兼容模型优先排列（Interactions-only 模型置后）。
-# generate_with_fallback() 使用 GeminiProvider.generate_content()，无法调用
-# Interactions-only 模型（gemini-3-*-preview / deep-research-*）。
-# 若首选模型为 Interactions-only，调用会立即失败并被检测为"模型不可用"，
-# 将其置后可节省一次无效 API 请求。
+# 注意：gemini-3-flash-preview / gemini-3-pro-preview 是普通 generate_content 模型。
+# 只有 deep-research-pro-preview-* 才是 Interactions API agent（使用 agent= 字段）。
 _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
     "CHAT": [
-        "gemini-2.5-flash",           # generate_content 兼容，优先
-        "gemini-3-flash-preview",     # interactions-only，会自动跳过
+        "gemini-3-flash-preview",     # 首选：最新 Gemini 3 Flash
+        "gemini-2.5-flash",           # 次选
         "gemini-2.0-flash",
         "gemini-1.5-flash",
     ],
     "CODER": [
-        "gemini-3.1-pro-preview",     # 最强 generate_content 兼容模型
-        "gemini-2.5-pro-preview",     # 次选
-        "gemini-3-pro-preview",       # interactions-only，会自动跳过
+        "gemini-3.1-pro-preview",     # 最强代码能力
+        "gemini-3-pro-preview",       # Gemini 3 Pro
+        "gemini-2.5-pro-preview",
         "gemini-2.5-flash",
         "gemini-2.0-flash",
     ],
     "RESEARCH": [
-        "gemini-3.1-pro-preview",     # 最强 generate_content 兼容模型
+        "gemini-3.1-pro-preview",     # 高质量 generate_content
+        "gemini-3-pro-preview",       # Gemini 3 Pro
         "gemini-2.5-pro-preview",
-        "deep-research-pro-preview-12-2025",  # interactions-only，会自动跳过
-        "gemini-3-pro-preview",       # interactions-only，会自动跳过
+        "deep-research-pro-preview-12-2025",  # Interactions API agent（专用深研，慢）
         "gemini-2.5-flash",
     ],
     "PAINTER": [
@@ -100,48 +98,47 @@ _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
         "gemini-2.0-flash-exp",
     ],
     "WEB_SEARCH": [
-        "gemini-2.5-flash",
+        "gemini-2.5-flash",           # grounding 需要 generate_content
         "gemini-2.0-flash",
-        "gemini-3-flash-preview",     # interactions-only，会自动跳过
         "gemini-1.5-flash",
     ],
     "FILE_GEN": [
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",     # interactions-only，会自动跳过
+        "gemini-3-flash-preview",     # 首选
+        "gemini-2.5-flash",           # 次选
         "gemini-2.0-flash",
         "gemini-1.5-flash",
     ],
     "AGENT": [
+        "gemini-3-flash-preview",     # 首选
         "gemini-2.5-flash",
-        "gemini-3-flash-preview",     # interactions-only，会自动跳过
         "gemini-2.0-flash",
     ],
     "DOC_ANNOTATE": [
+        "gemini-3-flash-preview",     # 首选
         "gemini-2.5-flash",
-        "gemini-3-flash-preview",     # interactions-only，会自动跳过
         "gemini-2.0-flash",
     ],
     "FILE_SEARCH": [
+        "gemini-3-flash-preview",     # 首选
         "gemini-2.5-flash",
-        "gemini-3-flash-preview",     # interactions-only，会自动跳过
         "gemini-2.0-flash",
     ],
     "VISION": [
-        "gemini-2.5-flash",
+        "gemini-2.5-flash",           # 需要 generate_content 处理图像字节
         "gemini-2.0-flash",
         "gemini-1.5-pro",
     ],
     "MULTI_STEP": [
-        "gemini-3.1-pro-preview",     # 最强 generate_content 兼容模型
+        "gemini-3.1-pro-preview",     # 最强
+        "gemini-3-pro-preview",       # Gemini 3 Pro
         "gemini-2.5-pro-preview",
         "gemini-2.5-flash",
-        "gemini-3-pro-preview",       # interactions-only，会自动跳过
         "gemini-2.0-flash",
     ],
     "COMPLEX": [
-        "gemini-3.1-pro-preview",     # 最强 generate_content 兼容模型
+        "gemini-3.1-pro-preview",     # 最强
+        "gemini-3-pro-preview",       # Gemini 3 Pro
         "gemini-2.5-pro-preview",
-        "gemini-3-pro-preview",       # interactions-only，会自动跳过
         "gemini-2.5-flash",
     ],
 }
