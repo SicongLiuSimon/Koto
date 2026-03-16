@@ -1,8 +1,7 @@
-import os
+﻿import os
 import asyncio
 import re
 import json
-import logging
 import time
 import threading
 import subprocess
@@ -598,150 +597,27 @@ except ImportError:
     _TOKEN_TRACKER_ENABLED = False
     def _record_token_usage(*_a, **_kw): pass
 
-class _FakeGenerateContentResponse:
-    """
-    轻量级响应包装器。
-    当 _TrackedModels 将 Interactions API 的字符串结果转换为标准响应对象时使用，
-    确保所有调用方可以统一以 response.text 取值。
-    """
-    __slots__ = ("text", "candidates", "usage_metadata")
-
-    def __init__(self, text: str):
-        self.text = text
-        self.candidates = []
-        self.usage_metadata = None
-
-
-def _extract_prompt_text(contents, config=None) -> tuple:
-    """
-    从 generate_content 的 contents / config 参数中提取文本 prompt 和 system_instruction。
-    返回 (prompt_text: str, sys_instruction: str | None)
-    """
-    # 提取 system_instruction
-    sys_instr = None
-    if config is not None:
-        sys_instr = getattr(config, "system_instruction", None)
-        if sys_instr is not None:
-            sys_instr = str(sys_instr)
-
-    # 提取 prompt 文本
-    if contents is None:
-        return "", sys_instr
-    if isinstance(contents, str):
-        return contents, sys_instr
-    if isinstance(contents, list):
-        parts = []
-        for item in contents:
-            if isinstance(item, str):
-                parts.append(item)
-            elif hasattr(item, "text") and item.text:
-                parts.append(str(item.text))
-            elif hasattr(item, "parts"):
-                for p in (item.parts or []):
-                    if hasattr(p, "text") and p.text:
-                        parts.append(str(p.text))
-            else:
-                s = str(item)
-                if s:
-                    parts.append(s)
-        return "\n".join(parts), sys_instr
-    return str(contents), sys_instr
-
-
-def _is_interactions_only(model_id: str) -> bool:
-    """
-    检查 model_id 是否需要走 Interactions API 而非 generate_content。
-    使用模块级 _INTERACTIONS_ONLY_MODELS（运行时查找，定义后一定可用）。
-    """
-    try:
-        iom = _INTERACTIONS_ONLY_MODELS  # noqa: F821 — 模块级全局，运行时已定义
-    except NameError:
-        iom = {"gemini-3-flash-preview", "gemini-3-pro-preview", "deep-research-pro-preview-12-2025"}
-    mid = str(model_id or "")
-    return mid in iom or mid.startswith("deep-research-pro-preview")
-
-
-_logger_tracked = logging.getLogger(__name__)
-
-
 class _TrackedModels:
-    """
-    拦截 client.models 的 generate_content / generate_content_stream，实现：
-      1. Token 用量自动记录
-      2. Interactions-only 模型防御路由（前置检查 + 异常捕获兜底）
-         - 在调用 generate_content 前先判断模型是否 interactions-only
-         - 若是，直接转发到 _call_interactions_api_sync()
-         - 若否，正常调用后 catch "Interactions API" 400 错误并 retry
-    """
+    """拦截 client.models.generate_content，自动记录 token 用量"""
 
     def __init__(self, real_models):
         object.__setattr__(self, '_real', real_models)
 
-    # ── 内部工具 ─────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _call_ia(model_id: str, contents, config) -> "_FakeGenerateContentResponse":
-        """提取文本并转发到 _call_interactions_api_sync，返回包装后的响应对象。"""
-        prompt, sys_instr = _extract_prompt_text(contents, config)
-        text = _call_interactions_api_sync(  # noqa: F821
-            model_id=model_id,
-            user_prompt=prompt,
-            sys_instruction=sys_instr,
-        )
-        return _FakeGenerateContentResponse(text or "")
-
-    # ── generate_content ────────────────────────────────────────────────────
-
     def generate_content(self, model=None, *args, **kwargs):
-        # 兼容旧式位置调用
+        # 新版 google-genai SDK：(*, model, contents, config) 全为关键字参数
+        # 不能将 model 作为位置参数传入，必须作为关键字参数传递
+        # 兼容旧式位置调用：如果 model 在 args 中，移到 kwargs
         if model is None and args:
             model, args = args[0], args[1:]
-
-        model_str = str(model or "")
+        # 合并剩余位置参数到 kwargs（新 SDK 不接受位置参数，args 应始终为空）
         real = object.__getattribute__(self, '_real')
-
-        # ① 前置路由：interactions-only 模型直接走 Interactions API
-        if _is_interactions_only(model_str):
-            _logger_tracked.debug(
-                "[TrackedModels] %s → Interactions API (pre-check)", model_str
-            )
-            try:
-                return self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
-            except Exception as _ia_err:
-                _logger_tracked.warning(
-                    "[TrackedModels] Interactions API failed for %s: %s — retrying generate_content as last resort",
-                    model_str, _ia_err,
-                )
-                # 强行尝试 generate_content（极少数情况模型实际支持）
-
-        # ② 标准调用 + 异常兜底
-        try:
-            response = real.generate_content(model=model, **kwargs)
-        except Exception as _gc_err:
-            _err_str = str(_gc_err)
-            if "Interactions API" in _err_str or (
-                "only supports" in _err_str and "Interactions" in _err_str
-            ):
-                _logger_tracked.warning(
-                    "[TrackedModels] 400 Interactions-API error for model=%s — retrying via Interactions API",
-                    model_str,
-                )
-                try:
-                    return self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
-                except Exception as _ia_retry_err:
-                    _logger_tracked.error(
-                        "[TrackedModels] Interactions API retry also failed for %s: %s",
-                        model_str, _ia_retry_err,
-                    )
-            raise  # 非 Interactions 错误，或 retry 也失败后，重新抛出原始异常
-
-        # ③ Token 记录
+        response = real.generate_content(model=model, **kwargs)
         if _TOKEN_TRACKER_ENABLED:
             try:
                 usage = getattr(response, 'usage_metadata', None)
                 if usage:
                     _record_token_usage(
-                        model=model_str,
+                        model=str(model or 'unknown'),
                         prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
                         completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
                     )
@@ -749,69 +625,26 @@ class _TrackedModels:
                 pass
         return response
 
-    # ── generate_content_stream ─────────────────────────────────────────────
-
     def generate_content_stream(self, model=None, *args, **kwargs):
-        """
-        拦截流式调用。
-        interactions-only 模型不支持流式接口；遇到此类模型时同步调用
-        Interactions API，再将完整结果包装成单个 chunk yield 出去，
-        保证调用方 for chunk in stream 的用法不变。
-        """
+        """拦截 generate_content_stream，记录最后一个 chunk 的 usage_metadata"""
         if model is None and args:
             model, args = args[0], args[1:]
-
-        model_str = str(model or "")
         real = object.__getattribute__(self, '_real')
-
-        # ① 前置路由：interactions-only 模型 → 同步调用后单 chunk 输出
-        if _is_interactions_only(model_str):
-            _logger_tracked.debug(
-                "[TrackedModels] %s → Interactions API stream-adapter (pre-check)", model_str
-            )
-            try:
-                fake_resp = self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
-                yield fake_resp   # 调用方 for chunk in stream: chunk.text 仍能工作
-                return
-            except Exception as _ia_err:
-                _logger_tracked.warning(
-                    "[TrackedModels] Interactions API stream-adapter failed for %s: %s — raising",
-                    model_str, _ia_err,
-                )
-                raise
-
-        # ② 标准流式调用 + 异常兜底（首个 chunk 前触发）
-        try:
-            stream = real.generate_content_stream(model=model, **kwargs)
-            first_chunk = True
-            for chunk in stream:
-                yield chunk
-                if first_chunk:
-                    first_chunk = False
-                if _TOKEN_TRACKER_ENABLED:
-                    try:
-                        usage = getattr(chunk, 'usage_metadata', None)
-                        if usage and (getattr(usage, 'prompt_token_count', 0) or 0) > 0:
-                            _record_token_usage(
-                                model=model_str,
-                                prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
-                                completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
-                            )
-                    except Exception:
-                        pass
-        except Exception as _stream_err:
-            _err_str = str(_stream_err)
-            if "Interactions API" in _err_str or (
-                "only supports" in _err_str and "Interactions" in _err_str
-            ):
-                _logger_tracked.warning(
-                    "[TrackedModels] 400 Interactions-API error in stream for model=%s — retrying via Interactions API",
-                    model_str,
-                )
-                fake_resp = self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
-                yield fake_resp
-                return
-            raise
+        stream = real.generate_content_stream(model=model, **kwargs)
+        _model_str = str(model or 'unknown')
+        for chunk in stream:
+            yield chunk
+            if _TOKEN_TRACKER_ENABLED:
+                try:
+                    usage = getattr(chunk, 'usage_metadata', None)
+                    if usage and (getattr(usage, 'prompt_token_count', 0) or 0) > 0:
+                        _record_token_usage(
+                            model=_model_str,
+                            prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
+                            completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
+                        )
+                except Exception:
+                    pass
 
     def generate_images(self, model=None, *args, **kwargs):
         """拦截 generate_images（Imagen），按图片数量记录合成 token 用量"""
@@ -904,222 +737,22 @@ def create_research_client():
     )
 
 
-def _poll_interaction(
-    ia_client,
-    interaction_id: str,
-    *,
-    timeout: float = 900.0,
-    initial_sleep: float = 2.0,
-    backoff_multiplier: float = 1.5,
-    max_sleep: float = 30.0,
-    label: str = "",
-) -> object:
+def _call_interactions_api_sync(model_id: str, user_prompt: str, sys_instruction: str = None, timeout: float = 90.0) -> str:
     """
-    生产级 Interactions API 轮询器。
-
-    实现指数退避 + 抖动 + 最大超时，避免轮询风暴：
-      - every successful poll: sleep *= backoff_multiplier（上限 max_sleep）
-      - ±25% 随机抖动，分散并发请求峰值
-      - 超时后自动请求取消，再抛出 TimeoutError
-
-    状态机：
-      ─ RUNNING   (active / running / queued / …)  →  继续等待
-      ─ COMPLETED (completed)                       →  返回最终 interaction 对象
-      ─ FAILED    (failed / cancelled / error)      →  抛出 RuntimeError
-
-    Args:
-        ia_client:          已初始化的 Gemini client（含 .interactions 接口）
-        interaction_id:     rc.interactions.create() 返回的 job ID
-        timeout:            最大等待秒数（默认 15 分钟）
-        initial_sleep:      首次轮询前等待秒数
-        backoff_multiplier: 退避倍率（每轮自动乘以此值）
-        max_sleep:          单次等待上限（秒）
-        label:              日志前缀标签（便于区分调用方）
-
-    Returns:
-        status == "completed" 的 interaction 对象
-
-    Raises:
-        RuntimeError: interaction_id 为空
-        TimeoutError: 超出 timeout 仍未完成（已请求取消）
-        RuntimeError: job 返回 failed / cancelled / error 状态
-    """
-    import random as _random
-
-    if not interaction_id:
-        raise RuntimeError(f"[{label or 'poll'}] interaction_id 为空，无法轮询")
-
-    _log = logging.getLogger(__name__)
-    tag  = f"[Interactions{':' + label if label else ''}]"
-
-    start          = time.monotonic()
-    sleep_interval = initial_sleep
-    last_status    = ""
-    poll_count     = 0
-
-    _log.info("%s ⏳ job=%s  开始轮询 (timeout=%.0fs)", tag, interaction_id, timeout)
-
-    while True:
-        elapsed = time.monotonic() - start
-
-        # ── 超时检查 ──────────────────────────────────────────────────────────
-        if elapsed >= timeout:
-            _log.warning("%s ⌛ job=%s  轮询超时 (%.0fs elapsed)", tag, interaction_id, elapsed)
-            try:
-                ia_client.interactions.cancel(interaction_id)
-                _log.info("%s 🛑 job=%s  已请求取消", tag, interaction_id)
-            except Exception as _ce:
-                _log.debug("%s 取消请求失败: %s", tag, _ce)
-            raise TimeoutError(
-                f"Interactions API 超时 ({timeout:.0f}s) job={interaction_id}"
-            )
-
-        # ── 轮询请求（网络抖动时短暂等待后重试，不立即放弃）──────────────────
-        try:
-            interaction = ia_client.interactions.get(interaction_id)
-        except Exception as _poll_err:
-            _log.warning(
-                "%s job=%s  轮询请求失败 (#%d): %s",
-                tag, interaction_id, poll_count, _poll_err,
-            )
-            time.sleep(min(sleep_interval, 10.0))
-            continue
-
-        status     = str(getattr(interaction, "status", "") or "").lower().strip()
-        poll_count += 1
-
-        # ── 仅在状态变化时输出日志，避免日志洪水 ─────────────────────────────
-        if status != last_status:
-            msg = _INTERACTION_STATUS_MSGS.get(status, f"状态: {status!r}")
-            _log.info(
-                "%s 🔄 job=%s  [poll#%d | %.0fs] %s",
-                tag, interaction_id, poll_count, elapsed, msg,
-            )
-            last_status = status
-
-        # ── 终止状态判断 ───────────────────────────────────────────────────────
-        if status in _INTERACTION_TERMINAL_STATES:
-            if status in _INTERACTION_SUCCESS_STATES:
-                _log.info(
-                    "%s ✅ job=%s  完成 (total=%.1fs, polls=%d)",
-                    tag, interaction_id, elapsed, poll_count,
-                )
-                return interaction
-            # failed / cancelled / error
-            err_detail = getattr(interaction, "error", None) or status
-            _log.error(
-                "%s ❌ job=%s  失败 status=%s  detail=%s",
-                tag, interaction_id, status, err_detail,
-            )
-            raise RuntimeError(
-                f"Interactions API job 失败 (status={status}, detail={err_detail})"
-            )
-
-        # ── 计算下一轮等待时间：指数退避 + ±25% 随机抖动 ─────────────────────
-        jitter       = sleep_interval * 0.25 * (_random.random() * 2 - 1)
-        actual_sleep = max(1.0, min(sleep_interval + jitter, max_sleep))
-        remaining    = timeout - elapsed
-        actual_sleep = min(actual_sleep, max(0.5, remaining - 0.1))   # 不超过剩余时间
-
-        _log.debug("%s job=%s  等待 %.1fs 后再次轮询…", tag, interaction_id, actual_sleep)
-        time.sleep(actual_sleep)
-
-        # 逐步延长轮询间隔，直到 max_sleep 上限
-        sleep_interval = min(sleep_interval * backoff_multiplier, max_sleep)
-
-
-def _extract_interaction_text_global(interaction) -> str:
-    """
-    从 interaction 对象递归提取输出文本。
-    兼容多种 SDK 返回格式：outputs 列表、text 属性、parts、Pydantic model_dump、dict 等。
-    """
-    def _walk(obj) -> list:
-        if obj is None:
-            return []
-        if isinstance(obj, str):
-            s = obj.strip()
-            return [s] if s else []
-        if isinstance(obj, dict):
-            results = []
-            for key in ("output_text", "text", "content"):
-                val = obj.get(key)
-                if isinstance(val, str) and val.strip():
-                    results.append(val.strip())
-                    return results          # 优先返回语义最强的字段
-            for val in obj.values():
-                results.extend(_walk(val))
-            return results
-        if isinstance(obj, (list, tuple)):
-            results = []
-            for item in obj:
-                results.extend(_walk(item))
-            return results
-        # Pydantic / SDK 对象：先尝试 model_dump()
-        if hasattr(obj, "model_dump"):
-            try:
-                return _walk(obj.model_dump())
-            except Exception:
-                pass
-        if hasattr(obj, "text") and obj.text:
-            return [str(obj.text).strip()]
-        if hasattr(obj, "parts"):
-            results = []
-            for p in (obj.parts or []):
-                results.extend(_walk(p))
-            return results
-        if hasattr(obj, "outputs"):
-            results = []
-            for o in (obj.outputs or []):
-                results.extend(_walk(o))
-            return results
-        return []
-
-    parts = _walk(getattr(interaction, "outputs", None))
-    if not parts:
-        parts = _walk(interaction)
-
-    # 去重，保持原始顺序
-    seen: set = set()
-    deduped = []
-    for p in parts:
-        if p not in seen:
-            deduped.append(p)
-            seen.add(p)
-    return "\n".join(deduped).strip()
-
-
-def _call_interactions_api_sync(
-    model_id: str,
-    user_prompt: str,
-    sys_instruction: str = None,
-    timeout: float = 900.0,
-) -> str:
-    """
-    通过 Interactions API 调用 gemini-3-*-preview / deep-research 等异步模型。
+    通过 Interactions API 调用 gemini-3-*-preview 模型。
     这些模型不支持 client.models.generate_content()，必须使用此端点。
-
-    工作流程：
-      1. 本地模型模式 → 直接用 Ollama，跳过 Interactions API
-      2. 云端模式     → rc.interactions.create() 提交异步 job，捕获 interaction_id
-      3.              → _poll_interaction() 轮询（指数退避，最大 timeout 秒）
-      4.              → 提取并返回最终文本
+    ⚡ 本地模型模式下自动降级为 Ollama，跳过 Interactions API。
 
     Args:
-        model_id:        目标模型 ID
-        user_prompt:     用户输入（已格式化）
-        sys_instruction: 系统指令（可选）
-        timeout:         最大等待秒数（默认 15 分钟）
+        model_id: 模型 ID，如 "gemini-3-flash-preview"
+        user_prompt: 用户输入文本（已包含格式化内容）
+        sys_instruction: 系统指令（可选），将拼接到 input 前
+        timeout: 最大等待时间（秒）
 
     Returns:
-        模型响应文本
-
-    Raises:
-        TimeoutError:   超时（已自动请求取消）
-        RuntimeError:   job 失败或本地降级失败
+        模型响应文本；失败时抛出异常
     """
-    _log = logging.getLogger(__name__)
-
-    # ── 本地模型模式：用 Ollama 直接回答，无需 Interactions API ──────────────
+    # ── 本地模型模式：用 Ollama 直接回答，无需 Interactions API ──
     model_mode, _ = _get_local_model_config()
     if model_mode == "local":
         try:
@@ -1134,69 +767,52 @@ def _call_interactions_api_sync(
         except Exception as _e:
             raise RuntimeError(f"本地模型 Interactions 降级失败: {_e}") from _e
 
-    # ── 云端：提交异步 Interactions 任务 ─────────────────────────────────────
+    rc = create_research_client()
+
     full_input = user_prompt
     if sys_instruction:
         full_input = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{user_prompt}"
 
-    rc = create_research_client()
-
-    _log.info(
-        "[Interactions] 🚀 提交 job  model=%s  input_chars=%d",
-        model_id, len(full_input),
+    interaction = rc.interactions.create(
+        agent=model_id,
+        input=full_input[:80000],   # 支持大文档（gemini-3 上下文窗口 >1M tokens）
+        background=model_id not in _NO_BACKGROUND_MODELS,
+        stream=False,
     )
-    # Interactions API 区分两种调用方式：
-    #   agent=  → deep-research 等真正的 Agent
-    #   model=  → gemini-3-pro/flash-preview 等普通模型（用 agent= 会报 400）
-    _create_kwargs: dict = {
-        "input":      full_input[:80000],
-        "background": True,
-        "stream":     False,
-    }
-    if _is_interactions_agent(model_id):
-        _create_kwargs["agent"] = model_id
-    else:
-        _create_kwargs["model"] = model_id
-
-    interaction = rc.interactions.create(**_create_kwargs)
 
     interaction_id = getattr(interaction, "id", None)
-    init_status    = str(getattr(interaction, "status", "") or "").lower()
+    status = getattr(interaction, "status", "")
+    start_wait = time.time()
 
-    # 快速路径：极少数情况下 create() 即刻返回已完成
-    if init_status in _INTERACTION_SUCCESS_STATES:
-        _log.info(
-            "[Interactions] ⚡ job=%s 即时完成 (status=%s)", interaction_id, init_status
-        )
-        return _extract_interaction_text_global(interaction)
+    while interaction_id and status not in ("completed", "failed", "cancelled") and (time.time() - start_wait) < timeout:
+        time.sleep(2)
+        interaction = rc.interactions.get(interaction_id)
+        status = getattr(interaction, "status", "")
 
-    if init_status in _INTERACTION_FAIL_STATES:
-        err = getattr(interaction, "error", init_status)
-        raise RuntimeError(
-            f"Interactions API job 立即失败 (status={init_status}): {err}"
-        )
+    if status not in ("completed", "failed", "cancelled"):
+        try:
+            rc.interactions.cancel(interaction_id)
+        except Exception:
+            pass
+        raise TimeoutError(f"Interactions API 超时 ({timeout}s) model={model_id}")
 
-    if not interaction_id:
-        raise RuntimeError(
-            f"Interactions API 未返回有效的 interaction_id (model={model_id})"
-        )
+    # 从 interaction 对象中提取文本
+    def _get_text_from_obj(obj):
+        if obj is None:
+            return ""
+        if isinstance(obj, str):
+            return obj
+        if hasattr(obj, "text") and obj.text:
+            return str(obj.text)
+        if hasattr(obj, "parts"):
+            return " ".join(str(p.text) for p in (obj.parts or []) if hasattr(p, "text") and p.text)
+        if hasattr(obj, "outputs"):
+            texts = [_get_text_from_obj(o) for o in (obj.outputs or [])]
+            return "\n".join(t for t in texts if t)
+        return ""
 
-    # 慢速路径：轮询等待（指数退避，含自动超时取消）
-    final_interaction = _poll_interaction(
-        rc,
-        interaction_id,
-        timeout=timeout,
-        initial_sleep=2.0,
-        backoff_multiplier=1.5,
-        max_sleep=30.0,
-        label=model_id,
-    )
-
-    text = _extract_interaction_text_global(final_interaction)
-    _log.info(
-        "[Interactions] 📄 提取文本 %d 字符 (model=%s)", len(text), model_id
-    )
-    return text
+    text = _get_text_from_obj(getattr(interaction, "outputs", None)) or _get_text_from_obj(interaction)
+    return text.strip()
 
 
 def run_with_timeout(fn, timeout_seconds):
@@ -1401,13 +1017,47 @@ _blueprints_registered = False
 _blueprints_lock = threading.Lock()
 
 def _register_blueprints_deferred():
-    """在后台线程中注册所有蓝图，避免阻塞主线程启动."""
+    """注册所有蓝图（必须在 app.run() 前调用）。
+    阶段1: 用线程池并行预导入各蓝图模块（重叠 I/O 等待，加速启动）。
+    阶段2: 串行注册到 Flask app（线程安全要求）。
+    """
     global _blueprints_registered, agent_bp
     with _blueprints_lock:
         if _blueprints_registered:
             return
         _blueprints_registered = True
-    
+
+    # ── 阶段 1：并行预导入（各模块互相独立，可同时加载）────────────────
+    import importlib
+    import concurrent.futures
+
+    _preload_modules = [
+        'app.api.task_routes',
+        'app.api',
+        'app.api.skill_routes',
+        'app.api.skill_marketplace_routes',
+        'app.api.goal_routes',
+        'app.api.file_hub_routes',
+        'app.api.job_routes',
+        'app.api.ops_routes',
+        'app.api.shadow_routes',
+        'app.api.macro_routes',
+    ]
+
+    def _safe_preload(mod_name):
+        try:
+            importlib.import_module(mod_name)
+        except Exception:
+            pass  # 导入失败时静默忽略，注册阶段会再次尝试并输出日志
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(6, len(_preload_modules)),
+        thread_name_prefix='BpPreload'
+    ) as _pool:
+        list(_pool.map(_safe_preload, _preload_modules))
+
+    # ── 阶段 2：串行注册蓝图（此时模块已在 sys.modules 中，import 为 O(1)）──
+
     # 注册任务管理 API（任务台账 + 进度总线 + 打断控制）
     try:
         from app.api.task_routes import task_bp as _task_bp
@@ -1682,65 +1332,33 @@ except ImportError:
         _MODEL_REGISTRY = {}
 
 # 静态默认值（API 不可用时的兜底，也是启动时的初始值）
+# 注意：只有 deep-research-pro-preview-* 是 Interactions API agent，其他模型均用 generate_content
 MODEL_MAP = {
     "CHAT":        "gemini-3-flash-preview",
-    "CODER":       "gemini-3.1-pro-preview",   # generate_content 兼容，最强直调模型
+    "CODER":       "gemini-3.1-pro-preview",
     "WEB_SEARCH":  "gemini-2.5-flash",
-    "VISION":      "gemini-3-flash-preview",
-    "RESEARCH":    "deep-research-pro-preview-12-2025",
+    "VISION":      "gemini-2.5-flash",
+    "RESEARCH":    "gemini-3.1-pro-preview",
     "FILE_GEN":    "gemini-3-flash-preview",
     "PAINTER":     "gemini-3.1-flash-image-preview",
     "SYSTEM":      "local-executor",
     "FILE_OP":     "local-executor",
     "AGENT":       "gemini-3-flash-preview",
-    "FILE_SEARCH": "gemini-3-flash-preview",  # 文件搜索/整理始终 Flash
-    "DOC_ANNOTATE":"gemini-3.1-pro-preview",  # 强模型标注，complex 由 get_model_for_task 确认
-    "COMPLEX":     "gemini-3.1-pro-preview",  # 复杂度升级兜底：3.1 Pro
+    "FILE_SEARCH": "gemini-3-flash-preview",
+    "DOC_ANNOTATE":"gemini-3-flash-preview",
+    "COMPLEX":     "gemini-3.1-pro-preview",
 }
 
 # ─── Interactions-API-only 模型（动态更新，静态默认兜底）──────────────────────
 # 这些模型不支持 client.models.generate_content()，必须走 Interactions API
+# 注意：gemini-3-flash-preview 和 gemini-3-pro-preview 是普通模型，直接用 generate_content，不在此列表中
 _INTERACTIONS_ONLY_MODELS = {
-    "gemini-3-flash-preview",
-    "gemini-3-pro-preview",
-    "deep-research-pro-preview-12-2025",  # 实际也是 interactions-only，错误调用 generate_content 会返回 400
+    "deep-research-pro-preview-12-2025",  # 深度研究 Agent，仅支持 Interactions API
 }
-
-# ─── Interactions API 字段区分 ─────────────────────────────────────────────
-# 真正的 Agent（deep-research 等）需要 interactions.create(agent=...)；
-# 普通模型（gemini-3-pro/flash-preview）走同一端点但必须用 model= 字段。
-# 错误用 agent= 传普通模型 ID 会得到 400: "refers to a model, not an agent"。
-_INTERACTIONS_AGENT_MODELS = frozenset({
-    "deep-research-pro-preview-12-2025",
-})
-
-
-def _is_interactions_agent(model_id: str) -> bool:
-    """True = 该模型需要用 agent= 字段（真正的 Interactions Agent）；
-    False = 该模型是普通模型，需要用 model= 字段。"""
-    mid = str(model_id or "")
-    return mid in _INTERACTIONS_AGENT_MODELS or mid.startswith("deep-research-pro-preview")
-
-
+# 当前 Interactions API 模型均支持 background=True
+_NO_BACKGROUND_MODELS: set = set()
 # 当 Interactions API 也失败时的最终降级模型
 _INTERACTIONS_FALLBACK_MODEL = "gemini-2.5-flash"
-
-# ── Interactions API 轮询状态常量 ────────────────────────────────────────────
-_INTERACTION_TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "error"})
-_INTERACTION_SUCCESS_STATES  = frozenset({"completed"})
-_INTERACTION_FAIL_STATES     = frozenset({"failed", "cancelled", "error"})
-
-# 中间状态 → 人类可读日志（仅当状态变化时输出，避免日志洪水）
-_INTERACTION_STATUS_MSGS: dict = {
-    "active":      "Agent 工作中…",
-    "running":     "Agent 工作中…",
-    "queued":      "等待队列中，即将开始…",
-    "in_progress": "Agent 处理中…",
-    "thinking":    "Agent 深度思考中…",
-    "searching":   "Agent 正在检索互联网…",
-    "reading":     "Agent 正在阅读资料…",
-    "generating":  "Agent 正在生成回复…",
-}
 
 # 全局模型管理器实例（后台初始化）
 _model_manager = None
@@ -1767,32 +1385,6 @@ def _init_model_manager():
         except Exception:
             pass
         print(f"[ModelManager] ✅ 动态路由已加载: {len(dynamic_map)} 个任务")
-        # ── 同步更新 ModelFallbackExecutor 的路由表 ──────────────────────────
-        try:
-            from app.core.llm.model_fallback import get_fallback_executor
-            get_fallback_executor().update_model_map(MODEL_MAP)
-            print("[ModelManager] ✅ ModelFallbackExecutor 路由表已同步")
-        except Exception as _fe:
-            print(f"[ModelManager] ⚠️ ModelFallbackExecutor 同步失败（非致命）: {_fe}")
-        # ── 同步更新 AIRouter 的轻量路由模型 ────────────────────────────────
-        try:
-            from app.core.routing.ai_router import AIRouter
-            # 选取可用的非 interactions-only、速度最快的模型作为路由器
-            _available_caps = _model_manager._cached_caps
-            _fast_candidates = [
-                (mid, caps) for mid, caps in _available_caps.items()
-                if not caps.get("interactions_only", False)
-                and not caps.get("image_gen", False)
-                and mid != "local-executor"
-            ]
-            if _fast_candidates:
-                _router_candidate = max(
-                    _fast_candidates,
-                    key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1
-                )[0]
-                AIRouter.set_router_model(_router_candidate)
-        except Exception as _are:
-            print(f"[ModelManager] ⚠️ AIRouter 路由模型更新失败（非致命）: {_are}")
     except Exception as _me:
         import traceback as _tb
         print(f"[ModelManager] ⚠️ 动态路由初始化失败，使用静态默认值: {_me}")
@@ -2222,9 +1814,9 @@ class WebSearcher:
                 "1. 先用一句话说明查询的出发日期和路线（如有）。\n"
                 "2. 用 **Markdown 表格** 列出主要班次，列标题为：\n"
                 "   | 班次 | 出发站 | 到达站 | 出发时间 | 到达时间 | 历时 | 二等座 | 一等座 |\n"
-                "   只列出搜索结果中明确出现的班次，不要自行补全或推测。\n"
+                "   至少列出 5 个代表性班次（早、中、晚各时段）。\n"
                 "3. 表格后，提醒用户前往 12306 或铁路官方渠道查看实时余票并购票。\n"
-                "4. **严禁** 在搜索结果班次信息不足时自行编造、补全或推测班次数据。若搜索结果不足，明确告知用户『当前搜索结果班次信息有限』，并直接引导用户前往 12306 官网或 App 查询。\n"
+                "4. 若搜索结果信息不足，请尽量根据已知班次填写，并注明「以下为参考班次，请以12306实时信息为准」。\n"
                 "用中文输出，格式整洁，突出关键数据。"
             )
             return query, instruction
@@ -2517,37 +2109,34 @@ class WebSearcher:
         if preferred_model.startswith("deep-research-pro-preview"):
             try:
                 research_client = create_research_client()
-                _log_ppt = logging.getLogger(__name__)
-                _log_ppt.info("[PPT-RESEARCH] 🚀 提交 deep-research job (model=%s)", preferred_model)
-                _ppt_create_kwargs: dict = {
-                    "input":      research_prompt,
-                    "background": True,
-                    "stream":     False,
-                }
-                if _is_interactions_agent(preferred_model):
-                    _ppt_create_kwargs["agent"] = preferred_model
-                else:
-                    _ppt_create_kwargs["model"] = preferred_model
-                interaction = research_client.interactions.create(**_ppt_create_kwargs)
-                interaction_id = getattr(interaction, "id", None)
-                init_status = str(getattr(interaction, "status", "") or "").lower()
-                if init_status in _INTERACTION_FAIL_STATES:
-                    raise RuntimeError(f"deep-research job 立即失败: {init_status}")
-
-                final_interaction = _poll_interaction(
-                    research_client,
-                    interaction_id,
-                    timeout=600.0,           # PPT 研究最多 10 分钟
-                    initial_sleep=3.0,
-                    backoff_multiplier=1.5,
-                    max_sleep=30.0,
-                    label="PPT-RESEARCH",
+                interaction = research_client.interactions.create(
+                    agent=preferred_model,
+                    input=research_prompt,
+                    background=True,
+                    stream=False,
                 )
-                text = _extract_interaction_text(final_interaction)
-                if text and len(text) > 200:
-                    print(f"[PPT-RESEARCH] ✅ 深度研究完成 ({preferred_model}), {len(text)} 字符")
-                    return text
-                print(f"[PPT-RESEARCH] ⚠️ Interactions 返回空结果或过短")
+                interaction_id = getattr(interaction, "id", None)
+                status = getattr(interaction, "status", "")
+                start_wait = time.time()
+                max_wait_time = 180  # 限制最大等待时间为 3 分钟
+                
+                while interaction_id and status not in ("completed", "failed", "cancelled") and (time.time() - start_wait) < max_wait_time:
+                    time.sleep(3)
+                    interaction = research_client.interactions.get(interaction_id)
+                    status = getattr(interaction, "status", "")
+
+                if status not in ("completed", "failed", "cancelled"):
+                    print(f"[PPT-RESEARCH] ⚠️ Interactions 超时 ({max_wait_time}s)，尝试取消并回退")
+                    try:
+                        research_client.interactions.cancel(interaction_id)
+                    except Exception:
+                        pass
+                else:
+                    text = _extract_interaction_text(interaction)
+                    if text and len(text) > 200:
+                        print(f"[PPT-RESEARCH] ✅ 深度研究完成 ({preferred_model}), {len(text)} 字符")
+                        return text
+                    print(f"[PPT-RESEARCH] ⚠️ Interactions 返回空结果或过短，status={status}")
             except Exception as inter_err:
                 print(f"[PPT-RESEARCH] Interactions 失败: {inter_err}")
         
@@ -2564,13 +2153,10 @@ class WebSearcher:
                 # deep-research 和 gemini-3-preview 仅支持 Interactions API，不走 generate_content
                 if model.startswith("deep-research-pro-preview") or model in _INTERACTIONS_ONLY_MODELS:
                     continue
-                # 备用路径必须启用 Google Search Grounding，避免模型在无实时数据的情况下
-                # 捏造统计数据、引用来源或市场数字（幻觉风险）
                 resp = client.models.generate_content(
                     model=model,
                     contents=research_prompt,
                     config=types.GenerateContentConfig(
-                        tools=[types.Tool(google_search=types.GoogleSearch())],
                         temperature=0.5,
                         max_output_tokens=16384,
                     )
@@ -4291,7 +3877,7 @@ class TaskOrchestrator:
 
     @classmethod
     async def _execute_coder(cls, user_input: str, context: dict, progress_callback=None) -> dict:
-        """执行代码生成子任务 - 使用 gemini-3.1-pro-preview（generate_content 直调）"""
+        """执行代码生成子任务 - 使用最佳可用 Gemini 模型"""
 
         def _report(msg: str, detail: str = ""):
             print(f"[CODER] {msg} | {detail}")
@@ -4299,7 +3885,7 @@ class TaskOrchestrator:
                 progress_callback(msg, detail)
 
         try:
-            model_id = MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+            model_id = MODEL_MAP.get("CODER", "gemini-3-pro-preview")
             _report("启动代码生成...", f"模型: {model_id}")
 
             # 注入前步搜索/研究结果（如有）
@@ -5159,33 +4745,6 @@ def _start_memory_extraction(
         except Exception:
             return ""
 
-    def _llm_quality_sync(prompt: str) -> str:
-        """Higher-quality LLM call for PersonalityMatrix and evaluations.
-        Tries gemini-2.5-flash → gemini-2.0-flash → falls back to _llm_sync."""
-        _quality_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
-        _model = "gemini-2.0-flash"  # safe default
-        try:
-            from app.core.llm.model_fallback import get_fallback_executor
-            _fbe = get_fallback_executor()
-            _model = next(
-                (m for m in _quality_models if _fbe.is_available(m)),
-                _quality_models[-1],
-            )
-        except Exception:
-            pass
-        try:
-            resp = client.models.generate_content(
-                model=_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.15,
-                    max_output_tokens=800,
-                )
-            )
-            return resp.text or ""
-        except Exception:
-            return _llm_sync(prompt)
-
     def _worker():
         # ── Existing MemoryIntegration (entity extraction) ────────────────
         if MemoryIntegration and MemoryIntegration.should_extract(user_msg, ai_msg):
@@ -5221,14 +4780,6 @@ def _start_memory_extraction(
             )
         except Exception as e:
             print(f"[MemoryReflector] ⚠️ 启动失败: {e}")
-
-        # ── 2-C: PersonalityMatrix — 动态个人记忆矩阵更新（使用更高质量模型）──
-        try:
-            _pm_mgr = get_memory_manager()
-            if _pm_mgr and hasattr(_pm_mgr, "update_personality_async"):
-                _pm_mgr.update_personality_async(user_msg, ai_msg, _llm_quality_sync)
-        except Exception as e:
-            print(f"[PersonalityMatrix] ⚠️ 更新启动失败: {e}")
 
         # ── 3: ShadowWatcher 影子追踪（零感知观察）────────────────────────────
         try:
@@ -5842,35 +5393,7 @@ class KotoBrain:
                     f"原始错误: `{err_str[:200]}`"
                 )
             else:
-                # ── 模型本身不可用（404 / not-found / Interactions-only 等）──────────
-                # 尝试从 ModelFallbackExecutor 获取备选模型并静默重试一次。
-                _retried = False
-                try:
-                    from app.core.llm.model_fallback import get_fallback_executor, _is_model_unavailable_error as _mue_chk
-                    if _mue_chk(e) and model_id not in (None, _INTERACTIONS_FALLBACK_MODEL):
-                        _fbe = get_fallback_executor()
-                        _fbe.mark_unavailable(model_id)
-                        _fb_model = _fbe.get_best_available(task_type=target_key)
-                        if _fb_model and _fb_model != model_id and _fb_model not in _INTERACTIONS_ONLY_MODELS:
-                            print(f"[brain.chat] 模型不可用 {model_id} → 自动降级 {_fb_model} (task={target_key})")
-                            _fh = locals().get("formatted_history") or []
-                            _mi = locals().get("model_input") or original_input
-                            _si = locals().get("_brain_sys_instruction") or ""
-                            _fb_r = client.models.generate_content(
-                                model=_fb_model,
-                                contents=_fh + [types.Content(
-                                    role="user",
-                                    parts=[types.Part.from_text(text=_mi)]
-                                )],
-                                config=types.GenerateContentConfig(system_instruction=_si)
-                            )
-                            result["response"] = _fb_r.text if _fb_r.text else ""
-                            result["model"] = _fb_model
-                            _retried = True
-                except Exception as _r_err:
-                    print(f"[brain.chat] 降级重试失败: {_r_err}")
-                if not _retried:
-                    result["response"] = f"❌ 发生错误: {err_str}"
+                result["response"] = f"❌ 发生错误: {err_str}"
             result["total_time"] = time.time() - start_time
             return result
 
@@ -6066,17 +5589,7 @@ def chat_stream():
         from app.core.routing.intent_analyzer import IntentAnalyzer
         if IntentAnalyzer.should_analyze(user_input):
             full_hist = session_manager.load_full(f"{session_name}.json")
-            # 快速获取长期记忆上下文，帮助消解跨 session 的指代词
-            _intent_memory_ctx = ""
-            try:
-                _mm_for_intent = get_memory_manager()
-                if _mm_for_intent:
-                    _intent_memory_ctx = _mm_for_intent.get_context_string(user_input) or ""
-            except Exception:
-                pass
-            rewritten_input = IntentAnalyzer.rewrite_intent(
-                user_input, full_hist, memory_context=_intent_memory_ctx
-            )
+            rewritten_input = IntentAnalyzer.rewrite_intent(user_input, full_hist)
             if rewritten_input and rewritten_input != user_input:
                 print(f"[STREAM] 🔄 意图重写: '{user_input}' -> '{rewritten_input}'")
                 user_input = rewritten_input
@@ -6167,6 +5680,7 @@ def chat_stream():
     # 🕵️‍♀️ 检测是否有最近上传的文件 (5分钟内)
     has_recent_upload = False
     recent_file_type = None
+    recent_file_path = None  # 保存路径以便后续注入文件内容
     try:
         upload_scan_dirs = ["web/uploads", "uploads", "workspace/documents"]
         recent_threshold = time.time() - 300 # 5分钟内
@@ -6178,6 +5692,7 @@ def chat_stream():
                         has_recent_upload = True
                         _, ext = os.path.splitext(f)
                         recent_file_type = ext.lower()
+                        recent_file_path = fp  # 记录完整路径
                         print(f"[STREAM] Found recent upload: {f} ({recent_file_type})")
                         break
             if has_recent_upload: break
@@ -6262,10 +5777,14 @@ def chat_stream():
 
     # ── 🔮 LangGraph 高级工作流路由（RESEARCH / FILE_GEN / MULTI_STEP）─────────
     # resolve_workflow() 检测用户意图，决定是否用 WorkflowEngine 替代旧路径
+    # 注意：有近期上传文件时传入 has_file=True，防止 LangGraph 工作流被错误激活
+    # （LangGraph 工作流没有文件字节上下文，无法处理文件分析任务）
     _wf_route = "legacy"
     if task_type in ("RESEARCH", "FILE_GEN", "MULTI_STEP"):
         try:
-            _wf_route = SmartDispatcher.resolve_workflow(task_type, user_input)
+            _wf_route = SmartDispatcher.resolve_workflow(
+                task_type, user_input, has_file=has_recent_upload
+            )
             if _wf_route != "legacy":
                 print(f"[STREAM] 🔮 LangGraph 工作流路由: {_wf_route}")
         except Exception as _wf_err:
@@ -7995,7 +7514,7 @@ def chat_stream():
                 
                 try:
                     from web.document_feedback import DocumentFeedbackSystem
-                    feedback_system = DocumentFeedbackSystem(gemini_client=client)
+                    feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
                     
                     # 使用流式分析系统，逐步反馈进度
                     yield f"data: {json.dumps({'type': 'progress', 'stage': 'processing_start', 'message': '🔍 开始处理文档...', 'detail': '这个过程会涉及多个阶段'})}\n\n"
@@ -8155,6 +7674,130 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                 return
             
+            # === 🗂️ 文件分析直通：有近期上传文件 + RESEARCH/CHAT/FILE_GEN + legacy ═════
+            # chat_stream 检测到近期上传文件时，直接读取文件内容并传给模型，
+            # 避免走不带文件字节的 RESEARCH/ToT 路径（那条路没有文件上下文，给出错误结果）
+            if (
+                has_recent_upload
+                and recent_file_path
+                and os.path.isfile(recent_file_path)
+                and task_type in ("RESEARCH", "CHAT", "FILE_GEN")
+                and _wf_route == "legacy"
+            ):
+                _rfile_ext  = os.path.splitext(recent_file_path)[1].lower()
+                _rfile_name = os.path.basename(recent_file_path)
+                _is_binary_doc = _rfile_ext in (".pdf", ".docx", ".doc", ".pptx", ".xlsx")
+                _is_image_file = _rfile_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+
+                # 图片 → 交给后续 VISION 路径，不在这里拦截
+                if not _is_image_file:
+                    print(f"[STREAM] 🗂️ 文件分析直通: {_rfile_name} ({_rfile_ext}) task={task_type}")
+                    yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'model': model_id, 'message': f'📄 文件分析模式: {_rfile_name}'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'📂 正在读取文件: {_rfile_name}', 'stage': 'file_ready', 'progress': 15})}\n\n"
+
+                    try:
+                        import time as _rft_mod
+                        _rf_start = _rft_mod.time()
+
+                        _rf_task_label = {'RESEARCH': '🔬 深度分析', 'FILE_GEN': '📝 内容生成', 'CHAT': '💬 文件问答'}.get(task_type, task_type)
+                        yield f"data: {json.dumps({'type': 'progress', 'message': f'🎯 任务类型: {_rf_task_label}', 'stage': 'routing_complete', 'progress': 25})}\n\n"
+
+                        if task_type == "RESEARCH":
+                            _rf_sys = (
+                                "你是一位专业的文档分析助手，擅长深度解读各类文件（商业计划书、研究报告、技术文档等）。\n"
+                                "请仔细阅读用户提供的文件内容，并按以下结构输出分析报告：\n\n"
+                                "## 核心摘要\n- 用 3-5 条要点概括文件核心内容\n\n"
+                                "## 详细解读\n### 背景与目标\n### 关键内容分析\n### 数据与证据\n\n"
+                                "## 结论与建议\n- 综合评判与可行性/价值判断\n\n"
+                                "要求：用中文，条理清晰，避免冗余，不输出代码块标记。"
+                            )
+                        else:
+                            _rf_sys = (
+                                "你是一位专业的文档阅读与分析助手。用户上传了一份文件并提出了问题，"
+                                "请认真阅读文件的完整内容，用中文给出详细、准确的分析和回答。\n"
+                                "注意：直接回答用户的具体问题，引用文件中的具体数据和信息支撑你的判断，"
+                                "用清晰的结构输出，避免空泛表述。"
+                            )
+
+                        # 二进制文档需要能处理文件字节的模型
+                        _rf_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash")
+                        if _is_binary_doc:
+                            _rf_model = globals().get("_INTERACTIONS_FALLBACK_MODEL") or "gemini-2.5-flash"
+
+                        yield f"data: {json.dumps({'type': 'progress', 'message': f'⚡ 正在请求 {_rf_model}，请稍候...', 'stage': 'api_calling', 'progress': 35})}\n\n"
+
+                        # 构建请求内容（文本 + 文件字节 或 提取文本）
+                        _rf_contents = user_input
+                        if _is_binary_doc:
+                            try:
+                                with open(recent_file_path, "rb") as _rfh:
+                                    _rf_bytes = _rfh.read()
+                                _rf_mime_map = {
+                                    ".pdf":  "application/pdf",
+                                    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    ".doc":  "application/msword",
+                                    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                }
+                                _rf_mime = _rf_mime_map.get(_rfile_ext, "application/octet-stream")
+                                _rf_doc_part = types.Part.from_bytes(data=_rf_bytes, mime_type=_rf_mime)
+                                _rf_contents = [user_input, _rf_doc_part]
+                                print(f"[STREAM] 📄 ByteDoc-Read: model={_rf_model}, bytes={len(_rf_bytes)}, mime={_rf_mime}")
+                            except Exception as _rfb_err:
+                                print(f"[STREAM] ⚠️ 文件字节读取失败，回退文本模式: {_rfb_err}")
+                                try:
+                                    from web.file_processor import process_uploaded_file
+                                    _rf_contents, _ = process_uploaded_file(recent_file_path, user_input)
+                                except Exception:
+                                    pass  # 用 user_input 作兜底
+                        else:
+                            # 文本类文件：提取内容后注入
+                            try:
+                                from web.file_processor import process_uploaded_file
+                                _rf_contents, _ = process_uploaded_file(recent_file_path, user_input)
+                            except Exception as _rft_err:
+                                print(f"[STREAM] ⚠️ 文本文件提取失败: {_rft_err}")
+
+                        _rf_stream = client.models.generate_content_stream(
+                            model=_rf_model,
+                            contents=_rf_contents,
+                            config=types.GenerateContentConfig(
+                                system_instruction=_rf_sys,
+                                temperature=0.7,
+                                max_output_tokens=8000,
+                            )
+                        )
+
+                        _rf_full_text = ""
+                        _rf_first_token = True
+                        for _rf_chunk in _rf_stream:
+                            _rf_t = getattr(_rf_chunk, "text", None)
+                            if _rf_t:
+                                if _rf_first_token:
+                                    yield f"data: {json.dumps({'type': 'progress', 'message': '✍️ 模型正在生成回复...', 'stage': 'generating', 'progress': 55})}\n\n"
+                                    _rf_first_token = False
+                                _rf_full_text += _rf_t
+                                yield f"data: {json.dumps({'type': 'token', 'content': _rf_t}, ensure_ascii=False)}\n\n"
+
+                        _rf_elapsed = round(_rft_mod.time() - _rf_start, 2)
+                        try:
+                            session_manager.append_and_save(
+                                f"{session_name}.json", user_input, _rf_full_text,
+                                task=task_type, model_name=_rf_model
+                            )
+                        except Exception:
+                            pass
+                        total_time = time.time() - start_time
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                        return
+
+                    except Exception as _rf_err:
+                        import traceback as _rf_tb
+                        print(f"[STREAM] ⚠️ 文件分析直通失败，降级标准路径: {_rf_tb.format_exc()}")
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 文件读取遇到问题，切换至标准模式...', 'detail': str(_rf_err)[:100]})}\n\n"
+                        # 降级：继续向下走 ToT / RESEARCH 标准路径
+            # ═══════════════════════════════════════════════════════════════════════════
+
             # === 🌳 Tree of Thought Mode (RESEARCH / FILE_GEN 并行多路推理选优) ===
             # 触发条件：legacy 路由 + RESEARCH/FILE_GEN + 非 Deep-Research-Pro + ToT 未被用户禁用
             _tot_enabled = (
@@ -8166,7 +7809,7 @@ def chat_stream():
             )
 
             if _tot_enabled:
-                _tot_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash-preview-05-20")
+                _tot_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash")
                 _tot_n     = 2 if task_type == "FILE_GEN" else 3   # FILE_GEN 用 2 路，RESEARCH 用 3 路
                 _tot_label = "📄 文档生成" if task_type == "FILE_GEN" else "🔬 深度研究"
                 yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'route_method': 'TreeOfThought', 'message': f'🌳 Tree of Thought 启动：{_tot_n} 条并行推理分支 ({_tot_label})'}, ensure_ascii=False)}\n\n"
@@ -9615,7 +9258,7 @@ def chat_stream():
                     _max_tokens = 16384 if _is_complex else 8192
                     _doc_models = list(dict.fromkeys([
                         model_id,
-                        "gemini-3.1-pro-preview",
+                        "gemini-3-pro-preview",
                         "gemini-2.5-flash",
                         "gemini-3-flash-preview",
                     ]))
@@ -9752,7 +9395,7 @@ def chat_stream():
                 # 模型列表（主模型 + 备用模型）
                 file_gen_models = [
                     model_id,  # 主模型
-                    "gemini-3.1-pro-preview",  # 备用1 (最强 generate_content 兼容)
+                    "gemini-3-pro-preview",  # 备用1 (更强的推理)
                     "gemini-2.5-flash",  # 备用2
                     "gemini-3-flash-preview",  # 备用3
                 ]
@@ -10045,10 +9688,9 @@ def chat_stream():
                 return
             
             # === Regular Mode (流式输出) ===
-            # use_instruction 直接继承外层 system_instruction
-            # （已包含 CWM 长期记忆、知识库RAG、Graph RAG、Skills 注入）
-            # 不再从零重建，避免丢失所有 outer-scope 注入的上下文
-            use_instruction = system_instruction
+            # 根据任务类型选择系统指令
+            # CHAT/RESEARCH等使用简化指令，避免不必要的文件生成
+            use_instruction = _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION() if task_type in ["CHAT", "RESEARCH"] else _get_system_instruction()
 
             # 注入长期记忆上下文
             _memory_manager = get_memory_manager()
@@ -11053,7 +10695,7 @@ def chat_with_file():
                         if os.path.abspath(_batch_filepath) != os.path.abspath(_batch_target):
                             import shutil as _bsh
                             _bsh.copy2(_batch_filepath, _batch_target)
-                        _bt_feedback = DocumentFeedbackSystem(gemini_client=client)
+                        _bt_feedback = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
                         _bt_final = None
                         for _bt_evt in _bt_feedback.full_annotation_loop_streaming(_batch_target, user_input):
                             if _bt_evt.get('stage') == 'complete':
@@ -11490,8 +11132,7 @@ def chat_with_file():
                 complexity = context_info["complexity"]
             
             if task_type == "DOC_ANNOTATE":
-                # 文档标注需要强模型：优先使用 gemini-3.1-pro-preview（如可用），回退 gemini-2.5-pro
-                # 注意：gemini-3-pro-preview / gemini-3-flash-preview 仅支持 Interactions API，不能用于 generate_content
+                # 文档标注需要强模型：优先使用 gemini-3.1-pro-preview或 gemini-3-pro-preview
                 model_to_use = "gemini-3.1-pro-preview"
             elif task_type == "FILE_GEN":
                 model_to_use = SmartDispatcher.get_model_for_task(
@@ -11505,12 +11146,6 @@ def chat_with_file():
                     has_image=bool(file_data)
                 )
         
-        # 最早拦截：文件分析不能使用 interactions-only 模型（不支持 generate_content 也不支持文件附件）
-        if model_to_use in _INTERACTIONS_ONLY_MODELS or str(model_to_use or "").startswith("deep-research-pro-preview"):
-            _orig_model = model_to_use
-            model_to_use = _INTERACTIONS_FALLBACK_MODEL
-            print(f"[FILE UPLOAD] ⚠️ {_orig_model} 是 interactions-only，文件分析降级到 {_INTERACTIONS_FALLBACK_MODEL}")
-
         print(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
 
         # 安全兜底：locked_task 预设时 prefer_ppt 可能未定义
@@ -11599,7 +11234,7 @@ def chat_with_file():
                 
                 try:
                     from web.document_feedback import DocumentFeedbackSystem
-                    feedback_system = DocumentFeedbackSystem(gemini_client=_ann_client)
+                    feedback_system = DocumentFeedbackSystem(gemini_client=_ann_client, default_model_id="gemini-3.1-pro-preview")
                     
                     # 发送分类信息（若上方转换块已发送则跳过重复）
                     if not _classif_sent:
@@ -11970,30 +11605,32 @@ def chat_with_file():
                     # 并将 PDF 字节附加到请求中，而不是依赖提取的文本
                     _stream_model = _captured_model
                     _stream_contents = formatted_message  # 默认：文本消息
-
-                    # 通用拦截：interactions-only 模型不支持 generate_content_stream
-                    # 覆盖所有情况（包括文本嵌入模式，不仅是 binary doc）
-                    if _stream_model in _INTERACTIONS_ONLY_MODELS or str(_stream_model).startswith("deep-research-pro-preview"):
-                        print(f"[FILE STREAM] ⚠️ {_stream_model} 是 interactions-only，降级到 {_INTERACTIONS_FALLBACK_MODEL}")
-                        _stream_model = _INTERACTIONS_FALLBACK_MODEL
-
                     _has_binary_doc = (
                         file_data is not None
                         and not (file_data.get("mime_type") or "").lower().startswith("image/")
                     )
-                    if _has_binary_doc and _captured_task in ("CHAT", "RESEARCH"):
-                        # 强制降级到支持文件字节的模型（Interactions API 不支持附件字节）
+                    # 需要降级到 generate_content 兼容模型的条件：
+                    # 1. 二进制文件（PDF/Word）+ CHAT/RESEARCH 任务
+                    # 2. 所选模型是 Interactions-only 模型（如 deep-research），不支持 generate_content_stream
+                    _need_fallback = (
+                        (_has_binary_doc and _captured_task in ("CHAT", "RESEARCH"))
+                        or _stream_model in _INTERACTIONS_ONLY_MODELS
+                    )
+                    if _need_fallback:
+                        if _stream_model in _INTERACTIONS_ONLY_MODELS:
+                            print(f"[FILE STREAM] interactions-only 模型 {_stream_model} 不支持文件流，降级到 {_INTERACTIONS_FALLBACK_MODEL}")
                         _stream_model = _INTERACTIONS_FALLBACK_MODEL
-                        try:
-                            _doc_part = types.Part.from_bytes(
-                                data=file_data["data"],
-                                mime_type=file_data.get("mime_type", "application/pdf")
-                            )
-                            _stream_contents = [formatted_message, _doc_part]
-                            print(f"[FILE STREAM] 📄 Binary-Doc-Read: model={_stream_model}, bytes={len(file_data['data'])}")
-                        except Exception as _bp_err:
-                            print(f"[FILE STREAM] ⚠️ 无法创建 doc_part，回退到文本模式: {_bp_err}")
-                            _stream_contents = formatted_message
+                        if _has_binary_doc:
+                            try:
+                                _doc_part = types.Part.from_bytes(
+                                    data=file_data["data"],
+                                    mime_type=file_data.get("mime_type", "application/pdf")
+                                )
+                                _stream_contents = [formatted_message, _doc_part]
+                                print(f"[FILE STREAM] 📄 Binary-Doc-Read: model={_stream_model}, bytes={len(file_data['data'])}")
+                            except Exception as _bp_err:
+                                print(f"[FILE STREAM] ⚠️ 无法创建 doc_part，回退到文本模式: {_bp_err}")
+                                _stream_contents = formatted_message
 
                     yield f"data: {json.dumps({'type': 'classification', 'task_type': _captured_task, 'model': _stream_model, 'message': f'📄 正在分析: {filename}'})}\n\n"
                     yield f"data: {json.dumps({'type': 'progress', 'message': '📂 文件内容已就绪', 'stage': 'file_ready_complete', 'progress': 15})}\n\n"
@@ -12276,27 +11913,6 @@ def api_refresh_models():
     try:
         new_map = _model_manager.refresh()
         MODEL_MAP.update(new_map)
-        # 同步更新 ModelFallbackExecutor 路由表
-        try:
-            from app.core.llm.model_fallback import get_fallback_executor
-            get_fallback_executor().update_model_map(MODEL_MAP)
-        except Exception as _fe:
-            print(f"[ModelRefresh] ⚠️ FallbackExecutor sync failed: {_fe}")
-        # 同步更新 AIRouter 轻量路由模型
-        try:
-            from app.core.routing.ai_router import AIRouter
-            _caps = _model_manager._cached_caps
-            _candidates = [
-                (mid, caps) for mid, caps in _caps.items()
-                if not caps.get("interactions_only", False)
-                and not caps.get("image_gen", False)
-                and mid != "local-executor"
-            ]
-            if _candidates:
-                _best = max(_candidates, key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1)[0]
-                AIRouter.set_router_model(_best)
-        except Exception as _are:
-            print(f"[ModelRefresh] ⚠️ AIRouter update failed: {_are}")
         return jsonify({
             "status":    "ok",
             "model_map": _model_manager.get_model_map_with_scores(),
@@ -13981,12 +13597,12 @@ def _call_document_annotate(file_path: str, requirement: str):
             }), 404
         
         from web.document_feedback import DocumentFeedbackSystem
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         result = feedback_system.full_annotation_loop(
             file_path=file_path,
             user_requirement=requirement,
-            model_id="gemini-3.1-pro-preview"
+            model_id="gemini-3-pro-preview"
         )
         
         # 添加处理模式标记
@@ -14050,7 +13666,7 @@ def document_feedback():
         
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         # 执行完整反馈闭环
         result = feedback_system.full_feedback_loop(
@@ -14096,7 +13712,7 @@ def document_analyze():
         
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         # 仅分析
         result = feedback_system.analyze_and_suggest(
@@ -14139,7 +13755,7 @@ def document_apply():
         
         # 应用修改
         from web.document_feedback import DocumentFeedbackSystem
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         result = feedback_system.apply_suggestions(
             file_path=file_path,
@@ -14162,7 +13778,7 @@ def document_annotate():
         data = request.json
         file_path = data.get('file_path')
         user_requirement = data.get('requirement', '')
-        model_id = data.get('model_id', 'gemini-3.1-pro-preview')
+        model_id = data.get('model_id', 'gemini-3-pro-preview')
         
         if not file_path:
             return jsonify({
@@ -14182,7 +13798,7 @@ def document_annotate():
         
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         # 执行完整标注闭环
         result = feedback_system.full_annotation_loop(
@@ -14352,7 +13968,7 @@ def document_apply_annotations():
         
         # 应用标注
         from web.document_feedback import DocumentFeedbackSystem
-        feedback_system = DocumentFeedbackSystem(gemini_client=client)
+        feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         result = feedback_system.annotate_document(file_path, annotations)
         
