@@ -540,7 +540,7 @@ class RAGService:
         self,
         question: str,
         k: int = DEFAULT_K,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "gemini-3-flash-preview",
         score_threshold: float = 0.2,
     ) -> Dict[str, Any]:
         """
