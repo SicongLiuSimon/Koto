@@ -121,11 +121,7 @@ def _ensure_sklearn():
         import sklearn  # noqa: F401
     except ImportError:
         print("[Train] 安装 scikit-learn")
-        import subprocess
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "scikit-learn"],
-            check=True,
-        )
+        os.system(f"{sys.executable} -m pip install scikit-learn")
 
 
 def main():

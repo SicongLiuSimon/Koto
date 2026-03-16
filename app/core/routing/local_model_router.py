@@ -187,9 +187,11 @@ class LocalModelRouter:
 【FILE_GEN vs CHAT】
 - "写一段/写一篇/帮我写个/给我写个" = 短文本输出 → CHAT
 - "生成一份.../做一个PPT/写一份Word文档" = 需要文件 → FILE_GEN
+- "你会做X么/你能做X吗/能不能做X/会不会X" = 能力询问 → CHAT（未明确下达任务指令，需先确认主题再生成）
 - "写一段自我介绍" → CHAT  |  "帮我制作一份Word版简历" → FILE_GEN
 - 关键信号：含 word/docx/pdf/ppt/excel/报告 等文件格式词 + "做一个/做一份/写一份/生成" 等动作词 → FILE_GEN
-- "介绍一下X" / "帮我讲讲X" → CHAT（无文件格式词）  
+- "介绍一下X" / "帮我讲讲X" → CHAT（无文件格式词）
+- "你会做ppt么/你能做excel吗" → CHAT（能力问句，无具体主题和明确动作词）
 - "做一个关于X的word介绍" / "写一份X的PDF报告" → FILE_GEN（有格式词+动作词）
 - 注意：含"表格/数据汇总"的生成请求 → FILE_GEN（不是CODER也不是PAINTER）
   - "生成一张表格汇总这些数据" → FILE_GEN  |  "帮我把数据整理成表格" → FILE_GEN
@@ -862,24 +864,6 @@ class LocalModelRouter:
             return True
         return False
 
-    @classmethod
-    def pick_best_chat_model(cls) -> Optional[str]:
-        """
-        返回最适合对话/生成的已安装本地模型名称。
-        按 OLLAMA_RESPONSE_MODELS 优先级顺序检测，找到即返回；
-        若都未安装则回退到分类模型 (_model_name)；
-        全部不可用时返回 None（调用方自行处理）。
-
-        等价于 _init_response_model() 但作为只读查询，不修改内部状态。
-        """
-        if cls._response_model:
-            return cls._response_model
-        # 尝试初始化（内部会设置 _response_model）
-        if cls._init_response_model():
-            return cls._response_model
-        # 最后降级到分类模型
-        return cls._model_name
-
     # ── 技术性话题信号词：命中即路由到云端 ──────────────────────────────
     # 原则：本地小模型可以回答"是什么/简介"类，但技术深度问题需要云端质量
     _TECHNICAL_CHAT_SIGNALS = [
@@ -1207,22 +1191,6 @@ class LocalModelRouter:
                 sys_prompt = _base
 
         messages.append({"role": "system", "content": sys_prompt})
-
-        # ── 注入记忆快照（PersonalityMatrix → 个人背景提示）────────────────
-        try:
-            import sys as _sys
-            _app = _sys.modules.get("web.app") or _sys.modules.get("app")
-            _get_mgr = getattr(_app, "get_memory_manager", None) if _app else None
-            if _get_mgr:
-                _mgr = _get_mgr()
-                if _mgr and hasattr(_mgr, "get_compact_memory_snapshot"):
-                    _mem_snap = _mgr.get_compact_memory_snapshot(max_chars=150) or ""
-                    if _mem_snap:
-                        messages[0]["content"] = (
-                            f"[用户背景：{_mem_snap}]\n\n" + messages[0]["content"]
-                        )
-        except Exception:
-            pass
 
         # 加入历史对话（最多最近 4 轮）
         if history:
