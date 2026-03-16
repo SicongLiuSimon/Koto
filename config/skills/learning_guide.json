@@ -1,0 +1,87 @@
+{
+  "id": "learning_guide",
+  "name": "学习路径规划",
+  "icon": "🎓",
+  "category": "domain",
+  "description": "为用户规划技能学习路径：推荐权威文档、书籍、课程、练习项目，并给出阶段性学习计划",
+  "intent_description": "用户想学习某项技能、寻找学习资源、规划技术路径、或问「从哪里开始」「怎么入门」时",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [
+      "##"
+    ],
+    "must_not_contain": [],
+    "min_chars": 300,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "阶段式学习路径（入门/进阶/实战）+ 具体资源推荐（官方文档/书籍/平台），包含预估时间"
+  },
+  "bound_tools": [
+    "web_search"
+  ],
+  "executor_tools": [
+    "web_search"
+  ],
+  "task_types": [
+    "CHAT",
+    "RESEARCH"
+  ],
+  "priority": 65,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 🎓 能力增强：学习路径规划专家\n\n当用户询问如何学习某项技能、想找学习资源时，按以下流程输出：\n\n### 工具使用规则\n- **必须先调用 `web_search`** 搜索该技术最新的学习资源，以避免推荐过时内容\n- 搜索关键词建议：`\"<技术名> 学习路径 2025\"` 或 `\"best <tech> learning resources 2025\"`\n- 官方文档链接必须通过搜索确认（不要凭记忆编造 URL）\n\n### 输出结构\n\n```markdown\n## 🎓 [技术名] 学习路径\n\n### 适合人群\n- 你目前的基础：...\n- 学完后能做什么：...\n\n### 第一阶段：入门（X 周）\n**目标**：能跑起 Hello World，理解核心概念\n- 📖 官方文档：[名称](URL)\n- 📺 视频课程：[名称](URL) — 平台、时长\n- ⏱️ 建议投入：每天 N 小时 × X 天\n\n### 第二阶段：进阶（X 周）\n**目标**：能完成实际任务、理解底层原理\n- 📚 推荐书籍：《书名》— 适合谁、核心章节\n- 🛠️ 练习项目：...\n\n### 第三阶段：实战（X 周）\n**目标**：能在工作/项目中独立使用\n- 💻 实战项目建议：...\n- 🏆 检验标准：...\n\n### ⚡ 快速起步（本周可以做的事）\n1. ...\n2. ...\n3. ...\n```\n\n### 推荐原则\n- 优先官方文档（最权威、最新）\n- 视频推荐平台：B站（中文）、Youtube、Coursera、Udemy\n- 书籍注明版本年份\n- 给出明确的时间估算（不要模糊说「需要一段时间」）\n- 根据用户当前技术水平调整难度起点\n- 不要推荐付费内容时不注明价格（免费资源优先）",
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-15T00:00:00Z",
+  "tags": [
+    "学习",
+    "教程",
+    "路径",
+    "入门",
+    "进阶",
+    "resources",
+    "learning",
+    "数据分析",
+    "Python",
+    "编程",
+    "技能提升",
+    "课程推荐"
+  ],
+  "trigger_keywords": [
+    "怎么学",
+    "如何入门",
+    "学习路径",
+    "学习资源",
+    "推荐教程",
+    "从哪里开始",
+    "新手如何",
+    "学习计划",
+    "怎么开始学",
+    "有没有好的课程",
+    "推荐书籍",
+    "学什么",
+    "如何自学",
+    "Python学习",
+    "数据分析学习",
+    "机器学习入门",
+    "how to learn",
+    "learning resources",
+    "beginner guide",
+    "推荐资料"
+  ],
+  "examples": [
+    {
+      "input": "我想学数据分析，没有基础，从哪里开始",
+      "output": "## 🎓 数据分析 学习路径\n\n### 适合人群\n- **你的起点**：零基础\n- **学完后**：能用 Python/Excel 独立完成数据清洗、分析和可视化\n\n### 第一阶段：入门（4 周）\n**目标**：Python 基础 + pandas 入门\n- 📖 官方文档：[pandas 中文文档](https://pandas.pydata.org/docs/)\n- 📺 B站推荐：「Python数据分析入门」...\n- ⏱️ 建议：每天 1 小时\n\n...",
+      "note": "实际输出需先 web_search 获取最新资源链接"
+    }
+  ],
+  "plan_template": [
+    "1. 调用 web_search(query=\"<技术>学习路径 2025\") 获取最新资源",
+    "2. 调用 web_search(query=\"best <tech> tutorial beginner 2025\") 补充英文资源",
+    "3. 根据用户当前水平，选择入门/进阶/实战三阶段资源",
+    "4. 按模板输出结构化学习路径，注明 URL 和时间估算"
+  ]
+}
