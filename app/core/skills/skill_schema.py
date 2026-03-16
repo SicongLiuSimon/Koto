@@ -299,6 +299,14 @@ class SkillDefinition:
     # ── 新增：工具绑定 ───────────────────────────────────────────────────────
     bound_tools: List[str] = field(default_factory=list)
 
+    # ── 执行层增强（自定义 Skill 由 SkillRecorder LLM 分析自动填充）──────────
+    # 执行时建议调用的内部工具名列表，供 UnifiedAgent 执行层参考
+    executor_tools: List[str] = field(default_factory=list)
+    # 有序执行步骤描述，供 inject_into_prompt 注入给模型
+    plan_template: List[str] = field(default_factory=list)
+    # AutoMatcher 触发关键词，用于 SkillAutoMatcher._PATTERN_MAP 注册
+    trigger_keywords: List[str] = field(default_factory=list)
+
     # ── 原有字段（保留向后兼容）─────────────────────────────────────────────
     task_types: List[str] = field(default_factory=list)
     enabled: bool = False
@@ -347,92 +355,28 @@ class SkillDefinition:
     # 格式: [{"trigger_type": "cron", "config": {"time": "09:00"}}]
     default_triggers: List[Dict[str, Any]] = field(default_factory=list)
 
-    # ── 两层能力架构（v2）──────────────────────────────────────────────────────
-    # 规划层：TaskPlanner 用此模板替代 LLM 规划，生成确定性步骤 DAG。
-    # 每步格式：
-    #   name           : 步骤唯一名称
-    #   description    : 用户可见描述
-    #   step_type      : "llm" | "file" | "tool" | "skill"
-    #   depends_on     : 依赖步骤名列表
-    #   executor_tools : 该步骤允许调用的工具子集（覆盖 skill 级别的 executor_tools）
-    #   executor_prompt: 该步骤附加的 system_prompt 片段
-    #   expected_output: 期望输出描述（用于验收）
-    #   input_keys     : 从上游步骤结果中取哪些字段注入到本步骤
-    plan_template: List[Dict[str, Any]] = field(default_factory=list)
-
-    # 执行层：若非空，UnifiedAgent 只向 LLM 暴露此子集工具。
-    # 避免无关工具污染 context，让模型精确使用绑定的工具集。
-    # 空列表 = 不限制（使用 ToolRouter 默认策略）。
-    executor_tools: List[str] = field(default_factory=list)
-
-    # 执行层：Python 实现入口点，格式 "module.path:function_name"。
-    # 设置后，SkillCapabilityRegistry 可将其加载为可调用能力。
-    # 函数签名约定：fn(user_input: str, context: Dict[str, Any]) → Any
-    entry_point: Optional[str] = None
-
     # ── 方法 ─────────────────────────────────────────────────────────────────
 
 
-    def render_prompt(
-        self,
-        variables: Optional[Dict[str, Any]] = None,
-        with_examples: bool = False,
-        with_output_spec: bool = False,
-    ) -> str:
+    def render_prompt(self, variables: Optional[Dict[str, Any]] = None) -> str:
         """
-        渲染 Skill 的完整 system prompt 片段。
-
-        合成顺序（均可单独开关）：
-          1. system_prompt_template（含变量占位符）或旧版 prompt 字段
-          2. [可选] output_spec.description → 告知模型期望输出格式
-          3. [可选] examples → few-shot 示例对，极大提升小白创建的 Skill 质量
+        将 system_prompt_template 中的 {variable} 占位符替换为实际值。
+        若无模板，则返回旧版 prompt 字段（向后兼容）。
 
         Args:
-            variables:        变量名 → 值 字典，用于替换 {variable} 占位符
-            with_examples:    True 时追加 few-shot 示例块（"用法示例"）
-            with_output_spec: True 时追加 output_spec.description 格式说明
+            variables: 变量名 → 值 字典
 
         Returns:
-            完整渲染后的 prompt 字符串
+            渲染好的 prompt 字符串
         """
-        # 1. 主体 prompt
         template = self.system_prompt_template or self.prompt
-        if variables:
-            try:
-                template = template.format(**variables)
-            except KeyError as e:
-                logger.warning("[SkillDefinition] render_prompt() missing variable %s for skill=%s", e, self.id)
-
-        parts = [template] if template else []
-
-        # 2. 输出格式规格（output_spec.description）
-        if with_output_spec:
-            fmt_desc = (
-                self.output_spec.description
-                if isinstance(self.output_spec, OutputSpec)
-                else ""
-            )
-            if fmt_desc:
-                parts.append(f"\n\n### 📋 输出格式要求\n{fmt_desc}")
-
-        # 3. Few-shot 示例块
-        if with_examples and self.examples:
-            lines = ["\n\n### 💡 用法示例（请参照格式）"]
-            for i, ex in enumerate(self.examples, 1):
-                inp = ex.get("input", "").strip()
-                out = ex.get("output", "").strip()
-                note = ex.get("note", "").strip()
-                if not inp and not out:
-                    continue
-                lines.append(f"\n**示例 {i}**{f'（{note}）' if note else ''}")
-                if inp:
-                    lines.append(f"用户输入：{inp}")
-                if out:
-                    lines.append(f"期望输出：\n{out}")
-            if len(lines) > 1:  # 有实际示例内容才追加
-                parts.append("\n".join(lines))
-
-        return "".join(parts)
+        if not variables:
+            return template
+        try:
+            return template.format(**variables)
+        except KeyError as e:
+            logger.warning("[SkillDefinition] render_prompt() missing variable %s for skill=%s", e, self.id)
+            return template
 
     def to_mcp_tool(self) -> Dict[str, Any]:
         """
@@ -536,6 +480,9 @@ class SkillDefinition:
                 "description": self.output_spec.description,
             },
             "bound_tools": self.bound_tools,
+            "executor_tools": self.executor_tools,
+            "plan_template": self.plan_template,
+            "trigger_keywords": self.trigger_keywords,
             "task_types": self.task_types,
             "enabled": self.enabled,
             "prompt": self.prompt,
@@ -553,10 +500,6 @@ class SkillDefinition:
             "update_url": self.update_url,
             "publisher": self.publisher or self.author,
             "default_triggers": self.default_triggers,
-            # v2 两层能力架构
-            "plan_template": self.plan_template,
-            "executor_tools": self.executor_tools,
-            "entry_point": self.entry_point,
         }
 
     @classmethod
@@ -598,6 +541,9 @@ class SkillDefinition:
             input_variables=input_variables,
             output_spec=output_spec,
             bound_tools=data.get("bound_tools", []),
+            executor_tools=data.get("executor_tools", []),
+            plan_template=data.get("plan_template", []),
+            trigger_keywords=data.get("trigger_keywords", []),
             task_types=data.get("task_types", []),
             enabled=data.get("enabled", False),
             prompt=data.get("prompt", ""),
@@ -615,9 +561,6 @@ class SkillDefinition:
             update_url=data.get("update_url", ""),
             publisher=data.get("publisher", data.get("author", "user")),
             default_triggers=data.get("default_triggers", []),
-            plan_template=data.get("plan_template", []),
-            executor_tools=data.get("executor_tools", []),
-            entry_point=data.get("entry_point"),
         )
 
     @classmethod
@@ -638,7 +581,10 @@ class SkillDefinition:
             system_prompt_template=legacy.get("system_prompt_template", ""),
             input_variables=[],
             output_spec=OutputSpec(),
-            bound_tools=[],
+            bound_tools=legacy.get("bound_tools", []),
+            executor_tools=legacy.get("executor_tools", []),
+            plan_template=legacy.get("plan_template", []),
+            trigger_keywords=legacy.get("trigger_keywords", []),
             task_types=legacy.get("task_types", []),
             enabled=legacy.get("enabled", False),
             prompt=legacy.get(
@@ -650,9 +596,6 @@ class SkillDefinition:
             priority=legacy.get("priority", 50),
             conflict_with=legacy.get("conflict_with", []),
             examples=legacy.get("examples", []),
-            plan_template=legacy.get("plan_template", []),
-            executor_tools=legacy.get("executor_tools", []),
-            entry_point=legacy.get("entry_point"),
         )
 
 

@@ -108,6 +108,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "category": "behavior",
         "skill_nature": "model_hint",
         "description": "要求更严格的推理：引用来源、标明不确定性、避免模糊结论",
+        "intent_description": "用户需要可靠的事实或分析、担心信息过时、处理有争议的话题、或明确要求严谨/有据可依的回答时",
         "task_types": ["CHAT", "RESEARCH"],
         "prompt": (
             "\n\n## 🔬 行为要求：严谨模式\n"
@@ -145,6 +146,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "category": "behavior",
         "skill_nature": "model_hint",
         "description": "苏格拉底式引导 + 类比 + 逐层展开，帮助用户真正理解而非死记答案",
+        "intent_description": "用户说「教我」「帮我理解」「解释一下」「我是新手」或想从零开始系统学习某个概念时",
         "task_types": ["CHAT", "RESEARCH"],
         "prompt": (
             "\n\n## 🎓 行为要求：教学模式\n"
@@ -162,6 +164,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "category": "behavior",
         "skill_nature": "model_hint",
         "description": "回答后主动给出相关的延伸建议、潜在问题或下一步操作",
+        "intent_description": "用户在探索某个主题、刚完成一项任务、或需要进一步指引时，Koto 主动推荐下一步行动",
         "task_types": [],
         "prompt": (
             "\n\n## 💡 行为要求：主动建议\n"
@@ -179,6 +182,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "category": "style",
         "skill_nature": "model_hint",
         "description": "使用正式的商务/学术语气，适合需要对外输出的报告、邮件、文档",
+        "intent_description": "用户要写对外报告、商务邮件、官方声明、论文摘要或任何需要正式书面语气的内容时",
         "task_types": ["CHAT", "FILE_GEN", "RESEARCH"],
         "prompt": (
             "\n\n## 👔 风格要求：专业语气\n"
@@ -287,9 +291,22 @@ BUILTIN_SKILLS: List[Dict] = [
             "- 尽量用数据和指标支撑观点，而不仅是定性描述\n"
             "- 建议可测量的方法：「通过监控 X 指标来判断」\n"
             "- 对比分析时使用表格格式呈现\n"
-            "- 推荐 Python/Excel 等工具时，给出具体的实现思路"
+            "- 推荐 Python/Excel 等工具时，给出具体的实现思路\n\n"
+            "## 🔧 Koto 实际可用的数据分析工具（如实告知用户）\n"
+            "当用户询问 Koto 能做什么数据分析时，只介绍以下已实现的能力，不夸大：\n"
+            "1. **加载数据文件**（load_data）：读取 CSV / Excel / JSON，返回行列数和预览\n"
+            "2. **统计摘要**（describe_data）：均值、中位数、标准差、缺失值统计、分类列频率\n"
+            "3. **数据查询**（query_data）：在 DataFrame 上运行 pandas 表达式过滤/聚合\n"
+            "4. **探索性问题建议**（suggest_questions）：根据数据结构自动生成分析方向\n"
+            "5. **趋势分析**（analyze_trends）：时序数据趋势、环比增长率、峰谷检测、异常识别\n"
+            "6. **数据保存**（save_data）：将结果导出为 CSV / Excel / JSON\n"
+            "7. **图表图片解读**（analyze_chart_image）：上传图表截图，Gemini 多模态视觉解析\n"
+            "8. **学习资源推荐**（learning_guide 技能）：通过 web_search 搜索最新学习路径\n\n"
+            "**真正尚未具备的能力（不要在回复中声称拥有）：**\n"
+            "- 直接从网页 URL 读取在线图表（需用户先下载到本地）\n"
+            "- 自动绘制可视化图表并展示（可生成绘图代码，但不能直接渲染图形）"
         ),
-        "enabled": False,
+        "enabled": True,
     },
     # ── 领域增强 ──────────────────────────────────────────────────────────────
     {
@@ -426,6 +443,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "task_types": ["DOC_ANNOTATE", "CODER"],
         "priority": 75,
         "conflict_with": ["code_best_practices"],
+        "executor_tools": ["read_file_snippet", "find_file", "list_directory"],
+        "plan_template": [
+            "读取目标代码文件或代码块",
+            "分析安全性（注入风险/硬编码密钥/权限漏洞）",
+            "检查可读性与最佳实践合规性",
+            "识别潜在 bug 和边界条件缺失",
+            "生成按严重等级分类的批注报告（🔴严重 / 🟡警告 / 🔵建议）",
+            "输出整体代码质量评分与 Top 3 优先修复项",
+        ],
         "prompt": (
             "\n\n## 🔍 领域要求：代码审查批注\n"
             "- 按严重等级分类：🔴 严重（安全漏洞/逻辑错误）、🟡 警告（可读性差/违反规范）、🔵 建议（优化空间）\n"
@@ -467,6 +493,14 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户遇到 Python 报错、traceback、AttributeError、ImportError 等 bug 需要调试",
         "task_types": ["CODER"],
         "priority": 80,
+        "executor_tools": ["read_file_snippet", "find_file", "execute_python"],
+        "plan_template": [
+            "读取错误信息或问题代码文件",
+            "分析完整 traceback，从最末帧定位根本原因",
+            "提炼最小可复现代码片段",
+            "用 diff 格式或完整替换块给出修复代码",
+            "说明如何防止同类问题复发（类型检查/防御性断言等）",
+        ],
         "prompt": (
             "\n\n## 🐍 领域要求：Python 专项调试\n"
             "- 优先读取完整 traceback，从最末帧（实际出错位置）逆向分析调用链\n"
@@ -1053,6 +1087,13 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要读取 PDF、解析 PDF 内容、提取 PDF 文字、分析 PDF 文档",
         "task_types": ["RESEARCH", "FILE_GEN", "DOC_ANNOTATE", "CHAT"],
         "priority": 60,
+        "executor_tools": ["read_file_snippet", "find_file", "summarize_file"],
+        "plan_template": [
+            "定位目标 PDF 文件路径（未知时用 find_file 搜索）",
+            "调用 read_file_snippet 读取前 8000 字内容",
+            "若内容被截断则再调用 summarize_file 获取针对性摘要",
+            "基于读取内容直接回答用户问题",
+        ],
         "prompt": (
             "\n\n## 📕 文件工具：PDF 深度解析\n"
             "\n**工具调用规范：**\n"
@@ -1081,6 +1122,14 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要读取或查看各种类型的文件，需要解析文件内容",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT", "DOC_ANNOTATE"],
         "priority": 61,
+        "executor_tools": ["read_file_snippet", "find_file", "summarize_file", "list_directory"],
+        "plan_template": [
+            "识别文件扩展名确定读取策略",
+            "路径不确定时用 find_file 定位文件",
+            "按格式调用对应工具读取内容（PDF/DOCX/XLSX/CSV/TXT）",
+            "文件过长时改用 summarize_file 获取针对性摘要",
+            "整理并呈现文件内容，回答用户问题",
+        ],
         "prompt": (
             "\n\n## 📂 文件工具：多格式文件读取规范\n"
             "\n**按扩展名选择读取方式（严格遵守）：**\n"
@@ -1159,6 +1208,14 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要分析表格数据、Excel 文件、CSV 数据，进行统计或数据解读",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT"],
         "priority": 63,
+        "executor_tools": ["read_file_snippet", "find_file", "execute_python"],
+        "plan_template": [
+            "定位并读取 Excel/CSV 数据文件",
+            "分析数据结构（行列数、字段名、数据类型、缺失值）",
+            "执行统计分析（均值/中位数/分布/趋势）",
+            "识别数据清洗问题（重复行/异常值/格式不一致）",
+            "生成结构化分析报告或可视化建议",
+        ],
         "prompt": (
             "\n\n## 📊 工作流：表格数据深度分析\n"
             "\n**第一步：读取表格**\n"
@@ -1578,6 +1635,8 @@ class SkillManager:
         {}
     )  # id → original built-in prompt (O(1) lookup)
     _initialized: bool = False
+    # 单轮注入的用户启用 Skill 数上限（系统 Skill 不计入），防止 token 膨胀
+    _MAX_ACTIVE_INJECT: int = 20
 
     # ── 初始化 ─────────────────────────────────────────────────────────────────
     @classmethod
@@ -1822,6 +1881,9 @@ class SkillManager:
         冲突处理：当两个互相冲突的 Skill 同时启用时，优先级（priority）更高的
         skill 正常注入，低优先级的 skill 被静默抑制（但仍保持「启用」状态供用户查看）。
 
+        Token 膨胀保护：单轮注入的用户启用 Skill 数（不含长期记忆）超过
+        _MAX_ACTIVE_INJECT 时，按 priority 降序仅保留靠前的 skill，其余跳过。
+
         Args:
             base_instruction: 原始系统指令文本
             task_type:        当前任务类型（如 "CHAT"），None 表示通用
@@ -1838,6 +1900,7 @@ class SkillManager:
         active_prompts = []
         memory_block = ""
         seen_ids: set = set()  # 防止重复注入
+        _inject_skill_count = 0  # 已注入的非系统 Skill 计数（用于上限保护）
 
         # ── 预计算冲突：找出所有因冲突被抑制的 skill_id ────────────────────
         suppressed_ids: set = set()
@@ -1871,10 +1934,11 @@ class SkillManager:
         for skill_id, s in all_skill_items:
             if skill_id in seen_ids:
                 continue
-            seen_ids.add(skill_id)
 
             if not s.get("enabled", False):
                 continue
+
+            seen_ids.add(skill_id)
 
             # 跳过被冲突抑制的 Skill
             if skill_id in suppressed_ids:
@@ -1902,21 +1966,35 @@ class SkillManager:
                     logger.debug(f"[SkillManager] 长期记忆注入跳过: {_me}")
                 continue  # 长期记忆不走普通 prompt 通道
 
+            # ── 注入上限检测（长期记忆走了 continue，不计入此计数）─────────────
+            if _inject_skill_count >= cls._MAX_ACTIVE_INJECT:
+                logger.debug(
+                    "[SkillManager] 注入上限 (%d) 已达，跳过低优先级 Skill: %s",
+                    cls._MAX_ACTIVE_INJECT, skill_id,
+                )
+                continue
+
             # 优先使用新版 SkillDefinition 的 render_prompt()
             skill_def = cls._def_registry.get(skill_id)
-            if skill_def:
-                _is_domain = (
-                    getattr(skill_def.category, "value", skill_def.category) == "domain"
-                )
-                p = skill_def.render_prompt(
-                    with_examples=_is_domain,
-                    with_output_spec=_is_domain,
-                ).strip()
+            if skill_def and skill_def.system_prompt_template:
+                p = skill_def.render_prompt().strip()
             else:
                 p = s.get("prompt", "").strip()
 
             if p:
+                # 注入 plan_template（仅在 prompt 中尚未包含执行步骤时追加，避免重复）
+                pt = (
+                    (getattr(skill_def, "plan_template", None) if skill_def else None)
+                    or s.get("plan_template", [])
+                )
+                if pt and "执行步骤" not in p:
+                    p = p + (
+                        "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
+                        + "\n".join(f"{i+1}. {step}" for i, step in enumerate(pt))
+                    )
                 active_prompts.append(p)
+
+            _inject_skill_count += 1
 
             # ── Word 模板 skill：追加模板字段说明 ─────────────────────────────
             tmpl_path_rel = s.get("template_path")
@@ -1964,17 +2042,18 @@ class SkillManager:
                 logger.debug(f"[SkillManager] 临时 Skill 不存在，跳过: {skill_id}")
                 continue
             skill_def = cls._def_registry.get(skill_id)
-            if skill_def:
-                _is_domain = (
-                    getattr(skill_def.category, "value", skill_def.category) == "domain"
-                )
-                p = skill_def.render_prompt(
-                    with_examples=_is_domain,
-                    with_output_spec=_is_domain,
-                ).strip()
+            if skill_def and skill_def.system_prompt_template:
+                p = skill_def.render_prompt().strip()
             else:
                 p = s.get("prompt", "").strip()
             if p:
+                # 临时 skill 也注入 plan_template（不注入 examples，避免 token 浪费）
+                pt = getattr(skill_def, "plan_template", None) if skill_def else None
+                if pt:
+                    p = p + (
+                        "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
+                        + "\n".join(f"{i+1}. {step}" for i, step in enumerate(pt))
+                    )
                 auto_prompts.append(p)
                 logger.debug(f"[SkillManager] 🤖 临时注入 Auto-Skill: {skill_id}")
 
@@ -2107,6 +2186,9 @@ class SkillManager:
             "task_types": skill_def.task_types,
             "prompt": skill_def.render_prompt(),
             "enabled": skill_def.enabled,
+            # 执行层增强字段（供 inject_into_prompt auto-skill 路径使用）
+            "executor_tools": list(getattr(skill_def, "executor_tools", None) or []),
+            "plan_template": list(getattr(skill_def, "plan_template", None) or []),
         }
 
         cls._apply_default_triggers(skill_def)
@@ -2198,29 +2280,27 @@ class SkillManager:
                     with open(skill_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     skill_def = SkillDefinition.from_dict(data)
-
                     if skill_def.id in cls._def_registry:
-                        # 内置 Skill 已存在 —— 仅合并「能力扩展」字段：
-                        #   plan_template / executor_tools / entry_point / bound_tools
-                        # 其他核心字段（prompt / enabled 等）由内置版本维护，
-                        # 避免用户误覆盖内置行为。
+                        # 已有内置注册：将 JSON 文件的增强字段合并进去
+                        # （trigger_keywords / plan_template / executor_tools / examples / prompt）
+                        # 保留 enabled 状态由 _load_states_from_settings 管理，不从 JSON 覆盖
                         existing = cls._def_registry[skill_def.id]
+                        if skill_def.trigger_keywords:
+                            existing.trigger_keywords = skill_def.trigger_keywords
                         if skill_def.plan_template:
                             existing.plan_template = skill_def.plan_template
                         if skill_def.executor_tools:
                             existing.executor_tools = skill_def.executor_tools
-                        if skill_def.entry_point:
-                            existing.entry_point = skill_def.entry_point
-                        if skill_def.bound_tools:
-                            existing.bound_tools = skill_def.bound_tools
-                        if skill_def.output_spec and skill_def.output_spec.description:
-                            existing.output_spec = skill_def.output_spec
                         if skill_def.examples:
                             existing.examples = skill_def.examples
-                        logger.debug(
-                            "[SkillManager] 内置 Skill '%s' 能力层已由 JSON 扩展",
-                            skill_def.id,
-                        )
+                        if skill_def.prompt:
+                            existing.prompt = skill_def.prompt
+                            # 同步到 _registry 的 prompt 字段
+                            reg_entry = cls._registry.get(skill_def.id)
+                            if reg_entry:
+                                reg_entry["prompt"] = skill_def.render_prompt()
+                                reg_entry["plan_template"] = skill_def.plan_template
+                        logger.debug(f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}")
                     else:
                         cls._def_registry[skill_def.id] = skill_def
                         entry = {
@@ -2236,6 +2316,7 @@ class SkillManager:
                             "task_types": skill_def.task_types,
                             "prompt": skill_def.render_prompt(),
                             "enabled": skill_def.enabled,
+                            "plan_template": skill_def.plan_template,
                         }
                         # 保留 template_path 和 bound_tools（若 JSON 中有）
                         if data.get("template_path"):
