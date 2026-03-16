@@ -17,6 +17,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Interactions-only models: cannot use client.models.generate_content()
+# Must be routed through rc.interactions.create(agent=...) instead.
+# NOTE: gemini-3-flash-preview and gemini-3-pro-preview are regular models
+# (use generate_content). Only deep-research-* are actual Interactions API agents.
+_INTERACTIONS_ONLY_MODELS: frozenset = frozenset({
+    "deep-research-pro-preview-12-2025",  # Research agent: Interactions API only
+})
+# No background=True restriction needed for current interactions models
+_NO_BACKGROUND_MODELS: frozenset = frozenset()
+
 
 class GeminiProvider(LLMProvider):
     """Google Gemini specific implementation of LLMProvider (google.genai SDK)"""
@@ -62,6 +72,12 @@ class GeminiProvider(LLMProvider):
     ) -> Union[Dict[str, Any], Generator[Dict[str, Any], None, None]]:
         if not self.client or not types:
             raise ImportError("google.genai client not initialized")
+
+        # Route interactions-only models through Interactions API transparently
+        if model in _INTERACTIONS_ONLY_MODELS:
+            return self._call_via_interactions_api(
+                model, prompt, sys_instruction=system_instruction, stream=stream
+            )
 
         try:
             config = types.GenerateContentConfig(
@@ -326,3 +342,118 @@ class GeminiProvider(LLMProvider):
                 "content": text,
                 "finish_reason": finish_reason,
             }
+
+    def _call_via_interactions_api(
+        self,
+        model_id: str,
+        prompt,
+        sys_instruction: str = None,
+        stream: bool = False,
+        timeout: float = 90.0,
+    ):
+        """Route interactions-only models (e.g. deep-research-pro-preview) via rc.interactions.create().
+
+        Returns the same dict format as generate_content() so all callers work unchanged.
+        For stream=True, yields the full response as a single chunk (Interactions API has
+        no token-level streaming).
+        """
+        flat = self._flatten_prompt_to_text(prompt)
+        full_input = flat
+        if sys_instruction:
+            full_input = f"[\u7cfb\u7edf\u6307\u4ee4]\n{sys_instruction}\n\n[\u7528\u6237\u8f93\u5165]\n{flat}"
+
+        # Build a client with extended timeout (interactions can take up to 5 min)
+        try:
+            import httpx
+            from google.genai._api_client import HttpOptions as _HttpOptions
+            http_client = httpx.Client(
+                timeout=httpx.Timeout(300.0, connect=30.0), verify=True
+            )
+            rc = genai.Client(
+                api_key=self.api_key,
+                http_options=_HttpOptions(api_version="v1beta", httpx_client=http_client),
+            )
+        except Exception:
+            rc = self.client
+
+        background = model_id not in _NO_BACKGROUND_MODELS
+        interaction = rc.interactions.create(
+            agent=model_id,
+            input=full_input[:80000],
+            background=background,
+            stream=False,
+        )
+
+        interaction_id = getattr(interaction, "id", None)
+        status = getattr(interaction, "status", "")
+        start_wait = time.time()
+
+        while (
+            interaction_id
+            and status not in ("completed", "failed", "cancelled")
+            and (time.time() - start_wait) < timeout
+        ):
+            time.sleep(2)
+            interaction = rc.interactions.get(interaction_id)
+            status = getattr(interaction, "status", "")
+
+        if status not in ("completed", "failed", "cancelled"):
+            try:
+                rc.interactions.cancel(interaction_id)
+            except Exception:
+                pass
+            raise TimeoutError(
+                f"Interactions API timeout ({timeout}s) model={model_id}"
+            )
+
+        text = (
+            self._get_interactions_text(getattr(interaction, "outputs", None))
+            or self._get_interactions_text(interaction)
+        ).strip()
+
+        if stream:
+            # Interactions API has no token-level streaming; emit as a single chunk
+            def _single_chunk():
+                yield {"content": text, "finish_reason": "stop"}
+            return _single_chunk()
+
+        return {"content": text, "tool_calls": [], "usage": {}}
+
+    @staticmethod
+    def _get_interactions_text(obj) -> str:
+        """Recursively extract text from an Interactions API response object."""
+        if obj is None:
+            return ""
+        if isinstance(obj, str):
+            return obj
+        if hasattr(obj, "text") and obj.text:
+            return str(obj.text)
+        if hasattr(obj, "parts"):
+            return " ".join(
+                str(p.text)
+                for p in (obj.parts or [])
+                if hasattr(p, "text") and p.text
+            )
+        if hasattr(obj, "outputs"):
+            texts = [
+                GeminiProvider._get_interactions_text(o)
+                for o in (obj.outputs or [])
+            ]
+            return "\n".join(t for t in texts if t)
+        return ""
+
+    @staticmethod
+    def _flatten_prompt_to_text(prompt) -> str:
+        """Flatten a str or message-list prompt to plain text for Interactions API."""
+        if isinstance(prompt, str):
+            return prompt
+        if not isinstance(prompt, list):
+            return str(prompt)
+        lines = []
+        for msg in prompt:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if content:
+                label = "\u52a9\u624b" if role in ("assistant", "model") else "\u7528\u6237"
+                lines.append(f"{label}: {content}")
+        return "\n".join(lines)
