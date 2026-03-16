@@ -402,7 +402,7 @@ class UnifiedAgent(Agent):
                         provider=self.llm,
                         prompt=current_history,
                         preferred_model=self.model_id,
-                        task_type=getattr(self, "_task_type", "CHAT") or "CHAT",
+                        task_type=_task_type or self.task_type or "CHAT",
                         system_instruction=_effective_instruction,
                         tools=tools_def if tools_def else None,
                         stream=False,
