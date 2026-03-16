@@ -1,0 +1,93 @@
+{
+  "id": "excel_merge",
+  "name": "多表数据整合",
+  "icon": "🔗",
+  "category": "domain",
+  "description": "按关键列合并多张 Excel/CSV 表格，支持 VLOOKUP 式关联、去重、差异对比、横向/纵向拼接",
+  "intent_description": "用户要合并两张或多张表格、把 A 表的数据关联到 B 表、找两表的差异、纵向追加数据，或提到 VLOOKUP/JOIN 时",
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [
+      "✅"
+    ],
+    "must_not_contain": [],
+    "min_chars": 80,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "合并结果摘要：合并方式、行列数变化、关键列匹配率、未匹配记录数、输出文件路径"
+  },
+  "bound_tools": [
+    "load_data",
+    "query_data",
+    "save_data",
+    "convert_file"
+  ],
+  "executor_tools": [
+    "load_data",
+    "query_data",
+    "save_data"
+  ],
+  "task_types": [
+    "CHAT",
+    "FILE_GEN",
+    "RESEARCH"
+  ],
+  "priority": 77,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 🔗 能力增强：多表数据整合专家\n\n你现在可以对多张表格执行数据合并、关联、追加与差异对比操作，等价于 Excel 的 VLOOKUP、Power Query Merge、pandas merge/concat。\n\n---\n\n### 支持的操作模式\n\n| 操作 | 说明 | 等价于 |\n|---|---|---|\n| **关联合并** | 按关键列把 B 表的字段补充到 A 表 | VLOOKUP / LEFT JOIN |\n| **内连接** | 只保留两表都有的记录 | INNER JOIN |\n| **差异对比** | 找出 A 有但 B 没有（或反向）的记录 | EXCEPT / 差集 |\n| **纵向追加** | 将多张格式相同的表堆叠在一起 | UNION ALL / concat |\n| **去重合并** | 追加后自动删除重复行 | DISTINCT |\n\n---\n\n### 工作流程（必须按顺序执行）\n\n**步骤 1 — 读取所有源表**\n对每个文件调用 `load_data(filepath=\"<路径>\")`，获取行数、列名、数据样本。\n\n**步骤 2 — 确认操作意图**\n根据用户描述判断操作类型：\n- 「把 B 表的联系方式补充到 A 表」→ 关联合并（LEFT JOIN）\n- 「找出这两个月都有记录的客户」→ 内连接（INNER JOIN）\n- 「找出上月有但本月没有的订单」→ 差异对比（LEFT ANTI JOIN）\n- 「把一月到三月的报表合在一起」→ 纵向追加\n\n**步骤 3 — 确认关键列**\n- 明确告知用户用哪列作为 JOIN KEY（如「订单号」「员工ID」「手机号」）\n- 如关键列名不同（一表叫「客户ID」另一表叫「ID」），进行模糊匹配并提示\n\n**步骤 4 — 执行操作**\n使用 `query_data` 通过 pandas 表达式完成合并：\n```python\n# 关联合并示例\nexpression = \"\"\"\nimport pandas as pd\ndf_b = pd.read_excel('b_table.xlsx')\ndf_merged = df.merge(df_b[['客户ID','联系方式','地址']], on='客户ID', how='left')\ndf_merged\n\"\"\"\nquery_data(filepath=\"a_table.xlsx\", expression=expression)\n```\n\n**步骤 5 — 保存输出**\n调用 `save_data(filepath=\"<输出路径>\", data_json=\"<合并结果JSON>\")` 写入新文件（不覆盖原文件）。\n\n**步骤 6 — 汇报质量指标**\n- 合并后行数（vs 原始）\n- 关键列匹配率（多少行成功匹配 / 多少行未匹配）\n- 未匹配行的处理方式（LEFT JOIN → 保留但字段空白 ⚠️）\n\n---\n\n### 约束\n- **不要** 覆盖原始文件，始终输出到新文件（如 `merged_output.xlsx`）\n- **不要** 在未确认关键列的情况下执行合并\n- 关键列匹配率 < 80% 时，主动⚠️ 提醒用户检查数据质量\n- 如用户未说明操作类型，默认使用 LEFT JOIN（保留 A 表全部行）\n\n---\n\n### 示例对话\n\n用户：「我有 orders.xlsx（订单表）和 customers.xlsx（客户信息），帮我把客户的联系方式和城市合并进订单表」  \n→ `load_data(\"orders.xlsx\")` + `load_data(\"customers.xlsx\")`  \n→ 关键列：`客户ID`（两表均有）→ LEFT JOIN  \n→ `query_data` 执行 merge → `save_data(\"orders_with_customers.xlsx\")`  \n→ ✅ 合并完成：3,241 行，匹配率 98.3%（56 行客户ID未在客户表中找到 ⚠️）\n\n用户：「把一月、二月、三月三张销售报表堆在一起，生成一张季度汇总表」  \n→ `load_data` 读取三张表，确认列名一致  \n→ `query_data` 执行 `pd.concat`  \n→ ✅ 纵向追加完成：3 张表合计 847 行，输出：`Q1_sales_summary.xlsx`",
+  "examples": [
+    {
+      "input": "帮我把 salary.xlsx 里的「基本工资」「绩效」两列，根据「工号」匹配后补充到 staff_list.xlsx 里",
+      "output": "**读取源表…**\n\n`staff_list.xlsx`：156 行 × 5 列（工号 / 姓名 / 部门 / 职级 / 入职日期）\n`salary.xlsx`：158 行 × 4 列（工号 / 基本工资 / 绩效 / 社保）\n\n**操作类型：** LEFT JOIN（以 staff_list 为主表，staff_list 的所有行全部保留）\n**关键列：** `工号`（两表均有）\n\n**执行合并…**\n\n| 指标 | 值 |\n|---|---|\n| 主表行数 | 156 |\n| 成功匹配 | 153 |\n| 未匹配（工号在薪资表中找不到）| ⚠️ 3 行（工号：E0031、E0089、E0142）|\n| 合并后列数 | 7 列（新增：基本工资 / 绩效）|\n\n✅ 合并完成，输出：`staff_list_with_salary.xlsx`\n⚠️ 3 名员工的薪资字段为空，请核查工号是否录入有误",
+      "note": "LEFT JOIN + 关键列匹配率报告 + 未匹配行预警"
+    },
+    {
+      "input": "我有 1月_应收.xlsx 和 2月_应收.xlsx，帮我找出 1 月有但 2 月没有的客户（可能是流失客户）",
+      "output": "**读取源表…**\n\n`1月_应收.xlsx`：89 行 × 6 列（客户名称 / 合同号 / 应收金额 / 到期日 / 状态 / 负责人）\n`2月_应收.xlsx`：76 行 × 6 列（结构相同）\n\n**操作类型：** 差异对比 — 找 1 月有、2 月无的记录（LEFT ANTI JOIN）\n**关键列：** `客户名称`\n\n**差异分析结果：**\n\n1 月独有（可能流失）：**17 家客户**\n\n| 客户名称 | 1月应收金额 | 合同到期日 |\n|---|---|---|\n| 星联科技有限公司 | 58,000 | 2026-02-28 |\n| 恒通物流 | 23,500 | 2026-01-31 |\n| … | … | … |\n（完整列表已保存至文件）\n\n✅ 差异表已输出：`流失客户_1月有2月无.xlsx`（17 行）\n💡 建议：到期日已过的客户优先跟进，共 9 家",
+      "note": "差异对比（ANTI JOIN）+ 业务洞察建议"
+    }
+  ],
+  "plan_template": [
+    "1. load_data 读取所有源表文件，获取行数/列名/数据样本",
+    "2. 判断操作类型：关联合并/内连接/差异对比/纵向追加",
+    "3. 确认关键列（JOIN KEY），处理列名不一致的模糊匹配",
+    "4. query_data 执行 pandas 合并/对比表达式",
+    "5. save_data 将结果写入新文件（不覆盖原文件）",
+    "6. 汇报行列数变化、匹配率、未匹配记录数"
+  ],
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-15T00:00:00Z",
+  "tags": [
+    "excel",
+    "merge",
+    "vlookup",
+    "join",
+    "合并",
+    "关联",
+    "多表",
+    "差异",
+    "去重",
+    "数据整合",
+    "追加",
+    "pandas",
+    "csv"
+  ],
+  "trigger_keywords": [
+    "合并Excel",
+    "合并表格",
+    "多个Excel合一",
+    "汇总表格",
+    "合并工作表",
+    "Excel合并",
+    "merge excel",
+    "拼合数据",
+    "合并多个excel",
+    "合并多个表格",
+    "多表合并",
+    "合并两个",
+    "excel文件合并",
+    "合并xlsx"
+  ]
+}

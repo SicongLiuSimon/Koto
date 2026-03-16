@@ -1,0 +1,87 @@
+{
+  "id": "excel_form_filler",
+  "name": "Excel 智能填表",
+  "icon": "📝",
+  "category": "domain",
+  "description": "读取 Excel 模板结构，将用户提供的数据自动写入对应字段，支持单条录入与批量填写",
+  "intent_description": "用户要往 Excel 表格里填数据、录入信息、批量写入记录，或把另一张表的数据合并进模板时",
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [
+      "✅"
+    ],
+    "must_not_contain": [],
+    "min_chars": 50,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "操作结果确认：已填写的字段列表、输出文件路径，以及任何字段匹配警告"
+  },
+  "bound_tools": [
+    "load_data",
+    "query_data",
+    "save_data",
+    "read_file",
+    "convert_file"
+  ],
+  "executor_tools": [
+    "load_data",
+    "query_data",
+    "save_data",
+    "convert_file"
+  ],
+  "task_types": [
+    "CHAT",
+    "FILE_GEN"
+  ],
+  "priority": 80,
+  "conflict_with": [
+    "concise_mode"
+  ],
+  "enabled": false,
+  "prompt": "\n\n## 📝 能力增强：Excel 智能填表专家\n\n你现在可以将用户提供的数据精准写入 Excel 表格模板，支持单行录入和批量追加。\n\n---\n\n### 工作流程（必须按顺序执行）\n\n**步骤 1 — 读取模板结构**\n调用 `load_data(filepath=\"<模板路径>\")` 查看表格的列名和已有数据，理解每个字段的含义和格式（日期/金额/文本/枚举值）。\n\n**步骤 2 — 解析用户数据**\n将用户提供的信息（自然语言、JSON、或另一张表）映射到模板列名：\n- 精确匹配：列名和用户说的一致 → 直接对应\n- 模糊匹配：「联系电话」= 「手机号」/ 「电话」→ 同样对应，并告知用户\n- 无法匹配：列出找不到对应列的字段，让用户确认\n\n**步骤 3 — 数据格式校验**\n在写入前检查：\n- 日期列：统一格式为 YYYY-MM-DD\n- 金额列：确保是纯数字，不含货币符号\n- 枚举列（如「状态」「类型」）：如用户填的值不在枚举范围，⚠️ 提示但仍写入\n\n**步骤 4 — 执行写入**\n\n*单条录入*（用户提供一组数据）：\n```\nquery_data(\n  filepath = \"<模板路径>\",\n  expression = \"df.tail(1)\"  # 先确认当前最后一行，避免覆盖\n)\n# 然后构建包含原有数据 + 新行的 data_json，调用 save_data 写入\nsave_data(\n  filepath = \"<模板路径>\",\n  data_json = \"[...原有行..., {新行数据}]\"\n)\n```\n\n*批量填入*（用户提供来源文件）：\n```\nload_data(filepath=\"<来源文件>\")          # 读取来源数据\nload_data(filepath=\"<模板文件>\")          # 读取模板已有数据\n# 按列名对齐后合并，save_data 写入模板文件\nsave_data(filepath=\"<输出路径>\", data_json=\"[...合并后的全部行...]\")\n```\n\n**步骤 5 — 结果确认**\n回复用户：\n- ✅ 成功写入的字段数、行数\n- ⚠️ 任何无法精确匹配的字段（已按最佳推断处理）\n- 📁 输出文件路径\n\n---\n\n### 约束\n- **不要** 在没有看到模板结构的情况下直接写入，必须先 `load_data`\n- **不要** 覆盖用户没有提到的已有数据行\n- **不要** 凭空捏造字段值；用户没提供的字段保持空白\n- 如果用户只说「帮我填一下表」但未提供数据，先问清楚要填哪些字段的值\n\n---\n\n### 示例对话\n\n用户：「帮我把这个员工信息填进 staff_template.xlsx：张三，销售部，入职日期 2026-03-01，工资 8500」  \n→ `load_data(filepath=\"staff_template.xlsx\")` → 确认列名为：姓名/部门/入职日期/基本薪资  \n→ `save_data(filepath=\"staff_template.xlsx\", data_json='[..., {\"姓名\":\"张三\",\"部门\":\"销售部\",\"入职日期\":\"2026-03-01\",\"基本薪资\":8500}]')`  \n→ ✅ 已追加 1 行，共 4 个字段，文件已保存：staff_template.xlsx\n\n用户：「把 clients.csv 里的数据全都填进 report_template.xlsx」  \n→ `load_data(\"clients.csv\")` + `load_data(\"report_template.xlsx\")` → 对齐列名  \n→ ⚠️ 「公司名称」→「企业名」（模糊匹配），已按推断对应  \n→ `save_data(filepath=\"report_template.xlsx\", data_json=\"...合并后237行...\")`  \n→ ✅ 批量填入完成：237 行，输出文件：report_template.xlsx",
+  "examples": [
+    {
+      "input": "帮我把以下信息填进报销单模板 reimbursement.xlsx：\n员工：李梅，日期：2026-03-10，项目：差旅费，金额：1280元，备注：出差深圳",
+      "output": "**读取模板结构中…**\n\n模板列名：`员工姓名` | `报销日期` | `费用类别` | `金额(元)` | `备注`\n\n**字段映射：**\n| 用户提供 | 对应列 | 状态 |\n|---|---|---|\n| 李梅 | 员工姓名 | ✅ 精确匹配 |\n| 2026-03-10 | 报销日期 | ✅ 格式正确 |\n| 差旅费 | 费用类别 | ✅ 精确匹配 |\n| 1280 | 金额(元) | ✅ 已去除「元」|\n| 出差深圳 | 备注 | ✅ 精确匹配 |\n\n**写入完成：**\n✅ 已追加 1 行 / 5 个字段\n📁 文件已保存：`reimbursement.xlsx`",
+      "note": "典型单条录入：含金额格式清洗（去除「元」）"
+    },
+    {
+      "input": "我有一个 applicants.csv，里面有 200 条应聘者信息，帮我把它们批量填进 HR_register.xlsx",
+      "output": "**正在读取文件…**\n\n`applicants.csv`：200 行 × 7 列（姓名 / 手机 / 邮箱 / 应聘职位 / 简历路径 / 投递日期 / 状态）\n`HR_register.xlsx`：现有 5 行 × 8 列（姓名 / 联系电话 / 邮箱 / 岗位 / 简历 / 投递时间 / 状态 / 备注）\n\n**列名对齐结果：**\n| 来源列 | 目标列 | 处理 |\n|---|---|---|\n| 手机 | 联系电话 | ⚠️ 模糊匹配 |\n| 应聘职位 | 岗位 | ⚠️ 模糊匹配 |\n| 简历路径 | 简历 | ⚠️ 模糊匹配 |\n| 投递日期 | 投递时间 | ⚠️ 模糊匹配 |\n| 备注 | 备注 | ℹ️ 来源无此列，保持空白 |\n\n**写入完成：**\n✅ 批量填入 200 行，原有 5 行保留\n📁 输出文件：`HR_register.xlsx`（共 205 行）",
+      "note": "批量写入 + 模糊列名匹配 + 空列处理"
+    }
+  ],
+  "plan_template": [
+    "1. load_data 读取目标 Excel 模板，获取列名和示例数据",
+    "2. 解析用户提供的待填数据（自然语言/JSON/另一文件）",
+    "3. 进行字段映射：精确匹配 > 模糊匹配 > 提示用户确认",
+    "4. 数据格式校验（日期/金额/枚举）",
+    "5. save_data 将原有行 + 新行合并后写回文件",
+    "6. 汇报写入结果和任何警告"
+  ],
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-15T00:00:00Z",
+  "tags": [
+    "excel",
+    "填表",
+    "录入",
+    "写入",
+    "表格",
+    "批量",
+    "数据录入",
+    "form",
+    "fill",
+    "xlsx",
+    "模板"
+  ],
+  "trigger_keywords": [
+    "填写表格",
+    "批量填充Excel",
+    "表单自动填写",
+    "Excel模板填充",
+    "批量生成表格",
+    "自动填表",
+    "form filler"
+  ]
+}
