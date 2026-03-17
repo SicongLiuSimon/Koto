@@ -851,7 +851,8 @@ async function deleteSession(sessionName, event) {
                 currentSession = null;
                 document.getElementById('chatTitle').textContent = '选择或创建对话';
                 const container = document.getElementById('chatMessages');
-                container.innerHTML = document.getElementById('welcomeScreen').outerHTML;
+                const welcomeEl = document.getElementById('welcomeScreen');
+                container.innerHTML = welcomeEl ? welcomeEl.outerHTML : '';
             }
             
             console.log(`[DELETE] 已删除话题 ${sessionName}，UI 实时更新`);
