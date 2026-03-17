@@ -1359,6 +1359,121 @@ a { color: var(--accent-primary); }
 @keyframes slideIn { from { transform: translateY(-10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes slideOut { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-10px); opacity: 0; } }
 
+/* Toast 通知堆叠容器 */
+#notificationStack {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 10000;
+    pointer-events: none;
+}
+.notification {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    color: white;
+    font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    pointer-events: all;
+    animation: slideIn 0.3s ease;
+    min-width: 200px;
+    max-width: 360px;
+}
+.notification.notif-hiding { animation: slideOut 0.3s ease forwards; }
+.notification-info    { background: #3b82f6; }
+.notification-success { background: #22c55e; }
+.notification-error   { background: #ef4444; }
+.notification-warning { background: #f59e0b; }
+.notif-dismiss {
+    background: transparent;
+    border: none;
+    color: rgba(255,255,255,0.75);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+    transition: color 0.1s;
+}
+.notif-dismiss:hover { color: white; }
+
+/* 返回底部浮动按钮（仅生成中+用户上滑时显示） */
+.back-to-bottom-btn {
+    position: absolute;
+    bottom: 16px;
+    right: 20px;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    transition: all 0.2s;
+    animation: slideIn 0.2s ease;
+}
+.back-to-bottom-btn:hover {
+    background: var(--bg-hover);
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+/* 消息操作栏（悬浮时显示） */
+.message-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.message:hover .message-actions { opacity: 1; }
+.message.user .message-actions { justify-content: flex-end; }
+.msg-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.5;
+}
+.msg-action-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+/* 外部链接：显示跳出图标，提示用户会在系统浏览器打开 */
+.message-body a.ext-link,
+.message-body a[href^="http://"],
+.message-body a[href^="https://"] {
+    color: var(--accent-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+.message-body a.ext-link::after {
+    content: ' ↗';
+    font-size: 0.75em;
+    opacity: 0.6;
+}
+
 /* ===== Apps (taskbar/windows) ===== */
 .apps-container { position: fixed; bottom: 70px; right: 16px; z-index: 45; pointer-events: none; }
 .app-window { position: fixed; min-width: 400px; min-height: 300px; max-width: 820px; max-height: 620px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 16px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; pointer-events: all; overflow: hidden; }
@@ -2349,7 +2464,6 @@ body.desktop-mode .pill-btn {
     border-top-color: var(--accent-primary, #63c6ff);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
-    flex-shrink: 0;
 }
 .planning-skills {
     display: inline-flex;
@@ -3606,6 +3720,7 @@ body.desktop-mode .pill-btn {
     border-radius: var(--radius-md) !important;
     padding: 8px 10px !important;
     font-size: 13px;
+    overflow: visible !important;
 }
 
 /* ── Scrollbar: thinner and subtler (macOS style) ── */

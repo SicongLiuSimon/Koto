@@ -232,7 +232,37 @@
             padding: 3px 8px; border-radius: 8px;
             background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.2);
             margin-top: 4px; text-align: center; display: none;
+            cursor: default;
         }
+        /* jrp-tooltip is appended to <body> so it escapes overflow:hidden sidebar */
+        #jrpFloatTip {
+            position: fixed;
+            background: #1a2235;
+            border: 1px solid rgba(99,198,255,.3);
+            border-radius: 10px;
+            padding: 10px 12px;
+            min-width: 210px; max-width: 280px;
+            box-shadow: 0 10px 28px rgba(0,0,0,.55);
+            z-index: 99999;
+            text-align: left;
+            pointer-events: none;
+            display: none;
+        }
+        .jrp-tip-section {
+            font-size: 10px; font-weight: 700; color: var(--accent-primary);
+            margin-bottom: 5px; margin-top: 6px; letter-spacing: .04em;
+        }
+        .jrp-tip-section:first-child { margin-top: 0; }
+        .jrp-tip-row {
+            display: flex; gap: 6px; align-items: baseline;
+            font-size: 11px; color: #c8d8ee; margin-bottom: 4px;
+        }
+        .jrp-tip-type {
+            font-size: 10px; background: rgba(99,198,255,.15);
+            border-radius: 4px; padding: 1px 5px;
+            color: var(--accent-primary); flex-shrink: 0;
+        }
+        .jrp-tip-input { color: #a0b4cc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* ── Active Skills Pill Bar (above chat input) ──────────── */
         #chat-skill-bar {
@@ -2341,8 +2371,14 @@
                     body: JSON.stringify({enabled: false})
                 });
                 if (!res.ok) throw new Error('toggle failed');
-                await refreshActiveSkills();
-                // Also sync the skills panel card if open
+                // Use window.refreshActiveSkills (wrapped version) so the skills panel
+                // also re-renders if it's open
+                if (typeof window.refreshActiveSkills === 'function') {
+                    await window.refreshActiveSkills();
+                } else {
+                    await refreshActiveSkills();
+                }
+                // Reload skills panel data so stale "enabled" state is cleared
                 if (typeof window.spLoadSkills === 'function') window.spLoadSkills();
             } catch (e) {
                 console.warn('[Koto] csbDismissSkill error', e);
@@ -2687,6 +2723,7 @@
 
         window.getSpSkills = function() { return _spSkills; };
         window.spRenderCards = spRenderCards;
+        window.spLoadSkills = spLoadSkills;
 
     })();
     </script>

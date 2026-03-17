@@ -214,6 +214,13 @@ async function closeWindow() {
 // 这样可以支持多个对话并行，也能正确处理话题切换
 const sessionStates = new Map();  // sessionName -> { isGenerating, abortController }
 
+// DOM 缓存：当切换到另一个 session 时，将正在生成的 session 的 DOM 节点保存到 Fragment
+// 这样切换回来时能恢复实时流式内容，而不是从服务端加载已保存的历史
+const sessionDomCache = new Map(); // sessionName -> DocumentFragment
+
+// 智能滚动锁：用户上划时暂停自动滚动到底部，避免打断阅读
+let isScrollLocked = false;
+
 function getSessionState(sessionName) {
     if (!sessionStates.has(sessionName)) {
         sessionStates.set(sessionName, {
@@ -258,7 +265,7 @@ function getSessionTaskId(sessionName) {
 // 任务类型到模型的映射
 const TASK_MODELS = {
     'CHAT': 'gemini-3-flash-preview',
-    'CODER': 'gemini-3-pro-preview', 
+    'CODER': 'gemini-3.1-pro-preview',
     'VISION': 'gemini-3-flash-preview',
     'PAINTER': 'nano-banana-pro-preview',
     'VOICE': 'gemini-3-flash-preview',  // 语音模式使用快速模型
@@ -268,47 +275,25 @@ const TASK_MODELS = {
 
 // ================= Notification =================
 function showNotification(message, type = 'info', duration = 3000) {
-    // 创建通知元素
+    // 获取或懒创建通知堆叠容器（垂直排列，避免重叠）
+    let stack = document.getElementById('notificationStack');
+    if (!stack) {
+        stack = document.createElement('div');
+        stack.id = 'notificationStack';
+        document.body.appendChild(stack);
+    }
+
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
-    notification.innerHTML = `<span>${message}</span>`;
-    
-    // 根据类型设置颜色
-    let bgColor;
-    switch (type) {
-        case 'success':
-            bgColor = '#22c55e';
-            break;
-        case 'error':
-            bgColor = '#ef4444';
-            break;
-        case 'warning':
-            bgColor = '#f59e0b';
-            break;
-        default:
-            bgColor = '#3b82f6';
-    }
-    
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 12px 20px;
-        border-radius: 8px;
-        background: ${bgColor};
-        color: white;
-        font-size: 14px;
-        z-index: 10000;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        animation: slideIn 0.3s ease;
-    `;
-    
-    document.body.appendChild(notification);
-    
-    // 指定时间后自动消失
+    notification.innerHTML = `<span>${escapeHtml(message)}</span><button class="notif-dismiss" onclick="this.parentElement.remove()" title="关闭">×</button>`;
+    stack.appendChild(notification);
+
+    // 自动消失
     setTimeout(() => {
-        notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
+        if (notification.parentElement) {
+            notification.classList.add('notif-hiding');
+            setTimeout(() => notification.remove(), 300);
+        }
     }, duration);
 }
 
@@ -361,6 +346,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     setTimeout(initVoice, 500);
     initVoicePanel();
     initProactiveUI();
+
+    // 9. 智能滚动 + 全局快捷键
+    initScrollBehavior();
+    window.addEventListener('keydown', handleGlobalKeyDown);
+
+    // 10. 全局外部链接拦截：防止 webview 导航离开 Koto
+    //     在系统浏览器中打开，而不是在 webview 内跳转
+    document.addEventListener('click', (e) => {
+        const a = e.target.closest('a[data-ext="1"], a[href^="http://"], a[href^="https://"]');
+        if (!a) return;
+        // 忽略已设置 target="_blank" 以外页面打开的链接（保持原行为）
+        if (a.target === '_blank' && !window.pywebview) return;
+        e.preventDefault();
+        const url = a.href;
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
+            window.pywebview.api.open_url(url);
+        } else {
+            // 普通浏览器环境：新标签打开
+            window.open(url, '_blank', 'noopener,noreferrer');
+        }
+    });
 
     // 8. 影子追踪：启动时拉取一次待消息，之后每 5 分钟轮询
     setTimeout(() => {
@@ -544,7 +550,7 @@ function renderSessions(sessions) {
     
     container.innerHTML = sessions.map(session => `
         <div class="session-item ${currentSession === session ? 'active' : ''}" 
-             onclick="selectSession('${session}')">
+             data-session="${escapeHtml(session)}">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
@@ -574,9 +580,19 @@ function goToWelcome() {
             controller.abort();
         }
         setSessionGenerating(currentSession, false);
+        sessionDomCache.delete(currentSession);
+    }
+
+    // 重置发送按钮状态
+    const _sendBtn = document.getElementById('sendBtn');
+    if (_sendBtn) {
+        _sendBtn.classList.remove('generating');
+        _sendBtn.disabled = false;
+        _sendBtn.title = '发送';
     }
     
     currentSession = null;
+    isScrollLocked = false;
     document.getElementById('chatTitle').textContent = '选择或创建对话';
     
     // 取消所有会话的选中状态
@@ -599,8 +615,16 @@ function goToWelcome() {
 }
 
 async function selectSession(sessionName) {
-    // ⭐ 改进：允许多个会话并行运行，不中止前一个会话的任务
-    // 只切换 currentSession 用于 UI 显示和新消息输入，但不中止前一个会话的生成
+    // 离开时：如果当前 session 正在生成，将其 DOM 节点移入 Fragment 缓存
+    // 这样后台流继续写入 bodyEl（引用仍有效），切回来时直接恢复，不会丢失流内容
+    if (currentSession && currentSession !== sessionName && isSessionGenerating(currentSession)) {
+        const _chatContainer = document.getElementById('chatMessages');
+        const _frag = document.createDocumentFragment();
+        while (_chatContainer.firstChild) _frag.appendChild(_chatContainer.firstChild);
+        sessionDomCache.set(currentSession, _frag);
+        console.log(`[SWITCH] DOM 已缓存 session: ${currentSession}`);
+    }
+
     console.log(`[SWITCH] 从 ${currentSession} 切换到 ${sessionName}（保持后台任务运行）`);
     
     currentSession = sessionName;
@@ -609,18 +633,44 @@ async function selectSession(sessionName) {
     // Update active state
     document.querySelectorAll('.session-item').forEach(item => {
         item.classList.remove('active');
-        if (item.querySelector('.session-name').textContent === sessionName) {
+        if (item.dataset.session === sessionName) {
             item.classList.add('active');
         }
     });
+
+    // 同步发送按钮状态：切换后立即反映新 session 的生成状态
+    const _sb = document.getElementById('sendBtn');
+    if (_sb) {
+        if (isSessionGenerating(sessionName)) {
+            _sb.classList.add('generating');
+            _sb.disabled = false;
+            _sb.title = '停止生成';
+        } else {
+            _sb.classList.remove('generating');
+            _sb.disabled = false;
+            _sb.title = '发送';
+        }
+    }
     
-    // Load chat history
-    try {
-        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}`);
-        const data = await response.json();
-        renderChatHistory(data.history);
-    } catch (error) {
-        console.error('Failed to load session:', error);
+    // 恢复或加载聊天内容
+    const _chatContainer = document.getElementById('chatMessages');
+    if (isSessionGenerating(sessionName) && sessionDomCache.has(sessionName)) {
+        // 从缓存恢复 DOM（stream 仍在向 bodyEl 写入，节点引用未变）
+        const _frag = sessionDomCache.get(sessionName);
+        sessionDomCache.delete(sessionName);
+        _chatContainer.innerHTML = '';
+        _chatContainer.appendChild(_frag);
+        scrollToBottomForce();
+        console.log(`[SWITCH] DOM 从缓存恢复 session: ${sessionName}`);
+    } else {
+        // Load chat history
+        try {
+            const response = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}`);
+            const data = await response.json();
+            renderChatHistory(data.history);
+        } catch (error) {
+            console.error('Failed to load session:', error);
+        }
     }
 }
 
@@ -955,7 +1005,7 @@ function renderChatHistory(history) {
         }
     }
     
-    scrollToBottom();
+    scrollToBottomForce();
     highlightCode();
     // 渲染 Mermaid 图表（历史消息中可能包含）
     setTimeout(() => renderMermaidBlocks(), 100);
@@ -1143,6 +1193,18 @@ function renderMessage(role, content, meta = {}) {
         `;
     }
     
+    const actionBar = `
+        <div class="message-actions">
+            ${role === 'assistant' ? `<button class="msg-action-btn" onclick="copyMessageText(this)" title="复制回复">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                复制
+            </button>` : ''}
+            ${role === 'user' ? `<button class="msg-action-btn" onclick="resendMessage(this)" title="重新发送">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>
+                重发
+            </button>` : ''}
+        </div>
+    `;
     return `
         <div class="message ${role}">
             <div class="message-avatar">${avatar}</div>
@@ -1156,6 +1218,7 @@ function renderMessage(role, content, meta = {}) {
                 ${pptHtml}
                 ${imagesHtml}
                 ${filesHtml}
+                ${actionBar}
             </div>
         </div>
     `;
@@ -1166,6 +1229,29 @@ function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// 复制助手消息文本内容
+function copyMessageText(btn) {
+    const msgBody = btn.closest('.message').querySelector('.message-body');
+    const text = msgBody ? msgBody.innerText : '';
+    navigator.clipboard.writeText(text).then(() => {
+        showNotification('已复制到剪贴板', 'success', 1500);
+    }).catch(() => {
+        showNotification('复制失败，请手动选择', 'error', 2000);
+    });
+}
+
+// 将用户消息内容填回输入框（重发）
+function resendMessage(btn) {
+    const msgBody = btn.closest('.message').querySelector('.message-body');
+    if (!msgBody) return;
+    const text = msgBody.innerText.trim();
+    if (!text) return;
+    const input = document.getElementById('messageInput');
+    input.value = text;
+    autoResize(input);
+    input.focus();
 }
 
 async function sendMessage(event) {
@@ -1247,7 +1333,7 @@ async function sendMessage(event) {
     }
     
     container.innerHTML += renderMessage('user', message || '(附件)', { attachment: attachmentInfo, attachments: attachmentList });
-    scrollToBottom();
+    scrollToBottomForce();
     
     // === 确定任务类型和模型 ===
     let taskType = lockedTaskType;  // 用户锁定的任务类型
@@ -1282,8 +1368,10 @@ async function sendMessage(event) {
     }
     
     // === 第二步：发送请求获取流式响应 ===
+    // ⭐ 捕获此刻的 session，防止 async 过程中 currentSession 被切换导致 finally 清理错误 session
+    const thisSession = currentSession;
     try {
-        setSessionGenerating(currentSession, true);
+        setSessionGenerating(thisSession, true);
         
         // 切换发送按钮为停止状态
         const sendBtn = document.getElementById('sendBtn');
@@ -1324,7 +1412,7 @@ async function sendMessage(event) {
         if (selectedFiles.length > 0) {
             // Send with file
             const formData = new FormData();
-            formData.append('session', currentSession);
+            formData.append('session', thisSession);
             formData.append('message', message);
             selectedFiles.forEach(file => formData.append('file', file));
             formData.append('file_count', String(selectedFiles.length));
@@ -1332,7 +1420,7 @@ async function sendMessage(event) {
             formData.append('locked_model', modelToUse || 'auto');
 
             const abortController = new AbortController();
-            setSessionAbortController(currentSession, abortController);
+            setSessionAbortController(thisSession, abortController);
             
             response = await fetch('/api/chat/file', {
                 method: 'POST',
@@ -1490,7 +1578,7 @@ async function sendMessage(event) {
                                     } else if (data.type === 'classification') {
                                         console.log('[FILE STREAM] 任务分类:', data.task_type);
                                         if (data.task_id) {
-                                            setSessionTaskId(currentSession, data.task_id);
+                                            setSessionTaskId(thisSession, data.task_id);
                                         }
                                         // 更新任务徽章（初始占位是 CHAT，收到分类后替换为真实任务名）
                                         if (currentSettings?.ai?.show_task_type === true) {
@@ -1632,7 +1720,7 @@ async function sendMessage(event) {
             // === 流式输出 ===
             // ⭐ 创建 AbortController 来支持取消请求
             const abortController = new AbortController();
-            setSessionAbortController(currentSession, abortController);
+            setSessionAbortController(thisSession, abortController);
 
             const effectiveTaskType = String(taskType || '').toUpperCase();
             const useUnifiedAgentStream = (effectiveTaskType === 'AGENT');
@@ -1641,11 +1729,11 @@ async function sendMessage(event) {
                 ? {
                     request: message,
                     context: { history: [] },
-                    session_id: currentSession,
+                    session_id: thisSession,
                     model: modelToUse || 'gemini-3-flash-preview'
                 }
                 : {
-                    session: currentSession,
+                    session: thisSession,
                     message: message,
                     locked_task: taskType,
                     locked_model: modelToUse
@@ -2247,7 +2335,7 @@ async function sendMessage(event) {
                                             await fetch('/api/agent/confirm', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ session: currentSession, confirmed: confirmResult.confirmed })
+                                                body: JSON.stringify({ session: thisSession, confirmed: confirmResult.confirmed })
                                             });
                                         } catch(e) { console.error('[AGENT] Confirm callback failed:', e); }
                                     }
@@ -2267,7 +2355,7 @@ async function sendMessage(event) {
                                             await fetch('/api/agent/choice', {
                                                 method: 'POST',
                                                 headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ session: currentSession, selected: choiceResult.selected })
+                                                body: JSON.stringify({ session: thisSession, selected: choiceResult.selected })
                                             });
                                         } catch(e) { console.error('[AGENT] Choice callback failed:', e); }
                                     }
@@ -2643,24 +2731,27 @@ async function sendMessage(event) {
         }
         scrollToBottom();
     } finally {
-        setSessionGenerating(currentSession, false);
+        setSessionGenerating(thisSession, false);
+        sessionDomCache.delete(thisSession); // 任务结束，清除 DOM 缓存
         hideLoading();
         
-        // 恢复发送按钮状态
-        const sendBtn = document.getElementById('sendBtn');
-        sendBtn.classList.remove('generating');
-        sendBtn.disabled = false;
-        sendBtn.title = '发送';
+        // 仅当用户仍在查看本 session 时才重置发送按钮（避免覆盖其他 session 的生成状态）
+        if (currentSession === thisSession) {
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.classList.remove('generating');
+            sendBtn.disabled = false;
+            sendBtn.title = '发送';
+        }
         
         // 清理 AbortController
-        setSessionAbortController(currentSession, null);
-        setSessionTaskId(currentSession, null);
+        setSessionAbortController(thisSession, null);
+        setSessionTaskId(thisSession, null);
         
         // 重置中断标志
         await fetch('/api/chat/reset-interrupt', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ session: currentSession })
+            body: JSON.stringify({ session: thisSession })
         }).catch(e => console.error('Reset interrupt failed:', e));
     }
 }
@@ -3041,15 +3132,67 @@ function handleKeyDown(event) {
     }
 }
 
+// 全局快捷键：Esc 停止生成，Ctrl+K 新建对话
+function handleGlobalKeyDown(e) {
+    // 有模态框开着时不拦截
+    if (document.querySelector('.modal-overlay.active')) return;
+
+    if (e.key === 'Escape' && currentSession && isSessionGenerating(currentSession)) {
+        e.preventDefault();
+        document.getElementById('sendBtn')?.click();
+        return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        showNewSessionModal();
+        return;
+    }
+}
+
 function autoResize(textarea) {
     textarea.style.height = 'auto';
     const maxH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--input-max-height') || '220');
     textarea.style.height = Math.min(textarea.scrollHeight, maxH || 220) + 'px';
 }
 
+// 智能滚动：只在用户未上划时才滚到底部（流式输出时使用）
 function scrollToBottom() {
+    if (isScrollLocked) return;
     const container = document.getElementById('chatMessages');
-    container.scrollTop = container.scrollHeight;
+    if (container) container.scrollTop = container.scrollHeight;
+}
+
+// 强制滚到底部并重置锁（切换会话、加载历史、用户发消息时使用）
+function scrollToBottomForce() {
+    isScrollLocked = false;
+    const container = document.getElementById('chatMessages');
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+        updateBackToBottomBtn();
+    }
+}
+
+// 初始化智能滚动：监听用户手动滚动，决定是否锁定自动滚动
+function initScrollBehavior() {
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    container.addEventListener('scroll', () => {
+        const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        isScrollLocked = distFromBottom > 80;
+        updateBackToBottomBtn();
+    });
+}
+
+// 更新「回到底部」浮动按钮的显示状态
+function updateBackToBottomBtn() {
+    const btn = document.getElementById('backToBottomBtn');
+    if (!btn) return;
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const isGenerating = currentSession && isSessionGenerating(currentSession);
+    btn.style.display = (distFromBottom > 80 && isGenerating) ? 'flex' : 'none';
 }
 
 function showLoading(text, model) {
@@ -3314,6 +3457,16 @@ function parseMarkdown(text) {
             }
         };
         
+        // 外部链接：加 data-ext 属性，由全局拦截器在系统浏览器打开
+        renderer.link = function(href, title, text) {
+            if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+                const t = title ? ` title="${title}"` : '';
+                return `<a href="${href}" data-ext="1"${t} class="ext-link">${text}</a>`;
+            }
+            // 内部链接（锚点等）正常渲染
+            return `<a href="${href || '#'}">${text}</a>`;
+        };
+
         // Configure marked
         marked.setOptions({
             renderer: renderer,
