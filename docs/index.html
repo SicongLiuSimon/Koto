@@ -381,7 +381,7 @@
     </p>
 
     <div class="hero-btns rv">
-      <a id="btn-download-hero" href="https://github.com/Loganwon/Koto/releases/latest/download/Koto_v1.1.0_Setup.exe" class="btn btn-dl">
+      <a id="btn-download-hero" href="https://github.com/Loganwon/Koto/releases/latest" class="btn btn-dl">
         ⬇&nbsp;<span data-en="Download for Windows (.exe)" data-zh="下载 Windows 安装包（.exe）">下载 Windows 安装包（.exe）</span>
       </a>
       <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-ghost">
@@ -432,11 +432,11 @@
   <div class="wrap">
     <div class="dl-banner rv">
       <div class="dl-banner-left">
-        <h3 data-en="🖥️ Koto v1.1.0 — Windows Installer" data-zh="🖥️ Koto v1.1.0 — Windows 安装包">🖥️ Koto v1.1.0 — Windows 安装包</h3>
+        <h3 data-en="🖥️ Koto v1.2.0 — Windows Installer" data-zh="🖥️ Koto v1.2.0 — Windows 安装包">🖥️ Koto v1.2.0 — Windows 安装包</h3>
         <p data-en="One-click install · No Python required · All dependencies bundled · No cloud account needed" data-zh="一键安装 · 无需安装 Python · 包含全部依赖 · 无需云端账号">一键安装 · 无需安装 Python · 包含全部依赖 · 无需云端账号</p>
       </div>
       <div class="dl-banner-right">
-        <a href="https://github.com/Loganwon/Koto/releases/latest/download/Koto_v1.1.0_Setup.exe" class="btn btn-dl">
+        <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-banner" class="btn btn-dl">
           ⬇&nbsp;<span data-en="Download Installer (.exe)" data-zh="下载安装包（.exe）">下载安装包（.exe）</span>
         </a>
         <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;">
@@ -579,7 +579,7 @@
           <div class="step-num">1</div>
           <div>
             <h4 data-en="Download installer" data-zh="下载安装包">下载安装包</h4>
-            <p><span data-en="Download the latest " data-zh="从 GitHub Releases 下载最新的 ">从 GitHub Releases 下载最新的 </span><code>Koto_v1.1.0_Setup.exe</code><span data-en=" from GitHub Releases." data-zh="。">。</span></p>
+            <p><span data-en="Click the Download button above to get the latest installer from GitHub Releases." data-zh="点击上方下载按钮，从 GitHub Releases 获取最新安装包。">点击上方下载按钮，从 GitHub Releases 获取最新安装包。</span></p>
           </div>
         </div>
         <div class="step rv">
@@ -605,7 +605,7 @@
         </div>
       </div>
       <div style="margin-top:28px; text-align:center;">
-        <a href="https://github.com/Loganwon/Koto/releases/latest/download/Koto_v1.1.0_Setup.exe" class="btn btn-dl">
+        <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-setup" class="btn btn-dl">
           ⬇&nbsp;<span data-en="Download Installer (.exe)" data-zh="下载安装包（.exe）">下载安装包（.exe）</span>
         </a>
       </div>
@@ -676,6 +676,33 @@
 </footer>
 
 <script>
+  /* ── Auto-fetch latest release download URL ─────── */
+  (function () {
+    const REPO = 'Loganwon/Koto';
+    const BTN_IDS = ['btn-download-hero', 'btn-download-banner', 'btn-download-setup'];
+    fetch('https://api.github.com/repos/' + REPO + '/releases/latest')
+      .then(r => r.json())
+      .then(data => {
+        const asset = (data.assets || []).find(a => a.name.endsWith('_Setup.exe'));
+        if (!asset) return;
+        const url = asset.browser_download_url;
+        BTN_IDS.forEach(id => {
+          const el = document.getElementById(id);
+          if (el) { el.href = url; el.removeAttribute('target'); }
+        });
+        // Update version text in banner
+        const ver = data.tag_name || '';
+        document.querySelectorAll('[data-zh*="Windows 安装包"]').forEach(el => {
+          if (el.tagName === 'H3') {
+            el.setAttribute('data-zh', '🖥️ Koto ' + ver + ' — Windows 安装包');
+            el.setAttribute('data-en', '🖥️ Koto ' + ver + ' — Windows Installer');
+            if (typeof lang !== 'undefined') el.textContent = el.getAttribute('data-' + lang);
+          }
+        });
+      })
+      .catch(() => {}); // silently fall back to releases/latest page link
+  })();
+
   /* ── Language toggle ──────────────────────────────── */
   let lang = localStorage.getItem('koto-lang') || 'zh';
 
