@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Koto (言) — AI 桌面助手</title>
-  <meta name="description" content="Koto 是运行在你自己电脑上的 AI 桌面助手，支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能系统与工作流自动化。">
+  <meta name="description" content="Koto 是运行在你自己电脑上的 AI 桌面助手，支持多模型对话、文档分析、技能系统与工作流自动化。">
   <style>
     /* ── Reset & Base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -72,13 +72,6 @@
       border: 1px solid var(--border);
     }
     .btn-ghost:hover { border-color: rgba(99,198,255,.35); color: var(--cyan); }
-    .btn-dl {
-      padding: 14px 32px; font-size: 15px; font-weight: 700;
-      background: var(--grad); color: #05080f;
-      box-shadow: 0 0 36px rgba(99,198,255,.4), 0 0 72px rgba(99,198,255,.15);
-      border-radius: 12px;
-    }
-    .btn-dl:hover { transform: translateY(-3px); box-shadow: 0 8px 52px rgba(99,198,255,.55); }
 
     /* ── Nav ── */
     .nav {
@@ -107,8 +100,6 @@
       font-size: 14px; color: var(--t2); transition: var(--ease);
     }
     .nav-links a:hover { color: var(--t1); }
-    .nav-dl { color: var(--cyan) !important; font-weight: 600; }
-    .nav-dl:hover { color: var(--teal) !important; }
     .lang-btn {
       background: none; border: 1px solid var(--border);
       border-radius: 6px; color: var(--t2); cursor: pointer;
@@ -270,34 +261,6 @@
       font-family: 'Consolas', monospace; font-size: 11.5px;
     }
 
-    /* ── Setup tabs ── */
-    .setup-tabs { display: flex; gap: 8px; margin-bottom: 32px; flex-wrap: wrap; }
-    .setup-tab {
-      padding: 8px 20px; border-radius: 8px; font-size: 13px; font-weight: 600;
-      cursor: pointer; transition: var(--ease); border: 1px solid var(--border);
-      background: transparent; color: var(--t2); font-family: inherit;
-    }
-    .setup-tab.active {
-      background: rgba(99,198,255,.12); border-color: rgba(99,198,255,.3); color: var(--cyan);
-    }
-    .setup-panel { display: none; }
-    .setup-panel.active { display: block; }
-
-    /* ── Download banner ── */
-    .dl-banner {
-      margin: 0 0 80px;
-      padding: 32px 40px; border-radius: 20px;
-      background: linear-gradient(135deg, rgba(99,198,255,.07) 0%, rgba(118,247,212,.05) 100%);
-      border: 1px solid rgba(99,198,255,.22);
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 24px; flex-wrap: wrap;
-      box-shadow: 0 0 0 1px rgba(99,198,255,.05), inset 0 1px 0 rgba(99,198,255,.1);
-      position: relative; z-index: 1;
-    }
-    .dl-banner-left h3 { font-size: 20px; font-weight: 800; margin-bottom: 6px; }
-    .dl-banner-left p  { font-size: 13px; color: var(--t2); }
-    .dl-banner-right   { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-
     /* ── Requirement note ── */
     .req-box {
       margin: 48px 0 0;
@@ -333,8 +296,6 @@
       .nav-links { display: none; }
       .wrap { padding: 0 20px; }
       .hero { padding: 120px 0 64px; }
-      .dl-banner { flex-direction: column; text-align: center; }
-      .dl-banner-right { justify-content: center; }
     }
   </style>
 </head>
@@ -357,7 +318,6 @@
     <div class="nav-links">
       <a href="#features"  data-en="Features"  data-zh="功能特性">功能特性</a>
       <a href="#setup"     data-en="Setup"      data-zh="快速开始">快速开始</a>
-      <a href="#download"  data-en="Download"   data-zh="下载" class="nav-dl">下载</a>
       <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
     </div>
     <button class="lang-btn" onclick="toggleLang()" aria-label="Switch language">EN</button>
@@ -368,7 +328,7 @@
 <section class="hero" aria-labelledby="hero-heading">
   <div class="wrap">
     <div class="hero-pill">
-      <span class="pill">✦ &nbsp;<span data-en="v1.1.0 · Open source · Python · Runs locally" data-zh="v1.1.0 · 开源 · Python · 本地运行">v1.1.0 · 开源 · Python · 本地运行</span></span>
+      <span class="pill">✦ &nbsp;<span data-en="Open source · Python · Runs locally" data-zh="开源 · Python · 本地运行">开源 · Python · 本地运行</span></span>
     </div>
 
     <h1 class="hero-h1 rv" id="hero-heading">
@@ -376,13 +336,13 @@
       <span class="gt" data-en="AI Desktop Workspace" data-zh="AI 桌面工作台">AI 桌面工作台</span>
     </h1>
 
-    <p class="hero-sub rv" data-en="Koto runs on your own machine — chat with Gemini cloud models or locally-running Ollama models, analyze documents, build a Knowledge Base, automate with Skills, and keep long-term memory. Your data stays local. Available in Web and Desktop modes." data-zh="Koto 运行在你的电脑上——支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能自动化与长期记忆。数据不离本地，Web 与桌面双模式运行。">
-      Koto 运行在你的电脑上——支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能自动化与长期记忆。数据不离本地，Web 与桌面双模式运行。
+    <p class="hero-sub rv" data-en="Koto runs on your own machine — multi-model chat, document analysis, Skills automation and long-term memory. Your data stays local." data-zh="Koto 运行在你自己的电脑上——多模型对话、文档分析、技能自动化与长期记忆。数据不离本地。">
+      Koto 运行在你自己的电脑上——多模型对话、文档分析、技能自动化与长期记忆。数据不离本地。
     </p>
 
     <div class="hero-btns rv">
-      <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener" class="btn btn-dl">
-        ⬇&nbsp;<span data-en="Download for Windows (.exe)" data-zh="下载 Windows 安装包（.exe）">下载 Windows 安装包（.exe）</span>
+      <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-prime">
+        ⬇&nbsp;<span data-en="Download" data-zh="下载">下载</span>
       </a>
       <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-ghost">
         <span data-en="View on GitHub" data-zh="查看 GitHub">查看 GitHub</span>
@@ -410,38 +370,18 @@
         <div class="aw-chat">
           <div class="aw-msg">
             <div class="aw-av usr">U</div>
-            <div class="aw-bubble usr" data-en="Help me analyze this contract PDF" data-zh="帮我分析一下这份合同 PDF">帮我分析一下这份合同 PDF</div>
+            <div class="aw-bubble usr" data-en="Summarize this PDF for me" data-zh="帮我总结一下这份 PDF">帮我总结一下这份 PDF</div>
           </div>
           <div class="aw-msg">
             <div class="aw-av ai">言</div>
             <div>
               <div class="aw-bubble ai">
-                <span data-en="Based on the document, I found 3 key risk points: ①…②…③…" data-zh="根据文档内容，我发现 3 个关键风险点：①…②…③…">根据文档内容，我发现 3 个关键风险点：①…②…③…</span><span class="aw-cursor"></span>
+                <span data-en="The document covers 3 key points: ①…②…③…" data-zh="这份文档涵盖 3 个核心要点：①…②…③…">这份文档涵盖 3 个核心要点：①…②…③…</span><span class="aw-cursor"></span>
               </div>
-              <div class="aw-badge" data-en="⚡ Streaming · Gemini 2.0 Flash" data-zh="⚡ 流式输出 · Gemini 2.0 Flash">⚡ 流式输出 · Gemini 2.0 Flash</div>
+              <div class="aw-badge" data-en="⚡ Streaming · Gemini Flash" data-zh="⚡ 流式输出 · Gemini Flash">⚡ 流式输出 · Gemini Flash</div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══ DOWNLOAD BANNER ══ -->
-<section id="download" aria-label="Download Koto">
-  <div class="wrap">
-    <div class="dl-banner rv">
-      <div class="dl-banner-left">
-        <h3 data-en="🖥️ Koto v1.1.0 — Windows Installer" data-zh="🖥️ Koto v1.1.0 — Windows 安装包">🖥️ Koto v1.1.0 — Windows 安装包</h3>
-        <p data-en="One-click install · No Python required · All dependencies bundled · Auto-launch on startup (optional)" data-zh="一键安装 · 无需安装 Python · 包含全部依赖 · 支持开机自启（可选）">一键安装 · 无需安装 Python · 包含全部依赖 · 支持开机自启（可选）</p>
-      </div>
-      <div class="dl-banner-right">
-        <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener" class="btn btn-dl">
-          ⬇&nbsp;<span data-en="Download Installer (.exe)" data-zh="下载安装包（.exe）">下载安装包（.exe）</span>
-        </a>
-        <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;">
-          <span data-en="All releases" data-zh="所有版本">所有版本</span>
-        </a>
       </div>
     </div>
   </div>
@@ -461,7 +401,7 @@
       <div class="feat-card rv">
         <div class="feat-icon">💬</div>
         <h3 data-en="Multi-model Chat" data-zh="多模型对话">多模型对话</h3>
-        <p data-en="Stream responses from Gemini Flash / Pro (cloud) or any locally-running Ollama model. Switch models per session — your API key, your choice." data-zh="流式调用 Gemini Flash / Pro 云端模型，或本机运行的任意 Ollama 模型。每会话独立切换，API Key 自己掌控。">流式调用 Gemini Flash / Pro 云端模型，或本机运行的任意 Ollama 模型。每会话独立切换，API Key 自己掌控。</p>
+        <p data-en="Stream responses from Gemini Flash / Pro / Ultra or locally-running Ollama models. Switch models per session." data-zh="流式调用 Gemini Flash / Pro / Ultra，或本机运行的 Ollama 模型。每个会话可独立切换模型。">流式调用 Gemini Flash / Pro / Ultra，或本机运行的 Ollama 模型。每个会话可独立切换模型。</p>
         <div class="feat-tags">
           <span class="tag">Gemini</span>
           <span class="tag">Ollama</span>
@@ -472,7 +412,7 @@
       <div class="feat-card rv">
         <div class="feat-icon">📄</div>
         <h3 data-en="Document Analysis" data-zh="文档分析">文档分析</h3>
-        <p data-en="Upload Word / PDF / Excel / PPT and ask questions, generate summaries, extract data tables, add annotations, or convert formats directly in chat." data-zh="上传 Word / PDF / Excel / PPT，在对话中提问、生成摘要、提取数据表格、添加批注或转换格式。">上传 Word / PDF / Excel / PPT，在对话中提问、生成摘要、提取数据表格、添加批注或转换格式。</p>
+        <p data-en="Upload Word / PDF / Excel / PPT and ask questions, generate summaries, add annotations, or convert formats directly in chat." data-zh="上传 Word / PDF / Excel / PPT，在对话中提问、生成摘要、添加批注或转换格式。">上传 Word / PDF / Excel / PPT，在对话中提问、生成摘要、添加批注或转换格式。</p>
         <div class="feat-tags">
           <span class="tag">Word</span><span class="tag">PDF</span>
           <span class="tag">Excel</span><span class="tag">PPT</span>
@@ -480,34 +420,21 @@
       </div>
 
       <div class="feat-card rv">
-        <div class="feat-icon">🗄️</div>
-        <h3 data-en="Knowledge Base (RAG)" data-zh="知识库 RAG">知识库 RAG</h3>
-        <p data-en="Build a personal knowledge base from your files. Koto indexes documents with FAISS vector search and routes queries to the most relevant sources automatically." data-zh="从你的文件构建个人知识库。Koto 使用 FAISS 向量索引，自动将问题路由到最相关的知识源，支持多源混合检索。">从你的文件构建个人知识库。Koto 使用 FAISS 向量索引，自动将问题路由到最相关的知识源，支持多源混合检索。</p>
-        <div class="feat-tags">
-          <span class="tag">FAISS</span>
-          <span class="tag" data-en="Vector search" data-zh="向量检索">向量检索</span>
-          <span class="tag" data-en="Hybrid search" data-zh="混合检索">混合检索</span>
-        </div>
-      </div>
-
-      <div class="feat-card rv">
         <div class="feat-icon">🧩</div>
         <h3 data-en="Skills System" data-zh="技能系统">技能系统</h3>
-        <p data-en="Define custom AI behaviors with system prompts, bind them to shortcuts, and switch context instantly. Install community skills from the built-in marketplace, or auto-generate skills from a natural language description." data-zh="用 System Prompt 定义 AI 行为，绑定快捷方式，即时切换上下文。从内置技能市场安装社区技能，或通过自然语言描述自动构建技能。">用 System Prompt 定义 AI 行为，绑定快捷方式，即时切换上下文。从内置技能市场安装社区技能，或通过自然语言描述自动构建技能。</p>
+        <p data-en="Define custom AI behaviors with a system prompt, bind them to shortcuts, and switch context instantly. Includes a built-in Skill marketplace." data-zh="用 System Prompt 定义 AI 行为，绑定快捷方式，即时切换上下文。内置 Skill 市场可浏览和安装社区技能。">用 System Prompt 定义 AI 行为，绑定快捷方式，即时切换上下文。内置 Skill 市场。</p>
         <div class="feat-tags">
           <span class="tag" data-en="Custom prompts" data-zh="自定义提示词">自定义提示词</span>
           <span class="tag" data-en="Marketplace" data-zh="技能市场">技能市场</span>
-          <span class="tag" data-en="Auto-builder" data-zh="自动构建">自动构建</span>
         </div>
       </div>
 
       <div class="feat-card rv">
         <div class="feat-icon">🧠</div>
         <h3 data-en="Long-term Memory" data-zh="长期记忆">长期记忆</h3>
-        <p data-en="Koto builds a persistent user profile and stores preferences, facts, and recurring context across sessions — no need to repeat yourself. Memory is stored locally as JSON, fully under your control." data-zh="Koto 持续构建用户画像，跨会话存储偏好、事实与常用上下文。记忆以 JSON 本地保存，完全掌控，无需重复自我介绍。">Koto 持续构建用户画像，跨会话存储偏好、事实与常用上下文。记忆以 JSON 本地保存，完全掌控，无需重复自我介绍。</p>
+        <p data-en="Koto builds a user profile and stores preferences, facts, and recurring context across sessions — no need to repeat yourself." data-zh="Koto 构建用户画像，跨会话存储偏好、事实与常用上下文，无需重复解释背景。">Koto 构建用户画像，跨会话存储偏好、事实与常用上下文，无需重复解释背景。</p>
         <div class="feat-tags">
           <span class="tag" data-en="User profile" data-zh="用户画像">用户画像</span>
-          <span class="tag" data-en="Local JSON" data-zh="本地 JSON">本地 JSON</span>
           <span class="tag" data-en="Persistent context" data-zh="持久上下文">持久上下文</span>
         </div>
       </div>
@@ -515,10 +442,9 @@
       <div class="feat-card rv">
         <div class="feat-icon">🔁</div>
         <h3 data-en="Automation &amp; Triggers" data-zh="自动化与触发器">自动化与触发器</h3>
-        <p data-en="Schedule recurring tasks — daily summaries, file watchers, timed reminders, proactive check-ins. Background jobs run silently without interrupting your work." data-zh="设置定时任务——每日摘要、文件监控、定时提醒、主动问候。后台作业静默运行，不打断工作流。">设置定时任务——每日摘要、文件监控、定时提醒、主动问候。后台作业静默运行，不打断工作流。</p>
+        <p data-en="Schedule recurring tasks — daily summaries, file watchers, timed reminders. Background jobs run silently without interrupting your work." data-zh="设置定时任务——每日摘要、文件监控、定时提醒。后台作业静默运行，不打断你的工作。">设置定时任务——每日摘要、文件监控、定时提醒。后台作业静默运行。</p>
         <div class="feat-tags">
           <span class="tag" data-en="Scheduler" data-zh="定时器">定时器</span>
-          <span class="tag" data-en="Proactive agent" data-zh="主动代理">主动代理</span>
           <span class="tag" data-en="Background jobs" data-zh="后台任务">后台任务</span>
         </div>
       </div>
@@ -526,21 +452,10 @@
       <div class="feat-card rv">
         <div class="feat-icon">🎙️</div>
         <h3 data-en="Voice I/O" data-zh="语音交互">语音交互</h3>
-        <p data-en="Speak your message with the microphone button or use TTS to have responses read aloud. Optional; requires separate voice dependencies." data-zh="点击麦克风说话，或开启 TTS 语音朗读回复。可选功能，需额外安装语音依赖。">点击麦克风说话，或开启 TTS 语音朗读回复。可选功能，需额外安装语音依赖。</p>
+        <p data-en="Speak your message with the microphone button or use TTS to have responses read aloud. Optional; requires voice dependencies." data-zh="点击麦克风说话，或开启 TTS 语音朗读回复。可选功能，需额外安装语音依赖。">点击麦克风说话，或开启 TTS 语音朗读回复。可选功能，需额外安装语音依赖。</p>
         <div class="feat-tags">
           <span class="tag" data-en="Speech-to-text" data-zh="语音输入">语音输入</span>
           <span class="tag">TTS</span>
-        </div>
-      </div>
-
-      <div class="feat-card rv">
-        <div class="feat-icon">🌐</div>
-        <h3 data-en="Web + Desktop Modes" data-zh="Web 与桌面双模式">Web 与桌面双模式</h3>
-        <p data-en="Run as a local web app (browser at localhost:5000) or as a standalone desktop window via PyWebView. Docker Compose included for team or container deployments." data-zh="作为本地 Web 应用运行（浏览器访问 localhost:5000），或通过 PyWebView 以独立桌面窗口运行。内置 Docker Compose，支持容器化部署。">作为本地 Web 应用运行（浏览器访问 localhost:5000），或通过 PyWebView 以独立桌面窗口运行。内置 Docker Compose，支持容器化部署。</p>
-        <div class="feat-tags">
-          <span class="tag">Flask</span>
-          <span class="tag">PyWebView</span>
-          <span class="tag">Docker</span>
         </div>
       </div>
 
@@ -555,90 +470,45 @@
       <span class="pill" data-en="Getting started" data-zh="快速开始">快速开始</span>
     </div>
     <h2 class="sec-h2 rv" id="setup-heading" data-en="Up and running in minutes" data-zh="几分钟内跑起来">几分钟内跑起来</h2>
-    <p class="sec-sub rv" data-en="Choose the Windows installer for a one-click experience, or set up from source for full control." data-zh="选择 Windows 安装包一键体验，或从源码安装以获得完整控制权。">选择 Windows 安装包一键体验，或从源码安装以获得完整控制权。</p>
+    <p class="sec-sub rv" data-en="Koto is a Python app. Clone, install, configure your API key, run." data-zh="Koto 是 Python 应用。克隆、安装、填 API Key、启动。">Koto 是 Python 应用。克隆、安装、填 API Key、启动。</p>
 
-    <div class="setup-tabs rv">
-      <button class="setup-tab active" onclick="switchTab('installer', this)" data-en="🖥️ Windows Installer (Recommended)" data-zh="🖥️ Windows 安装包（推荐）">🖥️ Windows 安装包（推荐）</button>
-      <button class="setup-tab" onclick="switchTab('source', this)" data-en="🛠️ From Source" data-zh="🛠️ 从源码安装">🛠️ 从源码安装</button>
-    </div>
-
-    <div id="tab-installer" class="setup-panel active">
-      <div class="setup-grid">
-        <div class="step rv">
-          <div class="step-num">1</div>
-          <div>
-            <h4 data-en="Download installer" data-zh="下载安装包">下载安装包</h4>
-            <p><span data-en="Download the latest " data-zh="从 GitHub Releases 下载最新的 ">从 GitHub Releases 下载最新的 </span><code>Koto_v1.1.0_Setup.exe</code><span data-en=" from GitHub Releases." data-zh="。">。</span></p>
-          </div>
-        </div>
-        <div class="step rv">
-          <div class="step-num">2</div>
-          <div>
-            <h4 data-en="Run the installer" data-zh="运行安装程序">运行安装程序</h4>
-            <p data-en="Double-click and follow the wizard. Installs to your user folder — no admin rights required by default." data-zh="双击运行，按向导操作完成安装。默认安装到用户目录，无需管理员权限。">双击运行，按向导操作完成安装。默认安装到用户目录，无需管理员权限。</p>
-          </div>
-        </div>
-        <div class="step rv">
-          <div class="step-num">3</div>
-          <div>
-            <h4 data-en="Configure API key" data-zh="配置 API Key">配置 API Key</h4>
-            <p><span data-en="On first launch the setup wizard asks for your API key. Get a free Gemini key at " data-zh="首次启动时，向导会引导你填入 API Key。免费申请 Gemini Key：">首次启动时，向导会引导你填入 API Key。免费申请 Gemini Key：</span><code>aistudio.google.com</code></p>
-          </div>
-        </div>
-        <div class="step rv">
-          <div class="step-num">4</div>
-          <div>
-            <h4 data-en="Start using Koto" data-zh="开始使用">开始使用</h4>
-            <p data-en="Koto opens in desktop window mode. Switch models, upload documents, and build your knowledge base from day one." data-zh="Koto 以桌面窗口模式启动。立即切换模型、上传文档、构建知识库。">Koto 以桌面窗口模式启动。立即切换模型、上传文档、构建知识库。</p>
-          </div>
+    <div class="setup-grid">
+      <div class="step rv">
+        <div class="step-num">1</div>
+        <div>
+          <h4 data-en="Clone &amp; install" data-zh="克隆并安装">克隆并安装</h4>
+          <p><code>git clone</code> <span data-en="the repo, create a venv, then" data-zh="仓库，创建虚拟环境，然后">仓库，创建虚拟环境，然后</span> <code>pip install -r config/requirements.txt</code></p>
         </div>
       </div>
-      <div style="margin-top:28px; text-align:center;">
-        <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener" class="btn btn-dl">
-          ⬇&nbsp;<span data-en="Download Installer (.exe)" data-zh="下载安装包（.exe）">下载安装包（.exe）</span>
-        </a>
+      <div class="step rv">
+        <div class="step-num">2</div>
+        <div>
+          <h4 data-en="Set your API key" data-zh="填入 API Key">填入 API Key</h4>
+          <p data-en="Copy " data-zh="复制 "><span data-en="Copy " data-zh="复制 ">复制 </span><code>config/gemini_config.env.example</code><span data-en=" to " data-zh=" 为 "> 为 </span><code>gemini_config.env</code><span data-en=" and fill in your Gemini API key." data-zh="，填入 Gemini API Key。">，填入 Gemini API Key。</span></p>
+        </div>
       </div>
-    </div>
-
-    <div id="tab-source" class="setup-panel">
-      <div class="setup-grid">
-        <div class="step rv">
-          <div class="step-num">1</div>
-          <div>
-            <h4 data-en="Clone &amp; install" data-zh="克隆并安装">克隆并安装</h4>
-            <p><code>git clone</code> <span data-en="the repo, create a venv, then" data-zh="仓库，创建虚拟环境，然后">仓库，创建虚拟环境，然后</span> <code>pip install -r config/requirements.txt</code></p>
-          </div>
+      <div class="step rv">
+        <div class="step-num">3</div>
+        <div>
+          <h4 data-en="Launch Koto" data-zh="启动 Koto">启动 Koto</h4>
+          <p><span data-en="Run " data-zh="运行 ">运行 </span><code>Koto_Start.bat</code><span data-en=" (Windows) or " data-zh="（Windows）或 ">（Windows）或 </span><code>python src/koto_app.py</code><span data-en=" directly." data-zh="。">。</span></p>
         </div>
-        <div class="step rv">
-          <div class="step-num">2</div>
-          <div>
-            <h4 data-en="Set your API key" data-zh="填入 API Key">填入 API Key</h4>
-            <p><span data-en="Copy " data-zh="复制 ">复制 </span><code>config/gemini_config.env.example</code><span data-en=" to " data-zh=" 为 "> 为 </span><code>gemini_config.env</code><span data-en=" and fill in your key." data-zh="，填入 API Key。">，填入 API Key。</span></p>
-          </div>
-        </div>
-        <div class="step rv">
-          <div class="step-num">3</div>
-          <div>
-            <h4 data-en="Launch Koto" data-zh="启动 Koto">启动 Koto</h4>
-            <p><span data-en="Run " data-zh="运行 ">运行 </span><code>Koto_Start.bat</code><span data-en=" (desktop) or " data-zh="（桌面模式）或 ">（桌面模式）或 </span><code>python server.py</code><span data-en=" (web at localhost:5000)." data-zh="（Web 模式，访问 localhost:5000）。">（Web 模式，访问 localhost:5000）。</span></p>
-          </div>
-        </div>
-        <div class="step rv">
-          <div class="step-num">4</div>
-          <div>
-            <h4 data-en="(Optional) Local model" data-zh="（可选）本地模型">（可选）本地模型</h4>
-            <p data-en="Install Ollama and pull any model. Koto detects it automatically — no extra config needed." data-zh="安装 Ollama 并 pull 任意模型，Koto 自动识别，无需额外配置。">安装 Ollama 并 pull 任意模型，Koto 自动识别，无需额外配置。</p>
-          </div>
+      </div>
+      <div class="step rv">
+        <div class="step-num">4</div>
+        <div>
+          <h4 data-en="(Optional) Local model" data-zh="（可选）本地模型">（可选）本地模型</h4>
+          <p data-en="Install Ollama and pull any model. Koto detects it automatically." data-zh="安装 Ollama 并 pull 任意模型，Koto 自动识别。">安装 Ollama 并 pull 任意模型，Koto 自动识别。</p>
         </div>
       </div>
     </div>
 
     <!-- Requirements note -->
     <div class="req-box rv">
-      <h4 data-en="Requirements (source install)" data-zh="环境要求（源码安装）">环境要求（源码安装）</h4>
+      <h4 data-en="Requirements" data-zh="环境要求">环境要求</h4>
       <div class="req-list">
         <div class="req-item"><strong>Python</strong> 3.11+</div>
-        <div class="req-item"><strong>Gemini API Key</strong> <span data-en="(required for cloud models)" data-zh="（云端模型必需）">（云端模型必需）</span></div>
+        <div class="req-item"><strong data-en="Gemini API Key" data-zh="Gemini API Key">Gemini API Key</strong> <span data-en="(required for cloud models)" data-zh="（云端模型必需）">（云端模型必需）</span></div>
         <div class="req-item"><strong>Ollama</strong> <span data-en="(optional, local models)" data-zh="（可选，本地模型）">（可选，本地模型）</span></div>
         <div class="req-item"><strong>Windows 10+</strong> / macOS / Linux</div>
       </div>
@@ -683,14 +553,6 @@
   }
 
   applyLang();
-
-  /* ── Setup tab switcher ──────────────────────────── */
-  function switchTab(id, el) {
-    document.querySelectorAll('.setup-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.setup-panel').forEach(p => p.classList.remove('active'));
-    document.getElementById('tab-' + id).classList.add('active');
-    el.classList.add('active');
-  }
 
   /* ── Scroll reveal ───────────────────────────────── */
   const observer = new IntersectionObserver(entries => {
