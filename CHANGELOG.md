@@ -9,22 +9,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.2.0] — 2025-03-17
+
 ### Added
-- Structured JSON logging via `KOTO_LOG_FORMAT=json` (requires `python-json-logger`)
-- Request ID tracing: `X-Request-ID` header on every request/response for log correlation
-- Global Flask error handlers returning JSON `{error, status, request_id}` for 404/405/500
+- **Modular Blueprint Architecture**: Extracted ~206 routes from monolithic `web/app.py` into 14 Flask blueprints (sessions, analytics, proactive, execution, knowledge, file_editor, dev, voice, document, file_organize, workspace, settings, misc_api, pages)
+- **Skill Pipeline**: New `skill_pipeline.py` for structured skill execution with validation, routing, and fallback
+- **Skill Tool Adapter**: New `skill_tool_adapter.py` bridging skills with the agent tool registry
+- **Task Classifier**: ML-based task classification for intelligent request routing
+- **Smart Dispatcher**: Enhanced model dispatching with intent analysis and local planner integration
+- **Model Fallback Executor**: Automatic LLM failover with circuit breaker pattern
+- **Conversation Tracker**: Long-running conversation context management
+- **PersonalityMatrix**: 4-layer context injection for personalized responses
+- **File Converter Engine**: Multi-format document conversion endpoint
+- **Annotation & Chart Vision Plugins**: New agent plugins for image annotation and chart analysis
+- **Output Validator**: Security-focused output sanitization for agent responses
+- **Document Planner & Feedback Loop**: Iterative document generation with quality feedback
+- **Swagger/OpenAPI docs** via flasgger at `/apidocs`
+- **SQLite Migration Manager**: Lightweight schema versioning
+- **Custom Exception Hierarchy**: Structured error types for all Koto subsystems
+- **Landing Page**: Updated marketing site with download button, feature showcase, setup tabs
+- **Bilingual Support**: EN/中文 marketing page
+- **3,900+ tests** (up from 467): security, concurrency, circuit breaker, caching, XSS, path traversal, integration
+- Structured JSON logging via `KOTO_LOG_FORMAT=json`
+- Request ID tracing: `X-Request-ID` header for log correlation
+- Global Flask error handlers returning JSON `{error, status, request_id}`
 - `/api/info` endpoint exposing `{version, deploy_mode, auth_enabled}`
-- `version` field in `/api/health` and `/api/ping` responses
 - Dependabot config for weekly pip + GitHub Actions dependency updates
 - `.pre-commit-config.yaml` with black, isort, flake8, bandit hooks
 - `docker-compose.yml` for local development with volume mounts
 - `Makefile` with `dev`, `test`, `lint`, `format`, `build`, `audit` targets
 - `pip-audit` CVE scanning step in CI (non-blocking)
-- `CHANGELOG.md` — this file
+- Dependency lock file for reproducible builds
+
+### Changed
+- **web/app.py reduced from ~20,800 to ~16,100 lines** via blueprint extraction
+- Default model upgraded to `gemini-3.1-pro-preview`
+- AIRouter refactored: removed `set_router_model`, uses internal `_ROUTER_MODEL_CHAIN`
+- `print()` replaced with `logging` across 80+ web modules
+- Proactive agent persists cooldown state across restarts
+- RAG service upgraded with hybrid search improvements
+- Training data builder and training database updates
+- CI pipeline hardened: black, isort, bandit, pytest with coverage artifacts, Docker build
+
+### Fixed
+- Thread-safe singletons for shared services
+- Bounded caches preventing unbounded memory growth
+- Graceful shutdown with proper resource cleanup
+- Deadlock in `TrainingDB.correct_label()`
+- Path traversal in `file_converter` output directory
+- XSS in `showNotification` — uses `escapeHtml` on message
+- XSS in `md_to_html` fallback renderer
+- Module whitelist for `importlib` entry_point loading
+- Sandbox path validation in annotation plugin
+- Platform-specific tests properly skipped on Linux CI (9 Windows-only tests)
+- isort/black formatting compliance across all source files
 
 ### Security
 - JWT secret startup validation: raises `RuntimeError` in cloud mode if `KOTO_JWT_SECRET` not set
-- `werkzeug.secure_filename()` applied to all file upload filenames (prevents path traversal)
+- `werkzeug.secure_filename()` applied to all file upload filenames
+- CODEOWNERS, PR template, issue templates, SECURITY.md added
+- Branch protection ruleset configured
 
 ---
 
