@@ -1,7 +1,10 @@
 import json
+import logging
 import re
 
 from app.core.routing.local_model_router import LocalModelRouter
+
+logger = logging.getLogger(__name__)
 
 class LocalPlanner:
     """Local planner/controller using Ollama for multi-step task planning."""
@@ -292,13 +295,15 @@ class LocalPlanner:
                 "gemini-2.0-flash",        # 备选
                 "gemini-1.5-flash",        # 降级兜底
             ]
-            _planning_model = _safe_plan_models[1]  # 默认 gemini-2.5-flash
+            # 默认 gemini-2.5-flash（index=2）；gemini-2.5-pro（index=1）更贵不应作默认
+            _PLAN_DEFAULT_IDX = 2
+            _planning_model = _safe_plan_models[_PLAN_DEFAULT_IDX]
             try:
                 from app.core.llm.model_fallback import get_fallback_executor
                 _fbe = get_fallback_executor()
                 _planning_model = next(
                     (m for m in _safe_plan_models if _fbe.is_available(m)),
-                    _safe_plan_models[1],
+                    _safe_plan_models[_PLAN_DEFAULT_IDX],
                 )
             except Exception:
                 pass
@@ -321,10 +326,13 @@ class LocalPlanner:
             raw = resp.text or ""
             result = cls._parse_plan_json(raw)
             if result:
-                print(f"[LocalPlanner] ✅ Cloud fallback 规划成功 ({_planning_model}): {len(result.get('steps', []))} 步")
+                logger.info(
+                    "[LocalPlanner] Cloud 规划成功 (%s): %d 步",
+                    _planning_model, len(result.get("steps", []))
+                )
             return result
         except Exception as e:
-            print(f"[LocalPlanner] ⚠️ Cloud fallback 规划失败: {e}")
+            logger.warning("[LocalPlanner] Cloud 规划失败: %s", e)
             return None
 
     @classmethod
@@ -466,8 +474,8 @@ class LocalPlanner:
                     "next_actions": check.get("next_actions", []) if isinstance(check.get("next_actions", []), list) else [],
                     "model": _check_model,
                 }
-                print(f"[LocalPlanner] ✅ 云端验证完成 ({_check_model}): {result['status']}")
+                logger.info("[LocalPlanner] 云端验证完成 (%s): %s", _check_model, result["status"])
                 return result
         except Exception as e:
-            print(f"[LocalPlanner] ⚠️ 云端验证失败: {e}")
+            logger.warning("[LocalPlanner] 云端验证失败: %s", e)
         return None

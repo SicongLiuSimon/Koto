@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
-from typing import Any, Callable, Dict, Generator, List, Optional
+from collections import deque
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -38,23 +40,27 @@ logger = logging.getLogger(__name__)
 
 
 class ContextStore:
-    """步骤间结果共享仓库。"""
+    """步骤间结果共享仓库（线程安全版）。"""
 
     def __init__(self, user_input: str):
         self._store: Dict[str, Any] = {
             "original_input": user_input,
             "user_input": user_input,
         }
+        self._lock = threading.Lock()
 
     def put(self, key: str, value: Any) -> None:
-        self._store[key] = value
+        with self._lock:
+            self._store[key] = value
 
     def get(self, key: str, default: Any = None) -> Any:
-        return self._store.get(key, default)
+        with self._lock:
+            return self._store.get(key, default)
 
     def get_text(self, key: str, max_chars: int = 4000) -> str:
         """取出存储值并转为字符串文本（超过 max_chars 时自动摘要压缩）。"""
-        val = self._store.get(key)
+        with self._lock:
+            val = self._store.get(key)
         if val is None:
             return ""
         if isinstance(val, dict):
@@ -97,7 +103,8 @@ class ContextStore:
 
     def as_legacy_context(self) -> Dict[str, Any]:
         """返回与现有 TaskOrchestrator._execute_xxx(context=…) 兼容的 dict。"""
-        return dict(self._store)
+        with self._lock:
+            return dict(self._store)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,11 +131,10 @@ def _topo_sort(steps: List[Dict]) -> List[Dict]:
                 adj[dep].append(sid)
                 in_degree[sid] = in_degree.get(sid, 0) + 1
 
-    queue = [sid for sid in all_ids if in_degree.get(sid, 0) == 0]
-    queue.sort()
+    queue = deque(sorted(sid for sid in all_ids if in_degree.get(sid, 0) == 0))
     ordered = []
     while queue:
-        node = queue.pop(0)
+        node = queue.popleft()  # O(1) deque vs O(n) list.pop(0)
         ordered.append(id_map[node])
         for neighbor in sorted(adj.get(node, [])):
             in_degree[neighbor] -= 1
@@ -139,6 +145,58 @@ def _topo_sort(steps: List[Dict]) -> List[Dict]:
     if len(ordered) != len(steps):
         return steps
     return ordered
+
+
+def _topo_waves(steps: List[Dict]) -> List[List[Dict]]:
+    """
+    将步骤按依赖关系分组为并行波次（Kahn 算法）。
+    同一波次内的步骤互无依赖，可以用 asyncio.gather 并发执行。
+    波次内步骤保持按 id 升序排列以保证输出确定性。
+    """
+    if not steps:
+        return []
+
+    id_map = {s.get("id", i + 1): s for i, s in enumerate(steps)}
+    all_ids = list(id_map.keys())
+
+    in_degree: Dict[int, int] = {sid: 0 for sid in all_ids}
+    adj: Dict[int, List[int]] = {sid: [] for sid in all_ids}
+
+    for s in steps:
+        sid = s.get("id", 0)
+        for dep in s.get("depends_on") or []:
+            if dep in id_map:
+                adj[dep].append(sid)
+                in_degree[sid] = in_degree.get(sid, 0) + 1
+
+    waves: List[List[Dict]] = []
+    ready: deque = deque(sorted(sid for sid in all_ids if in_degree.get(sid, 0) == 0))
+    visited = 0
+
+    while ready:
+        # 当前所有就绪节点一起组成一个波次
+        wave_ids = list(ready)
+        ready.clear()
+        waves.append([id_map[sid] for sid in wave_ids])
+        visited += len(wave_ids)
+
+        for sid in wave_ids:
+            for neighbor in sorted(adj.get(sid, [])):
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    ready.append(neighbor)
+
+    # 环检测兆底：将未收录步骤追加为最后一波
+    if visited != len(steps):
+        covered = {s.get("id") for w in waves for s in w}
+        missing = [id_map[sid] for sid in sorted(set(all_ids) - covered)]
+        if missing:
+            logger.warning(
+                f"[PlanExecutor] _topo_waves: 检测到 {len(missing)} 个无法排序的步骤（可能存在依赖环），已追加到末尾"
+            )
+            waves.append(missing)
+
+    return waves
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,7 +262,8 @@ class PlanExecutor:
 
     async def execute(self) -> Generator:
         """
-        异步生成器：逐步执行计划，yield 进度事件 dict。
+        异步生成器：按依赖波次并行执行计划，yield 进度事件 dict。
+        同一波次内无互相依赖的步骤使用 asyncio.gather 并发执行。
         支持动态重规划：步骤失败时自动调用 LocalPlanner.replan() 生成修订步骤。
 
         事件格式与现有 SSE 体系兼容：
@@ -214,70 +273,67 @@ class PlanExecutor:
             {"type": "step_done","step_id": 1, "task_type": "WEB_SEARCH", "success": True, ...}
             {"type": "plan_done","final_output": "...", "saved_files": [...], "step_results": [...]}
         """
-        # 使用可变队列支持动态注入新步骤（Reflexion 风格重规划）
-        step_queue: List[Dict] = list(self.steps)
-        idx = 0
+        # 按依赖关系分组为并行波次
+        wave_list: List[List[Dict]] = _topo_waves(self.steps)
+        wave_idx = 0
 
-        while idx < len(step_queue):
-            total = len(step_queue)
-            step = step_queue[idx]
-            step_id = step.get("id", idx + 1)
-            task_type = step.get("task_type", "CHAT")
-            description = step.get("description", f"步骤 {step_id}")
-            output_key = step.get("output_key") or f"step_{step_id}_output"
+        while wave_idx < len(wave_list):
+            wave = wave_list[wave_idx]
+            total_steps = sum(len(w) for w in wave_list)
+            base_pos = sum(len(w) for w in wave_list[:wave_idx])
 
-            yield {
-                "type": "progress",
-                "step_number": idx + 1,
-                "step_description": description,
-                "message": f"步骤 {idx+1}/{total}: {description}",
-                "detail": f"任务类型: {task_type}",
-            }
+            # 如果当前波次包含多个无依赖步骤，提示并行执行
+            if len(wave) > 1:
+                names = "、".join(s.get("description", f"步骤{s.get('id')}") for s in wave)
+                yield {"type": "status", "message": f"⚡ 并行执行 {len(wave)} 个步骤: {names}"}
 
-            handler = self.handlers.get(task_type) or self.handlers.get("DEFAULT")
-            if handler is None:
-                err = f"无法处理任务类型: {task_type}"
-                logger.warning(f"[PlanExecutor] {err}")
-                result = {"success": False, "error": err, "output": ""}
-                self._record(step, result, output_key)
-                yield self._step_done_event(idx + 1, total, step, result)
-                idx += 1
-                continue
-
-            enriched_input = _build_enriched_input(step, self.store)
-            result = await self._run_with_retry(
-                handler, step, enriched_input, task_type, output_key, idx, total
+            # 并发执行当前波次，每步收集自己的事件列表和结果
+            wave_outcomes: List[Tuple[Dict, List[Dict], Dict]] = await self._run_wave(
+                wave, base_pos, total_steps
             )
 
-            # ── 动态重规划（步骤失败时）────────────────────────────────────────
-            if not result.get("success"):
-                new_steps = await self._attempt_replan(
-                    user_input=self.store.get("user_input", ""),
-                    completed_results=self.step_results,
-                    failed_step=step,
-                    error=result.get("error", "未知错误"),
-                    remaining_steps=step_queue[idx + 1:],
-                    next_id=step.get("id", idx + 1) + 1,
-                )
-                if new_steps:
-                    step_queue = step_queue[: idx + 1] + new_steps
-                    logger.info(
-                        f"[PlanExecutor] 🔄 Re-plan: 注入 {len(new_steps)} 个新步骤"
+            replan_insertions: List[List[Dict]] = []
+            for step, events, result in wave_outcomes:
+                # 按步骤顺序 yield 该步骤的所有事件
+                for event in events:
+                    yield event
+
+                step_id = step.get("id", 0)
+                output_key = step.get("output_key") or f"step_{step_id}_output"
+                self._record(step, result, output_key)
+
+                if result.get("saved_files"):
+                    self.saved_files.extend(result["saved_files"])
+
+                # 步骤失败时尝试动态重规划
+                if not result.get("success"):
+                    remaining = [s for w in wave_list[wave_idx + 1:] for s in w]
+                    new_steps = await self._attempt_replan(
+                        user_input=self.store.get("user_input", ""),
+                        completed_results=self.step_results[:-1],
+                        failed_step=step,
+                        error=result.get("error", "未知错误"),
+                        remaining_steps=remaining,
+                        next_id=step_id + 1,
                     )
-                    yield {
-                        "type": "replan",
-                        "message": f"🔄 重新规划: 生成 {len(new_steps)} 个新步骤",
-                        "new_step_count": len(new_steps),
-                    }
+                    if new_steps:
+                        replan_insertions.append(new_steps)
+                        logger.info(
+                            f"[PlanExecutor] 🔄 Re-plan: 注入 {len(new_steps)} 个新步骤"
+                        )
+                        yield {
+                            "type": "replan",
+                            "message": f"🔄 重新规划: 生成 {len(new_steps)} 个新步骤",
+                            "new_step_count": len(new_steps),
+                        }
 
-            self._record(step, result, output_key)
-            yield self._step_done_event(idx + 1, total, step, result)
+            # 将本波次产生的重规划步骤作为新波次插入队列
+            if replan_insertions:
+                flat_new = [s for ns in replan_insertions for s in ns]
+                new_waves = _topo_waves(flat_new)
+                wave_list = wave_list[: wave_idx + 1] + new_waves + wave_list[wave_idx + 1:]
 
-            # 追加文件
-            if result.get("saved_files"):
-                self.saved_files.extend(result["saved_files"])
-
-            idx += 1
+            wave_idx += 1
 
         # 汇总最终输出
         final_output = self._merge_outputs()
@@ -292,6 +348,48 @@ class PlanExecutor:
                 if k not in ("original_input", "user_input")
             },
         }
+
+    async def _run_wave(
+        self, wave: List[Dict], base_pos: int, total: int
+    ) -> List[Tuple[Dict, List[Dict], Dict]]:
+        """
+        并发执行一个波次内的所有步骤（asyncio.gather）。
+        返回列表：每项为 (step, events_list, result)，顺序与 wave 一致。
+        同一波次步骤互无依赖，可安全并发读取 ContextStore。
+        写入 ContextStore 由调用方在 gather 完成后顺序执行，无竞争。
+        """
+        async def _run_one(step: Dict, pos: int) -> Tuple[Dict, List[Dict], Dict]:
+            step_id = step.get("id", pos + 1)
+            task_type = step.get("task_type", "CHAT")
+            description = step.get("description", f"步骤 {step_id}")
+            output_key = step.get("output_key") or f"step_{step_id}_output"
+            events: List[Dict] = []
+
+            events.append({
+                "type": "progress",
+                "step_number": pos + 1,
+                "step_description": description,
+                "message": f"步骤 {pos+1}/{total}: {description}",
+                "detail": f"任务类型: {task_type}",
+            })
+
+            handler = self.handlers.get(task_type) or self.handlers.get("DEFAULT")
+            if handler is None:
+                err = f"无法处理任务类型: {task_type}"
+                logger.warning(f"[PlanExecutor] {err}")
+                result = {"success": False, "error": err, "output": ""}
+                events.append(self._step_done_event(pos + 1, total, step, result))
+                return step, events, result
+
+            enriched_input = _build_enriched_input(step, self.store)
+            result = await self._run_with_retry(
+                handler, step, enriched_input, task_type, output_key, pos, total
+            )
+            events.append(self._step_done_event(pos + 1, total, step, result))
+            return step, events, result
+
+        tasks = [_run_one(step, base_pos + i) for i, step in enumerate(wave)]
+        return list(await asyncio.gather(*tasks))
 
     # ─── Private helpers ─────────────────────────────────────────────────────
 

@@ -41,6 +41,7 @@ SkillChain（快捷方式）
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -100,9 +101,14 @@ class PipelineResult:
     elapsed_ms: float
     """总耗时（毫秒）"""
 
+    errors: Dict[str, str] = field(default_factory=dict)
+    """各步骤的错误信息 {skill_id: error_message}（仅记录失败步骤）"""
+
     @property
     def success(self) -> bool:
-        return bool(self.steps_executed) and not self.steps_skipped
+        # 只要有步骤成功执行即视为整体成功；
+        # skip_on_error=True 的跳过是可接受的非致命失败，不影响成功判定
+        return bool(self.steps_executed)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -147,16 +153,18 @@ class SkillPipeline:
         ctx: Dict[str, Any] = dict(context or {})
         steps_executed: List[str] = []
         steps_skipped: List[str] = []
+        errors: Dict[str, str] = {}
         last_output: Any = None
         t0 = time.perf_counter()
 
         for step in self.steps:
             # 构建本步骤的调用参数
-            call_ctx: Dict[str, Any] = {"skill_id": step.skill_id, **ctx}
-
+            # pass_full_ctx=True : 将整个 context 完整传入（链式管道默认行为）
+            # pass_full_ctx=False: 仅传入 input_from 显式声明的键（精确注入模式）
             if step.pass_full_ctx:
-                call_ctx["context"] = dict(ctx)
+                call_ctx: Dict[str, Any] = {"skill_id": step.skill_id, **ctx}
             else:
+                call_ctx = {"skill_id": step.skill_id}
                 for ctx_key, param_name in step.input_from.items():
                     if ctx_key in ctx:
                         call_ctx[param_name] = ctx[ctx_key]
@@ -177,6 +185,8 @@ class SkillPipeline:
                 logger.info("[SkillPipeline] ✅ step done: %s", step.skill_id)
 
             except Exception as exc:
+                err_msg = str(exc)
+                errors[step.skill_id] = err_msg
                 logger.warning(
                     "[SkillPipeline] ⚠️ step failed: %s — %s", step.skill_id, exc
                 )
@@ -190,6 +200,7 @@ class SkillPipeline:
                         steps_executed=steps_executed,
                         steps_skipped=steps_skipped,
                         elapsed_ms=elapsed,
+                        errors=errors,
                     )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -203,7 +214,19 @@ class SkillPipeline:
             steps_executed=steps_executed,
             steps_skipped=steps_skipped,
             elapsed_ms=elapsed_ms,
+            errors=errors,
         )
+
+    async def async_run(
+        self,
+        user_input: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> PipelineResult:
+        """
+        异步版本：将同步的 run() 移出事件循环执行，避免阻塞 asyncio。
+        从 async 上下文（如 PlanExecutor handler）调用时请使用此方法。
+        """
+        return await asyncio.to_thread(self.run, user_input, context)
 
 
 # ══════════════════════════════════════════════════════════════════
