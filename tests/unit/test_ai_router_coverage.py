@@ -1,9 +1,10 @@
 """Comprehensive tests for app.core.routing.ai_router.AIRouter."""
 
-import pytest
-import json
 import hashlib
-from unittest.mock import patch, MagicMock, Mock
+import json
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 
 def _make_mock_response(text):
@@ -133,6 +134,7 @@ class TestClassify:
     def test_timeout_returns_chat_fallback(self):
         """When the thread exceeds the timeout, classify returns CHAT with Timeout-fallback."""
         import time
+
         from app.core.routing.ai_router import AIRouter
 
         def slow_generate(*args, **kwargs):
@@ -301,6 +303,7 @@ class TestClassifyWithHint:
     def test_timeout_falls_back_to_classify(self):
         """On timeout, classify_with_hint delegates to classify()."""
         import time
+
         from app.core.routing.ai_router import AIRouter
 
         call_count = {"n": 0}

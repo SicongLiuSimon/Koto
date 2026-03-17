@@ -10,11 +10,11 @@ Layer 3 - 注入质量               : plan_template 被 inject_into_prompt
                                    正确追加到系统指令
 """
 
+import importlib
 import json
 import os
 import pathlib
 import sys
-import importlib
 
 import pytest
 
@@ -216,8 +216,8 @@ class TestAutoMatcherTriggerKeywords:
         验证 SkillAutoMatcher._match_with_patterns 能访问 SkillManager._def_registry，
         并从中读取 trigger_keywords 完成匹配。
         """
-        from app.core.skills.skill_manager import SkillManager
         from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+        from app.core.skills.skill_manager import SkillManager
 
         # 确保 def_registry 已初始化且包含 debug_python
         assert (

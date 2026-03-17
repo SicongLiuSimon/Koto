@@ -40,18 +40,6 @@ logger = logging.getLogger(__name__)
 
 # ── 可选依赖 ─────────────────────────────────────────────────────────────────
 try:
-    from langgraph.graph import StateGraph, END
-    from langgraph.types import (
-        Send,
-    )  # v1.x: Send moved from langgraph.graph to langgraph.types
-    from langgraph.checkpoint.memory import MemorySaver
-    from langchain_core.messages import (
-        AIMessage,
-        HumanMessage,
-        SystemMessage,
-        BaseMessage,
-    )
-    from typing_extensions import TypedDict, Annotated
     import operator
 
     from langchain_core.messages import (
@@ -60,6 +48,7 @@ try:
         HumanMessage,
         SystemMessage,
     )
+    from langgraph.checkpoint.memory import MemorySaver
     from langgraph.graph import END, StateGraph
     from langgraph.types import (  # v1.x: Send moved from langgraph.graph to langgraph.types
         Send,

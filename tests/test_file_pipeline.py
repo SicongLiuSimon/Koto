@@ -22,9 +22,9 @@
 """
 
 import os
+import shutil
 import sys
 import tempfile
-import shutil
 
 # 确保项目根目录在 sys.path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -7,15 +7,16 @@ Tests for large web modules at 0% coverage:
   - file_analyzer.py (335 stmts)
 """
 
-import pytest
+import hashlib
+import json
 import os
 import re
-import json
-import hashlib
 import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock, Mock, PropertyMock
 from datetime import datetime
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -283,8 +284,8 @@ class TestTrackChangesEditor:
 
     # -- _get_run_text ------------------------------------------------------
     def test_get_run_text(self):
-        from lxml import etree
         from docx.oxml.ns import qn
+        from lxml import etree
 
         obj = self._make()
         ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"

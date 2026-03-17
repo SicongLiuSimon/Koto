@@ -18,7 +18,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -701,8 +701,8 @@ class TestUtils:
 class TestSessionManager:
     @pytest.fixture(autouse=True)
     def setup_session_mgr(self, tmp_path):
-        from web.app import SessionManager
         import web.app as webapp
+        from web.app import SessionManager
 
         self.chat_dir = str(tmp_path / "chats")
         os.makedirs(self.chat_dir, exist_ok=True)
@@ -807,7 +807,7 @@ class TestChatSystemInstruction:
 @pytest.mark.unit
 class TestTimeInfoParsing:
     def setup_method(self):
-        from web.app import _parse_time_info_for_filegen, _build_filegen_time_context
+        from web.app import _build_filegen_time_context, _parse_time_info_for_filegen
 
         self.parse = _parse_time_info_for_filegen
         self.build = _build_filegen_time_context
@@ -1436,8 +1436,8 @@ class TestEdgeCases:
         assert Utils._PACKAGE_ALLOWLIST["PIL"] == "Pillow"
 
     def test_session_manager_append_and_save(self, tmp_path):
-        from web.app import SessionManager
         import web.app as webapp
+        from web.app import SessionManager
 
         chat_dir = str(tmp_path / "chats")
         os.makedirs(chat_dir, exist_ok=True)

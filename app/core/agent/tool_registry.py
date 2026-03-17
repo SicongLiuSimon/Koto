@@ -1,6 +1,7 @@
 import inspect
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FuturesTimeout
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as _FuturesTimeout
 from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from app.core.agent.base import AgentPlugin

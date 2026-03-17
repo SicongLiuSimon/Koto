@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, mock_open, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
 
 import pytest
 
@@ -949,7 +949,7 @@ class TestVoiceInputEngine:
 
     @patch("web.voice_input.VoiceInputEngine._detect_engines")
     def _make(self, mock_detect):
-        from web.voice_input import VoiceInputEngine, EngineType
+        from web.voice_input import EngineType, VoiceInputEngine
 
         engine = VoiceInputEngine()
         engine.available_engines = [EngineType.OFFLINE]

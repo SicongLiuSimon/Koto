@@ -11,9 +11,10 @@ Tests 19 plugins in app.core.agent.plugins, covering:
 import json
 import os
 import platform
+import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -1210,6 +1211,7 @@ class TestImageProcessPlugin:
         with patch.dict(sys.modules, {"PIL": mock_pil, "PIL.Image": mock_pil.Image}):
             # Force re-import to pick up mock
             import importlib
+
             import app.core.agent.plugins.image_process_plugin as mod
 
             importlib.reload(mod)
@@ -1237,6 +1239,7 @@ class TestImageProcessPlugin:
 
         with patch.dict(sys.modules, {"PIL": mock_pil, "PIL.Image": mock_pil.Image}):
             import importlib
+
             import app.core.agent.plugins.image_process_plugin as mod
 
             importlib.reload(mod)
@@ -1263,6 +1266,7 @@ class TestImageProcessPlugin:
 
         with patch.dict(sys.modules, {"PIL": mock_pil, "PIL.Image": mock_pil.Image}):
             import importlib
+
             import app.core.agent.plugins.image_process_plugin as mod
 
             importlib.reload(mod)
@@ -1386,6 +1390,7 @@ class TestScriptGenerationPlugin:
         assert "os" in result
         assert "script_type" in result
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     def test_save_script_to_file(self):
         p = self._make()
         with tempfile.TemporaryDirectory() as td:

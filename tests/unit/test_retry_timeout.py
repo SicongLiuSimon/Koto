@@ -9,7 +9,7 @@ Covers:
 from __future__ import annotations
 
 import types as stdlib_types
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 

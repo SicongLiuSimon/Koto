@@ -9,7 +9,7 @@ import sqlite3
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, mock_open
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
 import pytest
 
@@ -495,7 +495,7 @@ class TestAuthManager:
         assert "guest" in rm.roles
 
     def test_role_manager_create_custom_role(self):
-        from web.auth_manager import RoleManager, Permission
+        from web.auth_manager import Permission, RoleManager
 
         rm = RoleManager()
         role = rm.create_role(
@@ -513,7 +513,7 @@ class TestAuthManager:
         assert um.get_user_by_email("alice@test.com").user_id == "u1"
 
     def test_user_manager_has_permission(self):
-        from web.auth_manager import UserManager, UserRole, Permission
+        from web.auth_manager import Permission, UserManager, UserRole
 
         um = UserManager()
         um.create_user("u1", "alice", "a@b.com", "h", [UserRole.USER])

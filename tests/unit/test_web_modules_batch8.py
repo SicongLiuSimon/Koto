@@ -20,12 +20,12 @@ Modules covered:
 
 import json
 import os
+import sqlite3
 import sys
 import tempfile
-import sqlite3
-from pathlib import Path
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock, Mock, AsyncMock, mock_open
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, Mock, mock_open, patch
 
 import pytest
 
@@ -339,7 +339,7 @@ class TestContextInjector:
         assert task == TaskType.SYSTEM_DIAGNOSIS
 
     def test_context_selector_code(self):
-        from web.context_injector import ContextSelector, TaskType, ContextType
+        from web.context_injector import ContextSelector, ContextType, TaskType
 
         s = ContextSelector()
         ctxs = s.select_contexts(TaskType.CODE_EXECUTION)
@@ -373,18 +373,17 @@ class TestContextInjector:
         assert "Koto" in instruction
 
     def test_classify_question_helper(self):
-        from web.context_injector import classify_question, TaskType
-
         # Reset singleton
         import web.context_injector as ci
+        from web.context_injector import TaskType, classify_question
 
         ci._context_injector = None
         task, conf = classify_question("运行脚本")
         assert task == TaskType.CODE_EXECUTION
 
     def test_get_dynamic_system_instruction(self):
-        from web.context_injector import get_dynamic_system_instruction
         import web.context_injector as ci
+        from web.context_injector import get_dynamic_system_instruction
 
         ci._context_injector = None
         result = get_dynamic_system_instruction()
@@ -472,6 +471,7 @@ class TestClipboardManager:
         with patch.dict(sys.modules, {"pyperclip": mock_pyperclip}):
             # Force re-import so the module picks up the mock
             import importlib
+
             import web.clipboard_manager as cm_mod
 
             importlib.reload(cm_mod)

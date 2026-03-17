@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, PropertyMock, call
+from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 
 import pytest
 

@@ -610,6 +610,7 @@ class TestLocalModelInstaller:
             cb = Mock()
             assert mod.pull_model("gemma3:1b", log_cb=cb) is False
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     def test_pull_model_success_parses_progress(self):
         mod = self._import_module()
         mock_proc = MagicMock()

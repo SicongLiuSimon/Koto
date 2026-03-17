@@ -3,15 +3,16 @@ Deep-coverage tests for the largest uncovered modules.
 Each class targets methods / branches NOT exercised by earlier test files.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock, Mock, PropertyMock, mock_open, call
+import json
 import os
 import sys
-import json
 import tempfile
 import threading
 import time
 from pathlib import Path
+from unittest.mock import MagicMock, Mock, PropertyMock, call, mock_open, patch
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -867,7 +868,7 @@ class TestVoiceFastDeep:
 
     # -- request_stop_streaming ---------------------------------------------
     def test_request_stop_streaming_sets_event(self):
-        from web.voice_fast import request_stop_streaming, _stream_stop_event
+        from web.voice_fast import _stream_stop_event, request_stop_streaming
 
         request_stop_streaming()
         assert _stream_stop_event.is_set()
@@ -948,7 +949,7 @@ class TestVoiceInputDeep:
     # -- _get_engine_name / _get_engine_description -------------------------
     def test_get_engine_name_all_types(self):
         with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import VoiceInputEngine, EngineType
+            from web.voice_input import EngineType, VoiceInputEngine
 
             engine = VoiceInputEngine()
         for et in EngineType:
@@ -958,7 +959,7 @@ class TestVoiceInputDeep:
 
     def test_get_engine_description_all_types(self):
         with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import VoiceInputEngine, EngineType
+            from web.voice_input import EngineType, VoiceInputEngine
 
             engine = VoiceInputEngine()
         for et in EngineType:
@@ -968,7 +969,7 @@ class TestVoiceInputDeep:
     # -- _parse_engine ------------------------------------------------------
     def test_parse_engine_vosk(self):
         with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import VoiceInputEngine, EngineType
+            from web.voice_input import EngineType, VoiceInputEngine
 
             engine = VoiceInputEngine()
         result = engine._parse_engine("vosk")
@@ -976,7 +977,7 @@ class TestVoiceInputDeep:
 
     def test_parse_engine_google(self):
         with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import VoiceInputEngine, EngineType
+            from web.voice_input import EngineType, VoiceInputEngine
 
             engine = VoiceInputEngine()
         result = engine._parse_engine("google")
@@ -984,7 +985,7 @@ class TestVoiceInputDeep:
 
     def test_parse_engine_gemini(self):
         with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import VoiceInputEngine, EngineType
+            from web.voice_input import EngineType, VoiceInputEngine
 
             engine = VoiceInputEngine()
         result = engine._parse_engine("gemini")
@@ -992,7 +993,7 @@ class TestVoiceInputDeep:
 
     def test_parse_engine_unknown_defaults(self):
         with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import VoiceInputEngine, EngineType
+            from web.voice_input import EngineType, VoiceInputEngine
 
             engine = VoiceInputEngine()
         result = engine._parse_engine("unknown_engine_xyz")
@@ -1147,6 +1148,7 @@ class TestLocalModelInstallerDeep:
             save_result("test:1b")  # should not raise
 
     # -- pull_model ---------------------------------------------------------
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     def test_pull_model_success(self):
         mock_proc = MagicMock()
         mock_proc.stdout = iter(["pulling manifest\n", "success\n"])
@@ -1167,6 +1169,7 @@ class TestLocalModelInstallerDeep:
             result = pull_model("gemma3:1b")
         assert result is False
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     def test_pull_model_with_progress_percentage(self):
         mock_proc = MagicMock()
         mock_proc.stdout = iter(["pulling manifest\n", "  50% complete\n", "success\n"])
@@ -1227,7 +1230,7 @@ class TestLocalModelInstallerDeep:
         assert len(models) >= 1
 
     def test_recommend_models_high_resources(self):
-        from src.local_model_installer import recommend_models, MODEL_CATALOG
+        from src.local_model_installer import MODEL_CATALOG, recommend_models
 
         info = {
             "ram_gb": 64,
@@ -1373,8 +1376,9 @@ class TestKotoSetupDeep:
         assert ok is True
 
     def test_validate_api_key_http_400(self):
-        from src.koto_setup import _validate_api_key
         import urllib.error
+
+        from src.koto_setup import _validate_api_key
 
         with patch(
             "urllib.request.urlopen",
@@ -1387,8 +1391,9 @@ class TestKotoSetupDeep:
         assert "❌" in msg
 
     def test_validate_api_key_http_403(self):
-        from src.koto_setup import _validate_api_key
         import urllib.error
+
+        from src.koto_setup import _validate_api_key
 
         with patch(
             "urllib.request.urlopen",
@@ -1401,8 +1406,9 @@ class TestKotoSetupDeep:
         assert "403" in msg or "❌" in msg
 
     def test_validate_api_key_http_500(self):
-        from src.koto_setup import _validate_api_key
         import urllib.error
+
+        from src.koto_setup import _validate_api_key
 
         with patch(
             "urllib.request.urlopen",

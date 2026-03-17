@@ -10,10 +10,11 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -758,10 +759,12 @@ class TestFileService:
         svc = self._make_svc(tmp_dir)
         assert svc.is_safe_path(os.path.join(tmp_dir, "file.txt")) is True
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     def test_safe_path_rejects_system32(self, tmp_dir):
         svc = self._make_svc(tmp_dir)
         assert svc.is_safe_path(r"C:\Windows\System32\evil.txt") is False
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     def test_safe_path_rejects_program_files(self, tmp_dir):
         svc = self._make_svc(tmp_dir)
         assert svc.is_safe_path(r"C:\Program Files\app\file.dll") is False

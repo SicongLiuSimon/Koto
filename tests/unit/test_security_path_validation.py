@@ -16,6 +16,7 @@ nothing touches the real disk or opens a real browser.
 from __future__ import annotations
 
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -69,6 +70,7 @@ class TestAnnotationPluginSandbox:
             "不在允许的目录范围内" in result
         ), "Absolute path outside safe_dirs must be rejected"
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     def test_windows_absolute_path_outside_safe_dirs_blocked(self):
         """Windows-style absolute path outside safe_dirs should be blocked."""
         plugin = self._make_plugin()

@@ -5,9 +5,9 @@ Comprehensive tests for app.core.agent.checkpoint_manager
 
 import sqlite3
 import threading
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
 
 
 @pytest.mark.unit
@@ -123,6 +123,7 @@ class TestGetCheckpointer:
     def test_fallback_to_memory_on_import_error(self):
         """get_checkpointer falls back to MemorySaver when SqliteSaver import fails."""
         import sys
+
         import app.core.agent.checkpoint_manager as cm
 
         # Ensure langgraph.checkpoint.sqlite is NOT importable

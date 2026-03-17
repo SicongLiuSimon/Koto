@@ -14,7 +14,7 @@ import sqlite3
 import time
 from datetime import date
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, mock_open
+from unittest.mock import MagicMock, Mock, mock_open, patch
 
 import pytest
 
@@ -156,7 +156,7 @@ class TestSettingsManager:
         with patch("web.settings.os.path.exists", return_value=False), patch(
             "web.settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import SettingsManager, DEFAULT_SETTINGS
+            from web.settings import DEFAULT_SETTINGS, SettingsManager
 
             mgr = SettingsManager()
             mgr._settings["appearance"]["theme"] = "light"
@@ -170,7 +170,7 @@ class TestSettingsManager:
         with patch("web.settings.os.path.exists", return_value=False), patch(
             "web.settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import SettingsManager, DEFAULT_SETTINGS
+            from web.settings import DEFAULT_SETTINGS, SettingsManager
 
             mgr = SettingsManager()
             mgr._settings["ai"]["default_model"] = "custom"
@@ -388,7 +388,7 @@ class TestTokenTracker:
         assert price["output"] == 10.00
 
     def test_get_price_falls_back_to_default(self):
-        from web.token_tracker import _get_price, _PRICING
+        from web.token_tracker import _PRICING, _get_price
 
         price = _get_price("totally-unknown-model-xyz")
         assert price == _PRICING["default"]

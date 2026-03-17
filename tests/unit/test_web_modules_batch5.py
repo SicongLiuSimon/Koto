@@ -19,7 +19,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, mock_open, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
 
 import pytest
 
@@ -162,7 +162,7 @@ class TestProactiveTrigger:
 
     def test_determine_interaction_type_emergency(self):
         """Emergency trigger type should return ALERT."""
-        from web.proactive_trigger import TriggerType, InteractionType
+        from web.proactive_trigger import InteractionType, TriggerType
 
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.EMERGENCY, 0.5, 0.5)
@@ -170,7 +170,7 @@ class TestProactiveTrigger:
 
     def test_determine_interaction_type_high_urgency(self):
         """High urgency (>=0.8) returns ALERT regardless of trigger type."""
-        from web.proactive_trigger import TriggerType, InteractionType
+        from web.proactive_trigger import InteractionType, TriggerType
 
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.PERIODIC, 0.9, 0.5)
@@ -178,7 +178,7 @@ class TestProactiveTrigger:
 
     def test_determine_interaction_type_pattern(self):
         """Pattern trigger type with medium urgency returns QUESTION."""
-        from web.proactive_trigger import TriggerType, InteractionType
+        from web.proactive_trigger import InteractionType, TriggerType
 
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.PATTERN, 0.4, 0.4)
@@ -215,7 +215,7 @@ class TestParallelExecutor:
     # --- Task dataclass ---
 
     def test_task_creation_defaults(self):
-        from web.parallel_executor import Task, TaskType, Priority, TaskStatus
+        from web.parallel_executor import Priority, Task, TaskStatus, TaskType
 
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         assert t.status == TaskStatus.PENDING
@@ -224,7 +224,7 @@ class TestParallelExecutor:
         assert t.elapsed_time == 0
 
     def test_task_abort(self):
-        from web.parallel_executor import Task, TaskType, Priority, TaskStatus
+        from web.parallel_executor import Priority, Task, TaskStatus, TaskType
 
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         t.abort()
@@ -232,7 +232,7 @@ class TestParallelExecutor:
         assert t.status == TaskStatus.CANCELLED
 
     def test_task_to_dict(self):
-        from web.parallel_executor import Task, TaskType, Priority
+        from web.parallel_executor import Priority, Task, TaskType
 
         t = Task(
             id="t1",
@@ -248,7 +248,7 @@ class TestParallelExecutor:
         assert d["status"] == "pending"
 
     def test_task_elapsed_time_running(self):
-        from web.parallel_executor import Task, TaskType, Priority, TaskStatus
+        from web.parallel_executor import Priority, Task, TaskStatus, TaskType
 
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         t.started_at = datetime.now() - timedelta(seconds=5)
@@ -258,7 +258,7 @@ class TestParallelExecutor:
     # --- TaskQueueManager ---
 
     def test_queue_submit_and_get_next(self):
-        from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
 
         mgr = TaskQueueManager()
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
@@ -269,7 +269,7 @@ class TestParallelExecutor:
 
     def test_queue_priority_ordering(self):
         """CRITICAL tasks should be returned before HIGH/NORMAL."""
-        from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
 
         mgr = TaskQueueManager()
         t_normal = Task(
@@ -285,11 +285,11 @@ class TestParallelExecutor:
 
     def test_queue_cancel_task(self):
         from web.parallel_executor import (
-            TaskQueueManager,
-            Task,
-            TaskType,
             Priority,
+            Task,
+            TaskQueueManager,
             TaskStatus,
+            TaskType,
         )
 
         mgr = TaskQueueManager()
@@ -305,7 +305,7 @@ class TestParallelExecutor:
         assert mgr.cancel("nonexistent") is False
 
     def test_queue_full_raises(self):
-        from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
 
         mgr = TaskQueueManager(max_queue_size=2)
         for i in range(2):
@@ -328,7 +328,7 @@ class TestParallelExecutor:
             )
 
     def test_queue_get_stats(self):
-        from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
 
         mgr = TaskQueueManager()
         mgr.submit(
@@ -339,7 +339,7 @@ class TestParallelExecutor:
         assert stats["high"] == 1
 
     def test_queue_get_session_tasks(self):
-        from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+        from web.parallel_executor import Priority, Task, TaskQueueManager, TaskType
 
         mgr = TaskQueueManager()
         mgr.submit(
@@ -355,7 +355,7 @@ class TestParallelExecutor:
     # --- ResourceManager ---
 
     def test_resource_manager_can_start_task(self):
-        from web.parallel_executor import ResourceManager, Task, TaskType, Priority
+        from web.parallel_executor import Priority, ResourceManager, Task, TaskType
 
         rm = ResourceManager()
         rm.get_memory_usage_mb = lambda: 500.0
@@ -365,7 +365,7 @@ class TestParallelExecutor:
         assert reason == "OK"
 
     def test_resource_manager_release(self):
-        from web.parallel_executor import ResourceManager, Task, TaskType, Priority
+        from web.parallel_executor import Priority, ResourceManager, Task, TaskType
 
         rm = ResourceManager()
         rm.current_concurrent = 2
@@ -374,7 +374,7 @@ class TestParallelExecutor:
         assert rm.current_concurrent == 1
 
     def test_resource_manager_max_concurrent_blocks(self):
-        from web.parallel_executor import ResourceManager, Task, TaskType, Priority
+        from web.parallel_executor import Priority, ResourceManager, Task, TaskType
 
         rm = ResourceManager()
         rm.get_memory_usage_mb = lambda: 100.0
@@ -415,7 +415,7 @@ class TestParallelExecutor:
         assert d2 > d1
 
     def test_retry_policy_fatal_errors(self):
-        from web.parallel_executor import RetryPolicy, Task, TaskType, Priority
+        from web.parallel_executor import Priority, RetryPolicy, Task, TaskType
 
         rp = RetryPolicy()
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
@@ -465,7 +465,7 @@ class TestParallelExecutor:
     # --- TaskSnapshot ---
 
     def test_task_snapshot_roundtrip(self):
-        from web.parallel_executor import TaskSnapshot, Task, TaskType, Priority
+        from web.parallel_executor import Priority, Task, TaskSnapshot, TaskType
 
         t = Task(
             id="t1",
@@ -485,13 +485,13 @@ class TestParallelExecutor:
 
     def test_task_monitor_dashboard(self):
         from web.parallel_executor import (
-            TaskMonitor,
-            TaskQueueManager,
+            Priority,
             ResourceManager,
             Task,
-            TaskType,
-            Priority,
+            TaskMonitor,
+            TaskQueueManager,
             TaskStatus,
+            TaskType,
         )
 
         qm = TaskQueueManager()
@@ -751,6 +751,7 @@ class TestPptSynthesizer:
     def test_synthesize_from_blueprint_error_handling(self):
         """When synthesize_from_blueprint encounters an error, it returns error dict."""
         import asyncio
+
         from web.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()

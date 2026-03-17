@@ -10,8 +10,6 @@ Local Model Installer  —  本地 AI 模型安装器
     pyinstaller local_model_installer.spec
 """
 
-import os
-import sys
 import json
 import os
 import platform

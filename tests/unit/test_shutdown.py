@@ -171,6 +171,7 @@ class TestSignalHandlersRegistered:
 
         with patch("signal.signal", mock_signal), patch("atexit.register"):
             import importlib
+
             import src.server as server_mod
 
             importlib.reload(server_mod)
@@ -185,6 +186,7 @@ class TestSignalHandlersRegistered:
 
         with patch("signal.signal"), patch("atexit.register", mock_atexit):
             import importlib
+
             import src.server as server_mod
 
             importlib.reload(server_mod)

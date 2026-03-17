@@ -11,17 +11,16 @@ Covers constructors, key public methods, and error handling with mocked I/O.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import sqlite3
-import time
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, mock_open, PropertyMock, AsyncMock
-
-import asyncio
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, mock_open, patch
 
 import pytest
 
@@ -174,7 +173,7 @@ class TestPPTMasterDataclasses:
         assert ContentDensity.DENSE.value == "dense"
 
     def test_slide_blueprint_to_dict(self):
-        from web.ppt_master import SlideBlueprint, SlideType, ContentDensity
+        from web.ppt_master import ContentDensity, SlideBlueprint, SlideType
 
         sb = SlideBlueprint(
             slide_index=0,
@@ -294,10 +293,10 @@ class TestPPTLayoutPlanner:
 
     def test_plan_layout_dense_content(self):
         from web.ppt_master import (
+            ContentDensity,
             PPTLayoutPlanner,
             SlideBlueprint,
             SlideType,
-            ContentDensity,
         )
 
         planner = PPTLayoutPlanner()
@@ -476,8 +475,8 @@ class TestPPTGenerationPipeline:
     @patch("web.ppt_pipeline.PPTSynthesizer")
     @patch("web.ppt_pipeline.PPTMasterOrchestrator")
     def test_prepare_image_map_empty(self, mock_orch, mock_synth):
-        from web.ppt_pipeline import PPTGenerationPipeline
         from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+        from web.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
@@ -490,8 +489,8 @@ class TestPPTGenerationPipeline:
     @patch("web.ppt_pipeline.PPTSynthesizer")
     @patch("web.ppt_pipeline.PPTMasterOrchestrator")
     def test_prepare_image_map_with_images(self, mock_orch, mock_synth):
-        from web.ppt_pipeline import PPTGenerationPipeline
         from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+        from web.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
@@ -504,8 +503,8 @@ class TestPPTGenerationPipeline:
     @patch("web.ppt_pipeline.PPTSynthesizer")
     @patch("web.ppt_pipeline.PPTMasterOrchestrator")
     def test_finalize_result(self, mock_orch, mock_synth):
-        from web.ppt_pipeline import PPTGenerationPipeline
         from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+        from web.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
@@ -612,7 +611,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.makedirs")
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_add_task(self, mock_exists, mock_makedirs, mock_dump):
-        from web.task_scheduler import TaskScheduler, Task, TaskPriority
+        from web.task_scheduler import Task, TaskPriority, TaskScheduler
 
         sched = TaskScheduler()
         action = MagicMock()
@@ -627,7 +626,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.makedirs")
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_cancel_task(self, mock_exists, mock_makedirs, mock_dump):
-        from web.task_scheduler import TaskScheduler, Task
+        from web.task_scheduler import Task, TaskScheduler
 
         sched = TaskScheduler()
         task = Task(task_id="t1", name="T1", action=MagicMock())
@@ -641,7 +640,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.makedirs")
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_get_task(self, mock_exists, mock_makedirs, mock_dump):
-        from web.task_scheduler import TaskScheduler, Task
+        from web.task_scheduler import Task, TaskScheduler
 
         sched = TaskScheduler()
         task = Task(task_id="t1", name="T1", action=MagicMock())
@@ -654,7 +653,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.makedirs")
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_list_tasks(self, mock_exists, mock_makedirs, mock_dump):
-        from web.task_scheduler import TaskScheduler, Task, TaskStatus
+        from web.task_scheduler import Task, TaskScheduler, TaskStatus
 
         sched = TaskScheduler()
         t1 = Task(task_id="t1", name="T1", action=MagicMock())
@@ -690,8 +689,8 @@ class TestTaskDispatcher:
     @patch("web.task_dispatcher.get_resource_manager")
     @patch("web.task_dispatcher.get_queue_manager")
     def test_dispatcher_scheduler_register_executor(self, mock_qm, mock_rm, mock_mon):
-        from web.task_dispatcher import TaskScheduler as DispatcherScheduler
         from web.parallel_executor import TaskType
+        from web.task_dispatcher import TaskScheduler as DispatcherScheduler
 
         sched = DispatcherScheduler()
         fn = MagicMock()
@@ -726,8 +725,8 @@ class TestTaskDispatcher:
     @patch("web.task_dispatcher.get_resource_manager")
     @patch("web.task_dispatcher.get_queue_manager")
     def test_task_executor_circuit_breaker_open(self, mock_qm, mock_rm, mock_mon):
+        from web.parallel_executor import Priority, Task, TaskType
         from web.task_dispatcher import TaskExecutor
-        from web.parallel_executor import Task, TaskType, Priority
 
         task = Task(
             id="test-1",
@@ -844,7 +843,7 @@ class TestWorkflowManager:
         assert ex.execution_history == []
 
     def test_workflow_executor_execute_tool_step(self):
-        from web.workflow_manager import WorkflowExecutor, Workflow
+        from web.workflow_manager import Workflow, WorkflowExecutor
 
         ex = WorkflowExecutor()
         wf = Workflow("WF")
@@ -854,7 +853,7 @@ class TestWorkflowManager:
         assert result["steps_completed"] == 1
 
     def test_workflow_executor_execute_unknown_step(self):
-        from web.workflow_manager import WorkflowExecutor, Workflow
+        from web.workflow_manager import Workflow, WorkflowExecutor
 
         ex = WorkflowExecutor()
         wf = Workflow("WF")
@@ -863,7 +862,7 @@ class TestWorkflowManager:
         assert result["steps_failed"] == 1
 
     def test_workflow_executor_get_execution_history(self):
-        from web.workflow_manager import WorkflowExecutor, Workflow
+        from web.workflow_manager import Workflow, WorkflowExecutor
 
         ex = WorkflowExecutor()
         wf = Workflow("WF")
@@ -873,7 +872,7 @@ class TestWorkflowManager:
         assert len(hist) == 1
 
     def test_workflow_executor_callbacks(self):
-        from web.workflow_manager import WorkflowExecutor, Workflow
+        from web.workflow_manager import Workflow, WorkflowExecutor
 
         ex = WorkflowExecutor()
         wf = Workflow("WF")

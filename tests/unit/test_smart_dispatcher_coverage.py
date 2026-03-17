@@ -7,8 +7,9 @@ channels, resolve_workflow, routing list construction, and caching.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, Mock
 
 
 def _fresh_dispatcher():

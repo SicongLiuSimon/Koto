@@ -1,28 +1,29 @@
 """Tests for the Koto custom exception hierarchy."""
 
 import inspect
+
 import pytest
 
 from app.core.errors import (
+    AuthenticationError,
+    ConfigurationError,
+    GeminiAPIError,
+    InsufficientPermissionsError,
     KotoError,
     LLMProviderError,
-    OllamaConnectionError,
-    GeminiAPIError,
+    MissingConfigError,
     ModelNotFoundError,
     ModelTimeoutError,
-    SkillError,
-    SkillNotFoundError,
-    SkillExecutionError,
-    SkillLoadError,
-    AuthenticationError,
-    TokenExpiredError,
-    InsufficientPermissionsError,
-    ConfigurationError,
-    MissingConfigError,
-    StorageError,
+    OllamaConnectionError,
     PathTraversalError,
     RoutingError,
+    SkillError,
+    SkillExecutionError,
+    SkillLoadError,
+    SkillNotFoundError,
+    StorageError,
     TaskClassificationError,
+    TokenExpiredError,
 )
 
 # Collect all exception classes defined in the module

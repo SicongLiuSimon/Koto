@@ -69,7 +69,7 @@ _proxy = _setup_proxy_for_test()
 if _proxy:
     print(f"  代理: {_proxy}")
 
-from app.core.llm.gemini import GeminiProvider, _INTERACTIONS_ONLY_MODELS
+from app.core.llm.gemini import _INTERACTIONS_ONLY_MODELS, GeminiProvider
 
 GREEN = "\033[92m"
 RED = "\033[91m"

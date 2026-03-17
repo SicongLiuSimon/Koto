@@ -6,12 +6,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import app.core.llm.model_fallback as _mod
 from app.core.llm.model_fallback import (
     ModelFallbackExecutor,
     _is_model_unavailable_error,
     get_fallback_executor,
 )
-import app.core.llm.model_fallback as _mod
 
 # ---------------------------------------------------------------------------
 # Helpers

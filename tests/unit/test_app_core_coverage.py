@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
@@ -1154,7 +1154,7 @@ class TestOpsEventBus:
 
     def test_history_max_limit(self):
         """History is bounded by _HISTORY_MAX."""
-        from app.core.ops.ops_event_bus import OpsEventBus, _HISTORY_MAX
+        from app.core.ops.ops_event_bus import _HISTORY_MAX, OpsEventBus
 
         bus = OpsEventBus()
         for i in range(_HISTORY_MAX + 50):
@@ -1335,8 +1335,8 @@ class TestOllamaLLMProvider:
     def test_generate_content_with_skill_preamble(self, mock_post):
         """generate_content() injects skill preamble when Skills marker present."""
         from app.core.llm.ollama_llm_provider import (
-            OllamaLLMProvider,
             _SKILL_BLOCK_MARKER,
+            OllamaLLMProvider,
         )
 
         mock_post.return_value = {

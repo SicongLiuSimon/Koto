@@ -341,8 +341,9 @@ class DataProcessPlugin(AgentPlugin):
     ) -> str:
         """Run a time-series trend analysis on user data."""
         try:
-            import pandas as pd
             import math
+
+            import pandas as pd
 
             df = self._load_df(filepath)
 

@@ -8,9 +8,9 @@ and entry_point, dynamic import security allowlist, and edge cases.
 from __future__ import annotations
 
 import types
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock
 
 from app.core.skills.skill_capability import SkillCapabilityRegistry
 

@@ -10,11 +10,10 @@ from __future__ import annotations
 import json
 import socket
 import time
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 import requests
-
-from unittest.mock import patch, MagicMock, Mock, PropertyMock
 
 # ---------------------------------------------------------------------------
 # Helpers

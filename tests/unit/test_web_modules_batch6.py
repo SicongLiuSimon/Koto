@@ -14,15 +14,16 @@ Unit tests for web modules batch 6:
   - QuickNoteManager
 """
 
-import pytest
-from unittest.mock import patch, MagicMock, Mock, mock_open, PropertyMock
-import os
 import json
-import tempfile
+import os
 import shutil
 import sqlite3
+import tempfile
 import threading
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # DocumentAnnotator
@@ -65,8 +66,9 @@ class TestDocumentAnnotator:
         assert os.path.exists(revised)
 
     def test_extract_text_from_word_exception(self):
-        from web.document_annotator import DocumentAnnotator
         import sys
+
+        from web.document_annotator import DocumentAnnotator
 
         mock_docx = MagicMock()
         mock_docx.Document.side_effect = Exception("read error")
@@ -286,8 +288,9 @@ class TestDocumentReader:
             m.assert_called_once()
 
     def test_read_ppt_import_error(self):
-        from web.document_reader import DocumentReader
         import sys
+
+        from web.document_reader import DocumentReader
 
         with patch.dict(sys.modules, {"pptx": None}):
             result = DocumentReader.read_ppt("test.pptx")
@@ -295,8 +298,9 @@ class TestDocumentReader:
         assert "python-pptx" in result["error"]
 
     def test_read_excel_import_error(self):
-        from web.document_reader import DocumentReader
         import sys
+
+        from web.document_reader import DocumentReader
 
         with patch.dict(sys.modules, {"openpyxl": None}):
             result = DocumentReader.read_excel("test.xlsx")
@@ -418,8 +422,9 @@ class TestDocumentValidator:
         assert result["valid_count"] >= 1
 
     def test_verify_track_changes_integrity(self):
-        from web.document_validator import DocumentValidator
         import sys
+
+        from web.document_validator import DocumentValidator
 
         mock_docx = MagicMock()
         mock_para = MagicMock()
@@ -657,8 +662,9 @@ class TestFileScanner:
         assert "MB" in _human_size(5 * 1024 * 1024)
 
     def test_human_time(self):
-        from web.file_scanner import _human_time
         import time
+
+        from web.file_scanner import _human_time
 
         result = _human_time(time.time())
         assert "-" in result  # date format contains dashes

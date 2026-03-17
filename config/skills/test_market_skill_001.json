@@ -6,6 +6,7 @@
   "skill_nature": "domain_skill",
   "description": "A skill for marketplace integration testing",
   "intent_description": "",
+  "when_not_to_use": "",
   "system_prompt_template": "",
   "input_variables": [],
   "output_spec": {
@@ -18,6 +19,9 @@
     "description": ""
   },
   "bound_tools": [],
+  "executor_tools": [],
+  "plan_template": [],
+  "trigger_keywords": [],
   "task_types": [
     "CHAT"
   ],
@@ -31,6 +35,9 @@
   ],
   "priority": 50,
   "conflict_with": [],
+  "chains_to": [],
+  "synergizes_with": [],
+  "output_keys": [],
   "examples": [],
   "compatibility": {},
   "dependencies": [],
@@ -38,7 +45,5 @@
   "update_url": "",
   "publisher": "user",
   "default_triggers": [],
-  "plan_template": [],
-  "executor_tools": [],
   "entry_point": null
 }

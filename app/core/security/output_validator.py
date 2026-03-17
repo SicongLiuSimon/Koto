@@ -44,9 +44,9 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import re
-import concurrent.futures
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 

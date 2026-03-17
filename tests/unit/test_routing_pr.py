@@ -150,6 +150,7 @@ class TestInitResponseModel:
 
     def test_returns_false_when_no_model_available(self):
         from unittest.mock import patch
+
         from app.core.routing.local_model_router import LocalModelRouter
 
         original_resp = LocalModelRouter._response_model

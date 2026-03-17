@@ -11,14 +11,14 @@ All external services (APIs, file I/O, audio libs, COM) are mocked.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
 import sys
 import types
-import importlib
 from pathlib import Path
-from unittest.mock import patch, MagicMock, Mock, mock_open, PropertyMock
+from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
 
 import pytest
 
@@ -91,7 +91,7 @@ class TestGetSupportedConversions:
             assert isinstance(val, list)
 
     def test_returns_copy_not_reference(self):
-        from web.file_converter import get_supported_conversions, CONVERSION_MATRIX
+        from web.file_converter import CONVERSION_MATRIX, get_supported_conversions
 
         result = get_supported_conversions()
         result[".docx"].append(".fake")
@@ -581,6 +581,7 @@ class TestLocalExecutorExecute:
         assert result["success"] is False
         assert "失败" in result["message"]
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     @patch("sys.platform", "win32")
     def test_close_app(self):
         mock_run = MagicMock(returncode=0)
@@ -768,6 +769,7 @@ class TestLocalExecutorOpenFileOrDirectory:
 
         return LocalExecutor
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     @patch("sys.platform", "win32")
     def test_open_existing_file(self, tmp_path):
         f = tmp_path / "test.txt"

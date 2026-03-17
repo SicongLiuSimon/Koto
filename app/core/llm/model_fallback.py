@@ -29,9 +29,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
-import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)

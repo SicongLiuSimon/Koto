@@ -1069,7 +1069,7 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_outputã
     @staticmethod
     def _publish_step_event(task_id: str, step: PlanStep, event_type: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
 
             bus = get_progress_bus()
             bus.publish(
@@ -1088,7 +1088,7 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_outputã
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
 
             bus = get_progress_bus()
             bus.publish(
@@ -1120,7 +1120,7 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_outputã
     @staticmethod
     def _publish_step_event(task_id: str, step: PlanStep, event_type: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
 
             bus = get_progress_bus()
             bus.publish(
@@ -1139,7 +1139,7 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_outputã
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
 
             bus = get_progress_bus()
             bus.publish(

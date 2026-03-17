@@ -1056,8 +1056,8 @@ class TestSearchService:
                 ss_mod.HAS_GENAI_V2 = original
 
     def test_search_no_client(self):
-        from app.core.services.search_service import SearchService
         import app.core.services.search_service as ss_mod
+        from app.core.services.search_service import SearchService
 
         original = ss_mod.HAS_GENAI_V2
         ss_mod.HAS_GENAI_V2 = True
@@ -1072,8 +1072,8 @@ class TestSearchService:
             ss_mod.HAS_GENAI_V2 = original
 
     def test_search_success(self):
-        from app.core.services.search_service import SearchService
         import app.core.services.search_service as ss_mod
+        from app.core.services.search_service import SearchService
 
         original = ss_mod.HAS_GENAI_V2
         ss_mod.HAS_GENAI_V2 = True
@@ -1092,8 +1092,8 @@ class TestSearchService:
             ss_mod.HAS_GENAI_V2 = original
 
     def test_search_no_response_text(self):
-        from app.core.services.search_service import SearchService
         import app.core.services.search_service as ss_mod
+        from app.core.services.search_service import SearchService
 
         original = ss_mod.HAS_GENAI_V2
         ss_mod.HAS_GENAI_V2 = True
@@ -1110,8 +1110,8 @@ class TestSearchService:
             ss_mod.HAS_GENAI_V2 = original
 
     def test_search_exception(self):
-        from app.core.services.search_service import SearchService
         import app.core.services.search_service as ss_mod
+        from app.core.services.search_service import SearchService
 
         original = ss_mod.HAS_GENAI_V2
         ss_mod.HAS_GENAI_V2 = True
@@ -1220,6 +1220,7 @@ class TestDistillRoutes:
     @pytest.fixture
     def app(self):
         from flask import Flask
+
         from app.api.distill_routes import distill_bp
 
         app = Flask(__name__)

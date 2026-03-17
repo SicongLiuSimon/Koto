@@ -98,7 +98,7 @@ class TaskClassifier:
             t0 = time.time()
             if backend == "transformers_mean_pool":
                 # 新版：使用 transformers 直接加载，均值池化，无需 sentence-transformers
-                from transformers import AutoTokenizer, AutoModel
+                from transformers import AutoModel, AutoTokenizer
 
                 cls._st_model = {
                     "tokenizer": AutoTokenizer.from_pretrained(model_name),

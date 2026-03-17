@@ -299,8 +299,8 @@ class SkillChain:
         Returns None 当没有任何可执行步骤时。
         """
         try:
-            from app.core.skills.skill_manager import SkillManager
             from app.core.skills.skill_capability import SkillCapabilityRegistry
+            from app.core.skills.skill_manager import SkillManager
 
             SkillManager._ensure_init()
         except Exception:
