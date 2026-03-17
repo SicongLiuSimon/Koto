@@ -1,75 +1,96 @@
-{
-  "id": "git_commit_helper",
-  "name": "Git 提交消息生成",
-  "icon": "📝",
-  "category": "domain",
-  "description": "根据代码 diff 或改动描述生成符合 Conventional Commits 规范的提交消息和 CHANGELOG 条目",
-  "intent_description": "用户提到 git commit、写提交信息、粘贴了 diff、或说「帮我写 commit message」",
-  "output_spec": {
-    "format": "markdown",
-    "must_contain": [
-      ":"
-    ],
-    "must_not_contain": [],
-    "min_chars": 20,
-    "max_chars": null,
-    "required_json_keys": [],
-    "description": "符合 Conventional Commits 1.0 规范的提交消息，可选 body 和 footer"
-  },
-  "bound_tools": [],
-  "task_types": [
-    "CODER"
-  ],
-  "priority": 65,
-  "conflict_with": [],
-  "enabled": false,
-  "prompt": "\n\n## 📝 领域要求：Git 提交消息生成\n\n你是一名遵守 **Conventional Commits 1.0** 规范的高级开发者，负责将代码改动转化为标准提交消息。\n\n### Conventional Commits 速查\n```\n<type>(<scope>): <subject>\n\n[可选 body]\n\n[可选 footer]\n```\n\n**type 选择规则：**\n| type | 使用场景 |\n|------|----------|\n| `feat` | 新增功能（对应 MINOR 版本） |\n| `fix` | 修复 bug（对应 PATCH 版本） |\n| `refactor` | 重构（不新增功能，不修复 bug） |\n| `perf` | 性能优化 |\n| `test` | 添加/修改测试 |\n| `docs` | 只修改文档 |\n| `style` | 格式化、缩进等，不影响逻辑 |\n| `chore` | 构建、依赖、工具配置 |\n| `ci` | CI/CD 配置 |\n| `revert` | 回滚某次提交 |\n\n**BREAKING CHANGE**：重大不兼容变更时在 type 后加 `!`，或在 footer 写 `BREAKING CHANGE: 描述`。\n\n### subject 写作规则\n- **祈使句**，动词开头：`add`、`fix`、`remove`、`update`（不要 added/fixing）\n- **不超过 72 字符**（中文按 2 字符算）\n- **不以句号结尾**\n- 优先英文，如场景明确是中文项目可用中文\n\n### body（可选）\n- 换行后另起，解释「为什么」而非「做了什么」\n- 每行不超过 100 字符\n\n### footer（可选）\n- `Closes #123`、`Refs #456`\n- `Co-authored-by: Name <email>`\n- `BREAKING CHANGE: 描述变化内容`\n\n### 输出格式\n先给出推荐的提交消息（代码块），再简要说明 type 选择理由。如有多个合理方案，列出 2-3 个供用户选择。\n\n### 约束\n- **不要**输出 `git commit -m '...'` 命令本身，只输出消息文本（代码块格式）\n- **不要**在 subject 中暴露密码、token、邮箱等敏感信息\n- 如提供的 diff 包含多个独立改动，建议用户拆分为多个 commit，并分别给出消息",
-  "examples": [
-    {
-      "input": "改动：在 skill_manager.py 里加了 _MAX_ACTIVE_INJECT = 20 这个类变量，限制单次注入 skill 数量上限，防止 token 膨胀",
-      "output": "```\nfeat(skill-manager): cap injected skills per turn to prevent token bloat\n\nAdd `_MAX_ACTIVE_INJECT = 20` class variable to SkillManager.\nSkills are now sorted by priority descending; only the top 20\nuser-enabled skills (excl. system skills) are injected per request.\n```\n\n**type 选择理由**：新增了之前不存在的容量限制行为 → `feat`。scope 为 `skill-manager`。body 解释了实现细节和排序规则。",
-      "note": "功能性新增，body 说明实现策略"
-    },
-    {
-      "input": "diff：\n- if _has_active_skills_for_task(query):\n+ if _has_active_skills_for_task(query, exclude_system=True):",
-      "output": "```\nfix(auto-matcher): system skills no longer suppress AutoMatcher\n\nPreviously, long_term_memory (skill_nature=system) was always\nenabled, causing _has_active_skills_for_task to return True and\npermanently blocking the AutoMatcher from running.\n\nCloses #42\n```\n\n或者更简洁的单行版：\n\n```\nfix(auto-matcher): exclude system skills from active-skill gate check\n```\n\n**type 选择理由**：修复了 AutoMatcher 被错误抑制的 bug → `fix`。",
-      "note": "Bug 修复，两个备选方案（含 Closes）"
-    },
-    {
-      "input": "我把三个文件移到了新目录，改了 import 路径，功能没有变化",
-      "output": "```\nrefactor: reorganize module layout, update import paths\n```\n\n**type 选择理由**：纯结构调整，无新功能、无 bug 修复 → `refactor`。改动范围跨多模块，scope 可省略。",
-      "note": "重构，无功能变化"
-    }
-  ],
-  "trigger_keywords": [
-    "commit",
-    "提交信息",
-    "commit message",
-    "git提交",
-    "changelog",
-    "CHANGELOG",
-    "提交代码",
-    "提交信息怎么"
-  ],
-  "version": "1.0.0",
-  "author": "koto",
-  "created_at": "2026-03-15T00:00:00Z",
-  "tags": [
-    "git",
-    "commit",
-    "conventional-commits",
-    "changelog",
-    "version-control",
-    "copilot-cli"
-  ],
-  "plan_template": [
-    "1. 接收 diff 或用户对改动的自然语言描述",
-    "2. 判断 type：feat/fix/refactor/perf/test/docs/style/chore/ci/revert",
-    "3. 识别 scope（如有明确模块名）",
-    "4. 构造 subject（祈使句，≤72字符，不加句号）",
-    "5. 如改动复杂，生成 body（说明为什么，而非做了什么）",
-    "6. 如有关联 issue，生成 footer（Closes #N）",
-    "7. 提供 1-2 个备选方案，说明 type 选择理由"
-  ],
-  "executor_tools": []
+﻿{
+    "id":  "git_commit_helper",
+    "name":  "Git 提交消息生成",
+    "icon":  "📝",
+    "category":  "domain",
+    "description":  "根据代码 diff 或改动描述生成符合 Conventional Commits 规范的提交消息和 CHANGELOG 条目",
+    "intent_description":  "用户提到 git commit、写提交信息、粘贴了 diff、或说「帮我写 commit message」",
+    "output_spec":  {
+                        "format":  "markdown",
+                        "must_contain":  [
+                                             ":"
+                                         ],
+                        "must_not_contain":  [
+
+                                             ],
+                        "min_chars":  20,
+                        "max_chars":  null,
+                        "required_json_keys":  [
+
+                                               ],
+                        "description":  "符合 Conventional Commits 1.0 规范的提交消息，可选 body 和 footer"
+                    },
+    "bound_tools":  [
+
+                    ],
+    "task_types":  [
+                       "CODER"
+                   ],
+    "priority":  65,
+    "conflict_with":  [
+
+                      ],
+    "enabled":  false,
+    "prompt":  "\n\n## 📝 领域要求：Git 提交消息生成\n\n你是一名遵守 **Conventional Commits 1.0** 规范的高级开发者，负责将代码改动转化为标准提交消息。\n\n### Conventional Commits 速查\n```\n\u003ctype\u003e(\u003cscope\u003e): \u003csubject\u003e\n\n[可选 body]\n\n[可选 footer]\n```\n\n**type 选择规则：**\n| type | 使用场景 |\n|------|----------|\n| `feat` | 新增功能（对应 MINOR 版本） |\n| `fix` | 修复 bug（对应 PATCH 版本） |\n| `refactor` | 重构（不新增功能，不修复 bug） |\n| `perf` | 性能优化 |\n| `test` | 添加/修改测试 |\n| `docs` | 只修改文档 |\n| `style` | 格式化、缩进等，不影响逻辑 |\n| `chore` | 构建、依赖、工具配置 |\n| `ci` | CI/CD 配置 |\n| `revert` | 回滚某次提交 |\n\n**BREAKING CHANGE**：重大不兼容变更时在 type 后加 `!`，或在 footer 写 `BREAKING CHANGE: 描述`。\n\n### subject 写作规则\n- **祈使句**，动词开头：`add`、`fix`、`remove`、`update`（不要 added/fixing）\n- **不超过 72 字符**（中文按 2 字符算）\n- **不以句号结尾**\n- 优先英文，如场景明确是中文项目可用中文\n\n### body（可选）\n- 换行后另起，解释「为什么」而非「做了什么」\n- 每行不超过 100 字符\n\n### footer（可选）\n- `Closes #123`、`Refs #456`\n- `Co-authored-by: Name \u003cemail\u003e`\n- `BREAKING CHANGE: 描述变化内容`\n\n### 输出格式\n先给出推荐的提交消息（代码块），再简要说明 type 选择理由。如有多个合理方案，列出 2-3 个供用户选择。\n\n### 约束\n- **不要**输出 `git commit -m \u0027...\u0027` 命令本身，只输出消息文本（代码块格式）\n- **不要**在 subject 中暴露密码、token、邮箱等敏感信息\n- 如提供的 diff 包含多个独立改动，建议用户拆分为多个 commit，并分别给出消息",
+    "examples":  [
+                     {
+                         "input":  "改动：在 skill_manager.py 里加了 _MAX_ACTIVE_INJECT = 20 这个类变量，限制单次注入 skill 数量上限，防止 token 膨胀",
+                         "output":  "```\nfeat(skill-manager): cap injected skills per turn to prevent token bloat\n\nAdd `_MAX_ACTIVE_INJECT = 20` class variable to SkillManager.\nSkills are now sorted by priority descending; only the top 20\nuser-enabled skills (excl. system skills) are injected per request.\n```\n\n**type 选择理由**：新增了之前不存在的容量限制行为 → `feat`。scope 为 `skill-manager`。body 解释了实现细节和排序规则。",
+                         "note":  "功能性新增，body 说明实现策略"
+                     },
+                     {
+                         "input":  "diff：\n- if _has_active_skills_for_task(query):\n+ if _has_active_skills_for_task(query, exclude_system=True):",
+                         "output":  "```\nfix(auto-matcher): system skills no longer suppress AutoMatcher\n\nPreviously, long_term_memory (skill_nature=system) was always\nenabled, causing _has_active_skills_for_task to return True and\npermanently blocking the AutoMatcher from running.\n\nCloses #42\n```\n\n或者更简洁的单行版：\n\n```\nfix(auto-matcher): exclude system skills from active-skill gate check\n```\n\n**type 选择理由**：修复了 AutoMatcher 被错误抑制的 bug → `fix`。",
+                         "note":  "Bug 修复，两个备选方案（含 Closes）"
+                     },
+                     {
+                         "input":  "我把三个文件移到了新目录，改了 import 路径，功能没有变化",
+                         "output":  "```\nrefactor: reorganize module layout, update import paths\n```\n\n**type 选择理由**：纯结构调整，无新功能、无 bug 修复 → `refactor`。改动范围跨多模块，scope 可省略。",
+                         "note":  "重构，无功能变化"
+                     }
+                 ],
+    "trigger_keywords":  [
+                             "commit",
+                             "提交信息",
+                             "commit message",
+                             "git提交",
+                             "changelog",
+                             "CHANGELOG",
+                             "提交代码",
+                             "提交信息怎么"
+                         ],
+    "version":  "1.0.0",
+    "author":  "koto",
+    "created_at":  "2026-03-15T00:00:00Z",
+    "tags":  [
+                 "git",
+                 "commit",
+                 "conventional-commits",
+                 "changelog",
+                 "version-control",
+                 "copilot-cli"
+             ],
+    "plan_template":  [
+                          "1. 接收 diff 或用户对改动的自然语言描述",
+                          "2. 判断 type：feat/fix/refactor/perf/test/docs/style/chore/ci/revert",
+                          "3. 识别 scope（如有明确模块名）",
+                          "4. 构造 subject（祈使句，≤72字符，不加句号）",
+                          "5. 如改动复杂，生成 body（说明为什么，而非做了什么）",
+                          "6. 如有关联 issue，生成 footer（Closes #N）",
+                          "7. 提供 1-2 个备选方案，说明 type 选择理由"
+                      ],
+    "executor_tools":  [
+
+                       ],
+    "chains_to":  [
+
+                  ],
+    "synergizes_with":  [
+                            "debug_python",
+                            "write_unit_tests",
+                            "annotate_code_review"
+                        ],
+    "output_keys":  [
+                        "commit_message"
+                    ]
 }

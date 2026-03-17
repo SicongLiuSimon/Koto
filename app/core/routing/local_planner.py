@@ -17,7 +17,7 @@ class LocalPlanner:
         "AGENT",
     }
 
-    PLAN_PROMPT = '''你是一个多步任务规划器，只输出 JSON。
+    PLAN_PROMPT = """你是一个多步任务规划器，只输出 JSON。
 
 允许的任务类型（只从这里选）：
 - WEB_SEARCH : 联网搜索获取最新信息

@@ -2057,6 +2057,28 @@ class SkillManager:
                 auto_prompts.append(p)
                 logger.debug(f"[SkillManager] 🤖 临时注入 Auto-Skill: {skill_id}")
 
+        # ── 协同检测：找出所有已注入 Skill 中存在 synergizes_with 关系的配对 ──
+        all_injected_ids = seen_ids  # 含用户启用 + 临时注入
+        synergy_lines: List[str] = []
+        already_noted: set = set()
+        for sid in all_injected_ids:
+            s_def = cls._def_registry.get(sid)
+            if not s_def:
+                continue
+            partners = getattr(s_def, "synergizes_with", []) or []
+            for partner_id in partners:
+                pair_key = tuple(sorted([sid, partner_id]))
+                if pair_key in already_noted:
+                    continue
+                if partner_id not in all_injected_ids:
+                    continue
+                already_noted.add(pair_key)
+                p_def = cls._def_registry.get(partner_id)
+                sid_name = s_def.name or sid
+                p_name = getattr(p_def, "name", partner_id) if p_def else partner_id
+                synergy_lines.append(f"- **{sid_name}** + **{p_name}**")
+                logger.debug(f"[SkillManager] 🔗 检测到协同对: {sid} ↔ {partner_id}")
+
         # 组装注入块：记忆优先放在 skills 前面
         result = base_instruction
         if memory_block:
@@ -2079,6 +2101,17 @@ class SkillManager:
                 + "\n".join(auto_prompts)
             )
             result = result + auto_block
+        # 追加协同说明块（只在有 2 个以上互相协同的 Skill 时才生成）
+        if synergy_lines:
+            separator = "\n\n─────────────────────────────────────────"
+            synergy_block = (
+                separator
+                + "\n## 🔗 协同工作说明\n"
+                "以下技能正在协同发挥作用，请在回答中体现它们的互补关系，"
+                "不要重复描述各自的工作流程，而是以整体视角输出统一的结果：\n"
+                + "\n".join(synergy_lines)
+            )
+            result = result + synergy_block
         return result
 
     @classmethod

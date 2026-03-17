@@ -383,6 +383,27 @@ a { color: var(--accent-primary); }
 }
 .session-item:hover .session-delete-btn { opacity: 0.35; }
 .session-delete-btn:hover { opacity: 1 !important; color: #ef6b6b !important; background: rgba(239, 107, 107, 0.12); }
+.session-rename-btn {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    line-height: 1;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    flex-shrink: 0;
+}
+.session-item:hover .session-rename-btn { opacity: 0.35; }
+.session-rename-btn:hover { opacity: 1 !important; color: var(--accent-primary) !important; }
+.session-name-input {
+    flex: 1; font-size: 14px; color: var(--text-primary);
+    background: var(--bg-tertiary); border: 1px solid var(--accent-primary);
+    border-radius: 4px; padding: 2px 6px; outline: none; min-width: 0;
+    font-family: inherit;
+}
 
 .nav-section.compact { padding-top: 2px; }
 .nav-cta {
@@ -660,7 +681,7 @@ a { color: var(--accent-primary); }
 .hint-list span strong { color: var(--text-primary); font-weight: 600; }
 
 /* ===== Messages ===== */
-.message { display: flex; gap: 14px; max-width: 920px; align-items: flex-start; }
+.message { display: flex; gap: 14px; max-width: min(920px, 100%); align-items: flex-start; }
 .message.user { flex-direction: row-reverse; margin-left: auto; }
 .message-avatar {
     width: 42px;
@@ -709,6 +730,14 @@ a { color: var(--accent-primary); }
     font-size: 15px;
     color: var(--text-primary);
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    overflow-wrap: break-word;
+    word-break: break-word;
+    min-width: 0;
+}
+.message-body h1, .message-body h2, .message-body h3,
+.message-body h4, .message-body h5, .message-body h6 {
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 .message.user .message-body {
     background: var(--user-msg-bg);

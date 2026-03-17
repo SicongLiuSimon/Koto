@@ -459,8 +459,24 @@ class ContextInjector:
             context_part = f"\n\n{context_section}"
         else:
             context_part = ""
-        
-        return f"""你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。{context_part}
+
+        # ── 注入个人记忆矩阵（认知风格/专长/近期目标）──
+        _personality_part = ""
+        try:
+            import sys as _sys
+            _emm_mod = _sys.modules.get("web.enhanced_memory_manager") or _sys.modules.get("enhanced_memory_manager")
+            if _emm_mod is None:
+                import importlib
+                _emm_mod = importlib.import_module("web.enhanced_memory_manager")
+            _PM = getattr(_emm_mod, "PersonalityMatrix", None)
+            if _PM is not None:
+                _pm_ctx = _PM().to_context_string()
+                if _pm_ctx:
+                    _personality_part = f"\n\n## 🧠 用户画像（持续学习更新）\n{_pm_ctx}"
+        except Exception:
+            pass
+
+        return f"""你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。{_personality_part}{context_part}
 
 ## 👤 角色定位
 - 精通多个领域：编程、数据分析、写作、问题解决、系统管理

@@ -212,4 +212,44 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
     
+    @app.route('/api/memory/personality', methods=['GET'])
+    def get_personality_matrix():
+        """获取个人记忆矩阵（含 ShadowWatcher 整合数据）"""
+        try:
+            memory_mgr = get_memory_manager()
+            if not hasattr(memory_mgr, 'personality_matrix'):
+                return jsonify({"success": False, "message": "当前版本不支持个人矩阵"}), 404
+
+            pm = memory_mgr.personality_matrix
+            data = dict(pm.data)
+
+            # 追加 ShadowWatcher 摘要，方便前端一次性展示全貌
+            shadow_summary = {}
+            try:
+                from app.core.monitoring.shadow_watcher import ShadowWatcher
+                obs = ShadowWatcher.get().get_observations()
+                shadow_summary = {
+                    "streak_days":       obs.get("streak", {}).get("days", 0),
+                    "total_observations":obs.get("total_observations", 0),
+                    "open_tasks_count":  sum(1 for t in obs.get("open_tasks", []) if not t.get("done")),
+                    "recent_topics_7d":  obs.get("recent_topics_7d", {}),
+                    "task_types":        obs.get("task_style", {}).get("task_types", {}),
+                    "active_hours":      obs.get("active_hours", {}),
+                    "last_seen":         obs.get("last_seen"),
+                }
+            except Exception:
+                pass
+
+            return jsonify({
+                "success": True,
+                "matrix":  data,
+                "context": pm.to_context_string(),
+                "shadow":  shadow_summary,
+            })
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({"success": False, "error": str(e)}), 500
+
+
     logger.info("🧠 增强记忆系统API路由已注册")

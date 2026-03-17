@@ -41,12 +41,19 @@
         .skill-scope { font-size: 11px; color: var(--text-muted); }
         .skill-desc { font-size: 12px; color: var(--text-secondary); margin: 6px 0 4px 25px; line-height: 1.45; }
         .skill-footer { display: flex; justify-content: flex-end; margin-top: 4px; }
-        .skill-edit-btn {
-            font-size: 11px; padding: 2px 9px; border-radius: 6px;
-            border: 1px solid var(--border-color); background: transparent;
-            color: var(--text-muted); cursor: pointer; transition: all 0.15s;
+        .skill-gear-btn {
+            width: 26px; height: 26px; border-radius: 50%;
+            border: 1px solid transparent; background: transparent;
+            color: var(--text-muted); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 15px; opacity: 0; transition: opacity 0.15s, background 0.15s, color 0.15s, transform 0.3s;
+            flex-shrink: 0; line-height: 1;
         }
-        .skill-edit-btn:hover { color: var(--accent); border-color: var(--accent); }
+        .skill-card:hover .skill-gear-btn { opacity: 1; }
+        .skill-gear-btn:hover {
+            background: rgba(51,139,255,0.12); border-color: var(--accent);
+            color: var(--accent); transform: rotate(60deg);
+        }
         /* ── Skill Editor Modal (redesigned) ──────────────────── */
         .skill-editor-modal {
             position: fixed; inset: 0; background: rgba(0,0,0,.6);
@@ -372,7 +379,7 @@
             color: var(--text-secondary); cursor: pointer; transition: all .15s;
         }
         .sp-chip.active, .sp-chip:hover { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
-        .sp-content { flex: 1; overflow-y: auto; padding: 10px 12px; }
+        .sp-content { flex: 1; overflow-y: auto; padding: 0; }
         .sp-studio { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
         .sp-loading { text-align: center; padding: 24px 0; color: var(--text-muted); font-size: 12px; }
         .sp-card {
@@ -481,6 +488,95 @@
             transition: all .15s;
         }
         .sp-ext-link:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+        /* ── NotebookLM-style Skills Tile Grid ─────────────────────────────── */
+        .sp-tile-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 8px; padding: 10px 12px;
+        }
+        .sp-tile {
+            position: relative; border-radius: 12px; padding: 13px 10px 10px;
+            cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s, background .12s;
+            display: flex; flex-direction: column; gap: 4px; min-height: 110px;
+            border: 1.5px solid rgba(255,255,255,.06); user-select: none; overflow: hidden;
+        }
+        .sp-tile:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+        .sp-tile.active {
+            border-color: rgba(99,198,255,.85) !important;
+            box-shadow: 0 0 0 1px rgba(99,198,255,.22), 0 4px 18px rgba(0,0,0,.28);
+        }
+        .sp-tile.suppressed { opacity: .48; }
+        .sp-tile-behavior         { background: rgba(63,131,248,.11); }
+        .sp-tile-behavior.active  { background: rgba(63,131,248,.26); }
+        .sp-tile-style            { background: rgba(249,168,37,.11); }
+        .sp-tile-style.active     { background: rgba(249,168,37,.26); }
+        .sp-tile-domain           { background: rgba(52,211,153,.11); }
+        .sp-tile-domain.active    { background: rgba(52,211,153,.26); }
+        .sp-tile-custom           { background: rgba(167,139,250,.11); }
+        .sp-tile-custom.active    { background: rgba(167,139,250,.26); }
+        .sp-tile-workflow         { background: rgba(251,113,133,.11); }
+        .sp-tile-workflow.active  { background: rgba(251,113,133,.26); }
+        .sp-tile-emoji { font-size: 20px; line-height: 1; margin-bottom: 1px; }
+        .sp-tile-label {
+            font-size: 12px; font-weight: 600; color: var(--text-primary);
+            line-height: 1.3; word-break: break-word;
+        }
+        .sp-tile-desc {
+            font-size: 10px; color: var(--text-muted); line-height: 1.4;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+            overflow: hidden; opacity: .85; flex: 1;
+        }
+        .sp-tile-foot {
+            display: flex; align-items: center;
+            justify-content: space-between; margin-top: auto; padding-top: 4px;
+        }
+        .sp-tile-cat { font-size: 9px; color: var(--text-muted); opacity: .85; }
+        .sp-tile-check {
+            display: none; font-size: 9px; font-weight: 700; color: #4ade80;
+            background: rgba(0,0,0,.45); border-radius: 20px;
+            padding: 1px 6px; line-height: 1.6; letter-spacing: .02em;
+            border: 1px solid rgba(74,222,128,.35);
+        }
+        .sp-tile.active .sp-tile-check { display: inline-block; }
+        .sp-tile-dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: rgba(255,255,255,.18); flex-shrink: 0; transition: background .15s;
+        }
+        .sp-tile.active .sp-tile-dot { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,.7); }
+        .sp-tile-pencil {
+            position: absolute; top: 7px; right: 7px; width: 24px; height: 24px;
+            border-radius: 50%; background: rgba(0,0,0,.28);
+            border: 1px solid rgba(255,255,255,.1); cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; color: rgba(255,255,255,.55);
+            opacity: 0; transition: opacity .12s, transform .3s, color .15s, background .15s; line-height: 1;
+        }
+        .sp-tile:hover .sp-tile-pencil { opacity: 1; }
+        .sp-tile-pencil:hover { color: #fff; background: rgba(0,0,0,.55); border-color: rgba(255,255,255,.3); transform: rotate(60deg); }
+        /* ── Active skills list below grid (NotebookLM recent-items style) ── */
+        .sp-active-list-section {
+            padding: 4px 12px 10px; border-top: 1px solid var(--border-color); margin-top: 2px;
+        }
+        .sp-active-list-title {
+            font-size: 10px; font-weight: 700; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: .06em; padding: 8px 2px 6px;
+        }
+        .sp-actv-item {
+            display: flex; align-items: center; gap: 8px;
+            padding: 7px 10px; border-radius: 9px; background: var(--bg-card);
+            border: 1px solid var(--border-color); margin-bottom: 5px;
+            transition: border-color .12s;
+        }
+        .sp-actv-item:hover { border-color: rgba(99,198,255,.4); }
+        .sp-actv-icon { font-size: 16px; flex-shrink: 0; }
+        .sp-actv-info { flex: 1; min-width: 0; }
+        .sp-actv-name { font-size: 12px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sp-actv-meta { font-size: 10px; color: var(--text-muted); }
+        .sp-actv-dismiss {
+            background: none; border: none; color: var(--text-muted); font-size: 14px;
+            cursor: pointer; padding: 2px 5px; border-radius: 4px; line-height: 1;
+            transition: color .12s; flex-shrink: 0;
+        }
+        .sp-actv-dismiss:hover { color: #ef4444; }
         .settings-open-panel-btn {
             display: flex; align-items: center; justify-content: space-between;
             width: 100%; padding: 10px 14px; margin-top: 6px;
@@ -1080,6 +1176,16 @@
                             <option value="gemini-2.5-pro">🚀 Gemini 2.5 Pro</option>
                         </select>
                         <p class="setting-hint" id="settingModelHint">Auto 会根据任务类型自动选择最合适的模型</p>
+                    </div>
+                    <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label">自动保存回复文件</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingAutoSaveFiles" onchange="updateSetting('ai', 'auto_save_files', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">开启后 AI 回复中生成的代码、文档、总结等文件会自动保存到工作区</p>
                     </div>
                     <div class="setting-item">
                         <div class="toggle-row">
@@ -1693,7 +1799,6 @@
             </div>
             <div class="sp-footer">
                 <div style="display:flex;gap:6px;">
-                    <button class="sp-footer-btn" style="flex:1;" onclick="closeSkillsPanel(); openSettings()">⚙️ 绑定 &amp; 触发器</button>
                     <a href="/skill-marketplace" target="_blank" class="sp-footer-btn" style="flex:1;text-align:center;text-decoration:none;">📊 导入 / 统计</a>
                 </div>
             </div>
@@ -2292,7 +2397,8 @@
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 const data = await resp.json();
                 if (!data.success) throw new Error(data.error || '加载失败');
-                _spSkills = data.skills || [];
+                // Filter out system-level skills (e.g. long_term_memory) — always on, not user-toggleable
+                _spSkills = (data.skills || []).filter(s => s.skill_nature !== 'system');
                 // Also fetch conflict state so cards can show suppressed warnings
                 try {
                     const cres = await fetch('/api/skillmarket/conflicts');
@@ -2352,26 +2458,53 @@
                 }
                 return;
             }
-            // Sort: enabled always first
+            // Sort: enabled first, then alphabetical
             skills = [...skills.filter(s => s.enabled), ...skills.filter(s => !s.enabled)];
-            content.innerHTML = skills.map(s => `
-                <div class="sp-card ${s.enabled ? 'enabled' : ''} ${s.enabled && _spSuppressedIds.has(s.id) ? 'sp-card-suppressed' : ''}" data-sp-id="${s.id}">
-                    <div class="sp-card-icon" style="${s.enabled && _spSuppressedIds.has(s.id) ? 'opacity:.5' : ''}">${s.icon || '🔧'}</div>
-                    <div class="sp-card-body">
-                        <div class="sp-card-name" style="${s.enabled && _spSuppressedIds.has(s.id) ? 'text-decoration:line-through;opacity:.6' : ''}">${s.name}${s.has_template ? ' <span title="已绑定 Word 模板" style="font-size:12px;opacity:.8">📄</span>' : ''}${s.enabled && _spSuppressedIds.has(s.id) ? ' <span title="与「'+_spConflictWinner[s.id]+'」冲突，本次不生效" style="font-size:12px;color:#ffb86c">⚠️</span>' : ''}</div>
-                        <div class="sp-card-cat">${CAT_LABELS[s.category] || s.category}${s.enabled && _spSuppressedIds.has(s.id) ? ' <span style="color:#ffb86c;font-size:11px">· 已被「'+_spConflictWinner[s.id]+'」抑制</span>' : ''}</div>
-                        <div class="sp-card-desc">${s.description}</div>
-                        <div class="sp-card-actions">
-                            <button class="sp-enable-btn ${s.enabled ? 'enabled' : ''}"
-                                onclick="spToggleSkill('${s.id}', ${!s.enabled})">
-                                ${s.enabled ? '✓ 已启用' : '启用'}
-                            </button>
-                            <button class="sp-edit-btn" onclick="openSkillEditor('${s.id}')">✏️ 编辑</button>
-                            <button class="sp-edit-btn" onclick="spOpenTemplateUpload('${s.id}', '${s.name}')" title="${s.has_template ? '重新上传模板' : '绑定 Word 模板'}">📄 ${s.has_template ? '模板' : '绑定模板'}</button>
-                        </div>
+
+            const CAT_SHORT = { behavior: '行为', style: '风格', domain: '领域', custom: '自定义', workflow: '工作流' };
+
+            function renderTile(s) {
+                const isSup = s.enabled && _spSuppressedIds.has(s.id);
+                const catCls = `sp-tile-${s.category || 'custom'}`;
+                const badge = isSup
+                    ? `<span style="position:absolute;top:6px;left:30px;font-size:9px;color:#ffb86c;background:rgba(0,0,0,.55);border-radius:4px;padding:1px 4px;line-height:1.5;">⚠</span>`
+                    : (s.has_template ? `<span style="position:absolute;top:6px;left:30px;font-size:9px;color:var(--text-muted);background:rgba(0,0,0,.45);border-radius:4px;padding:1px 4px;line-height:1.5;">📄</span>` : '');
+                const descText = (s.description || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                return `<div class="sp-tile ${catCls}${s.enabled ? ' active' : ''}${isSup ? ' suppressed' : ''}"
+                    data-sp-id="${s.id}"
+                    onclick="spToggleSkill('${s.id}', ${!s.enabled})">
+                    ${badge}
+                    <button class="sp-tile-pencil" onclick="event.stopPropagation();openSkillEditor('${s.id}')" title="编辑 Prompt">⚙</button>
+                    <div class="sp-tile-emoji">${s.icon || '🔧'}</div>
+                    <div class="sp-tile-label">${s.name}</div>
+                    ${descText ? `<div class="sp-tile-desc">${descText}</div>` : ''}
+                    <div class="sp-tile-foot">
+                        <span class="sp-tile-cat">${CAT_SHORT[s.category] || s.category || ''}</span>
+                        <span class="sp-tile-check">✓ 启用</span>
+                        <span class="sp-tile-dot"></span>
                     </div>
-                </div>
-            `).join('');
+                </div>`;
+            }
+
+            const enabledSkills = skills.filter(s => s.enabled);
+            const activeListHtml = enabledSkills.length ? `
+                <div class="sp-active-list-section">
+                    <div class="sp-active-list-title">当前激活 · ${enabledSkills.length} 个</div>
+                    ${enabledSkills.map(s => {
+                        const isSup = _spSuppressedIds.has(s.id);
+                        const supNote = isSup ? ` <span style="color:#ffb86c;font-size:10px;">⚠ 被「${_spConflictWinner[s.id] || ''}」抑制</span>` : '';
+                        return `<div class="sp-actv-item">
+                            <span class="sp-actv-icon">${s.icon || '🔧'}</span>
+                            <div class="sp-actv-info">
+                                <div class="sp-actv-name">${s.name}${isSup ? ' ⚠️' : ''}</div>
+                                <div class="sp-actv-meta">${CAT_LABELS[s.category] || s.category}${supNote}</div>
+                            </div>
+                            <button class="sp-actv-dismiss" onclick="event.stopPropagation();spToggleSkill('${s.id}',false)" title="禁用">✕</button>
+                        </div>`;
+                    }).join('')}
+                </div>` : '';
+
+            content.innerHTML = `<div class="sp-tile-grid">${skills.map(renderTile).join('')}</div>${activeListHtml}`;
         }
 
         window.spSwitchTab = function(tab) {
@@ -2409,12 +2542,11 @@
         };
 
         window.spToggleSkill = async function(skillId, enabled) {
-            // Optimistic UI update in panel
-            const card = document.querySelector(`.sp-card[data-sp-id="${skillId}"]`);
-            if (card) {
-                card.classList.toggle('enabled', enabled);
-                const btn = card.querySelector('.sp-enable-btn');
-                if (btn) { btn.textContent = enabled ? '✓ 已启用' : '启用'; btn.classList.toggle('enabled', enabled); }
+            // Optimistic UI: toggle active class on tile immediately
+            const tile = document.querySelector(`.sp-tile[data-sp-id="${skillId}"]`);
+            if (tile) {
+                tile.classList.toggle('active', enabled);
+                tile.setAttribute('onclick', `spToggleSkill('${skillId}', ${!enabled})`);
             }
             const skill = _spSkills.find(s => s.id === skillId);
             if (skill) skill.enabled = enabled;
@@ -2423,6 +2555,8 @@
             if (typeof window.toggleSkill === 'function') {
                 await window.toggleSkill(skillId, enabled);
             }
+            // Refresh active list section
+            spRenderCards();
         };
 
         // ── Studio: AI 生成 ──────────────────────────────────────────────────

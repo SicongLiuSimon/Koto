@@ -220,6 +220,13 @@ function renderSkillGrid(gridId, skills) {
       toggleSkill(btn.dataset.id, btn.dataset.enabled !== 'true');
     });
   });
+
+  grid.querySelectorAll('[data-action="edit"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openEditModal(btn.dataset.id);
+    });
+  });
 }
 
 function renderSkillCard(skill) {
@@ -236,6 +243,10 @@ function renderSkillCard(skill) {
     : `<span class="sm-badge disabled">○ 已禁用</span>`;
   const builtinBadge = skill.is_builtin ? `<span class="sm-badge builtin">内置</span>` : '';
 
+  const editBtn = !skill.is_builtin
+    ? `<button class="btn-gear" data-action="edit" data-id="${skill.id}" title="编辑技能">⚙</button>`
+    : '';
+
   return `
   <div class="sm-card ${skill.enabled ? 'enabled' : ''}" data-skill-id="${skill.id}">
     <div class="sm-card-header">
@@ -247,6 +258,7 @@ function renderSkillCard(skill) {
           &nbsp;·&nbsp; v${escHtml(skill.version || '1.0.0')}
         </div>
       </div>
+      ${editBtn}
     </div>
     <div class="sm-card-desc">${escHtml(skill.description || '（暂无描述）')}</div>
     <div class="sm-card-footer">
@@ -342,6 +354,7 @@ async function openDrawer(skillId) {
         <button class="btn btn-primary" onclick="toggleSkill('${skill.id}', ${!skill.enabled})" id="drawer-toggle-btn">
           ${skill.enabled ? '禁用' : '启用'}
         </button>
+        ${!isBuiltin ? `<button class="btn btn-secondary btn-gear-label" onclick="openEditModal('${skill.id}')" title="编辑 Skill"><span class="gear-icon">⚙</span> 编辑</button>` : ''}
         <button class="btn btn-secondary" onclick="duplicateSkill('${skill.id}')">🔁 克隆</button>
         <button class="btn btn-secondary" onclick="exportOneSkill('${skill.id}')">⬇️ 导出</button>
         ${!isBuiltin ? `<button class="btn btn-danger" onclick="uninstallSkill('${skill.id}')">🗑️ 卸载</button>` : ''}
@@ -367,6 +380,77 @@ async function openDrawer(skillId) {
 function closeDrawer() {
   document.getElementById('sm-drawer').classList.remove('open');
   document.getElementById('sm-drawer-overlay').classList.remove('open');
+}
+
+/* ═══════════════ Edit Modal ═════════════════ */
+async function openEditModal(skillId) {
+  const modal = document.getElementById('skill-edit-modal');
+  const overlay = document.getElementById('skill-edit-overlay');
+  if (!modal || !overlay) return;
+
+  try {
+    const data = await api('GET', `/api/skills/${skillId}`);
+    const skill = data.skill;
+
+    document.getElementById('edit-modal-title').textContent = `⚙ 编辑：${skill.name}`;
+    document.getElementById('edit-skill-id').value = skill.id;
+    document.getElementById('edit-skill-name').value = skill.name || '';
+    document.getElementById('edit-skill-icon').value = skill.icon || '🔧';
+    document.getElementById('edit-skill-description').value = skill.description || '';
+    document.getElementById('edit-skill-prompt').value = skill.system_prompt_template || skill.prompt || '';
+    document.getElementById('edit-skill-intent').value = skill.intent_description || '';
+    document.getElementById('edit-skill-tags').value = (skill.tags || []).join(', ');
+
+    overlay.classList.add('open');
+    modal.classList.add('open');
+    document.getElementById('edit-skill-name').focus();
+  } catch (e) {
+    toast(`加载 Skill 失败: ${e.message}`, 'error');
+  }
+}
+
+function closeEditModal() {
+  document.getElementById('skill-edit-modal')?.classList.remove('open');
+  document.getElementById('skill-edit-overlay')?.classList.remove('open');
+}
+
+async function saveSkillEdit() {
+  const skillId = document.getElementById('edit-skill-id').value;
+  const name = document.getElementById('edit-skill-name').value.trim();
+  const icon = document.getElementById('edit-skill-icon').value.trim();
+  const description = document.getElementById('edit-skill-description').value.trim();
+  const prompt = document.getElementById('edit-skill-prompt').value.trim();
+  const intent = document.getElementById('edit-skill-intent').value.trim();
+  const tagsRaw = document.getElementById('edit-skill-tags').value.trim();
+  const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+  if (!name) { toast('技能名称不能为空', 'error'); return; }
+
+  const saveBtn = document.getElementById('edit-save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
+
+  try {
+    await api('PUT', API.edit(skillId), {
+      name, icon, description,
+      system_prompt_template: prompt,
+      intent_description: intent,
+      tags,
+    });
+    toast(`✅ 技能「${name}」已更新`, 'success');
+    closeEditModal();
+    // Refresh views
+    loadCatalog();
+    loadLibrary();
+    // Refresh drawer if open
+    const drawer = document.getElementById('sm-drawer');
+    if (drawer?.classList.contains('open') && drawer.dataset.skillId === skillId) {
+      openDrawer(skillId);
+    }
+  } catch (e) {
+    toast(`保存失败: ${e.message}`, 'error');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存更改'; }
+  }
 }
 
 function hoverStar(starEl) {
@@ -883,6 +967,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Drawer close
   document.getElementById('sm-drawer-overlay')?.addEventListener('click', closeDrawer);
   document.getElementById('drawer-close-btn')?.addEventListener('click', closeDrawer);
+
+  // Edit modal close
+  document.getElementById('skill-edit-overlay')?.addEventListener('click', closeEditModal);
 
   // Export pack button
   document.getElementById('export-pack-btn')?.addEventListener('click', exportSelectedPack);

@@ -949,7 +949,7 @@ class SkillAutoMatcher:
             user_input, task_type, catalog_text, candidate_ids
         )
         if model_result is not None:
-            return model_result
+            return cls._expand_with_synergy(model_result, user_input, candidate_ids)
 
         # ── n-gram 语义相似度中间层（Ollama 不可用时，比纯关键词更泛化）─────
         ngram_result = cls._match_with_intent_ngram(user_input, candidates)
@@ -957,7 +957,7 @@ class SkillAutoMatcher:
             logger.info(
                 f"[AutoMatcher] 🔤 n-gram 匹配: {task_type} → {ngram_result}"
             )
-            return ngram_result
+            return cls._expand_with_synergy(ngram_result, user_input, candidate_ids)
 
         # ── 最终兜底：精确关键词规则 ────────────────────────────────────────
         pattern_result = cls._match_with_patterns(user_input, candidates)
@@ -965,9 +965,77 @@ class SkillAutoMatcher:
             logger.info(
                 f"[AutoMatcher] 📋 规则兜底匹配: {task_type} → {pattern_result}"
             )
-            return pattern_result
+            return cls._expand_with_synergy(pattern_result, user_input, candidate_ids)
 
         return []
+
+    @classmethod
+    def _expand_with_synergy(
+        cls,
+        matched_ids: List[str],
+        user_input: str,
+        candidate_ids: set,
+    ) -> List[str]:
+        """
+        对初步匹配到的 Skill 列表，检查各 Skill 的 ``synergizes_with`` 字段，
+        将得分达标的协同伙伴加入列表（不超过 ``_MAX_AUTO_SKILLS`` 上限）。
+
+        只添加在候选池（candidate_ids）中存在的伙伴，避免注入和当前
+        task_type 无关的 Skill。
+        """
+        if not matched_ids:
+            return matched_ids
+
+        try:
+            from app.core.skills.skill_manager import SkillManager
+            SkillManager._ensure_init()
+        except Exception:
+            return matched_ids
+
+        result = list(matched_ids)
+        result_set = set(result)
+        user_lower = user_input.lower()
+
+        for sid in list(matched_ids):
+            if len(result) >= _MAX_AUTO_SKILLS:
+                break
+            s_def = SkillManager._def_registry.get(sid)
+            if not s_def:
+                continue
+            partners = getattr(s_def, "synergizes_with", []) or []
+            for partner_id in partners:
+                if len(result) >= _MAX_AUTO_SKILLS:
+                    break
+                if partner_id in result_set:
+                    continue
+                if partner_id not in candidate_ids:
+                    continue
+                # 快速相关性检查：intent_description 或 trigger_keywords 有命中
+                p_def = SkillManager._def_registry.get(partner_id)
+                if p_def:
+                    kws = list(getattr(p_def, "trigger_keywords", []) or [])
+                    intent = (getattr(p_def, "intent_description", "") or "").lower()
+                    hit = any(kw.lower() in user_lower for kw in kws) or any(
+                        tok in user_lower for tok in intent.split() if len(tok) > 1
+                    )
+                    score_ok = hit
+                else:
+                    score_ok = False
+
+                # 协同组合：即使分数不高，只要主 skill 已匹配，
+                # 协同伙伴也以较低门槛纳入（最多 1 个门槛宽松的伙伴）
+                if not score_ok and len(result) < _MAX_AUTO_SKILLS:
+                    # 只允许每条主 skill 带出 1 个低置信度伙伴
+                    score_ok = True  # 宽松：首个未命中的伙伴也接受
+
+                if score_ok:
+                    result.append(partner_id)
+                    result_set.add(partner_id)
+                    logger.debug(
+                        "[AutoMatcher] 🔗 协同扩展: %s → +%s", sid, partner_id
+                    )
+
+        return result
 
     @classmethod
     def describe_matched(cls, skill_ids: List[str]) -> str:

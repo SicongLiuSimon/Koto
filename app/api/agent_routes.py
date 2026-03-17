@@ -695,6 +695,15 @@ def chat():
                     )
                     if _suggestions:
                         display_answer += SkillSuggester.format_hint(_suggestions)
+                    # ── chains_to：基于本轮激活 Skill 推荐下一步 ──────────────
+                    _all_active = list(set((auto_skill_ids or []) + ([skill_id] if skill_id else [])))
+                    _already_ids = [s["id"] for s in _suggestions] if _suggestions else []
+                    _chains = SkillSuggester.suggest_chains(
+                        active_skill_ids=_all_active,
+                        already_suggested_ids=_already_ids,
+                    )
+                    if _chains:
+                        display_answer += SkillSuggester.format_chain_hint(_chains)
                 except Exception as _se:
                     logger.debug(f"[chat] Skill 推荐注入跳过: {_se}")
 
