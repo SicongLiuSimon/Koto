@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Koto (言) — AI 桌面助手</title>
-  <meta name="description" content="Koto 是运行在你自己电脑上的 AI 桌面助手，支持 Gemini / OpenAI / Claude / Ollama 多模型对话、文档分析、知识库 RAG、技能系统与工作流自动化。">
+  <meta name="description" content="Koto 是运行在你自己电脑上的 AI 桌面助手，支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能系统与工作流自动化。">
   <style>
     /* ── Reset & Base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -376,8 +376,8 @@
       <span class="gt" data-en="AI Desktop Workspace" data-zh="AI 桌面工作台">AI 桌面工作台</span>
     </h1>
 
-    <p class="hero-sub rv" data-en="Koto runs on your own machine — multi-model chat (Gemini / OpenAI / Claude / Ollama), document analysis, Knowledge Base RAG, Skills automation and long-term memory. Your data stays local. Available in Web and Desktop modes." data-zh="Koto 运行在你的电脑上——支持 Gemini / OpenAI / Claude / Ollama 等多模型对话、文档分析、知识库 RAG、技能自动化与长期记忆。数据不离本地，Web 与桌面双模式运行。">
-      Koto 运行在你的电脑上——支持 Gemini / OpenAI / Claude / Ollama 等多模型对话、文档分析、知识库 RAG、技能自动化与长期记忆。数据不离本地，Web 与桌面双模式运行。
+    <p class="hero-sub rv" data-en="Koto runs on your own machine — chat with Gemini cloud models or locally-running Ollama models, analyze documents, build a Knowledge Base, automate with Skills, and keep long-term memory. Your data stays local. Available in Web and Desktop modes." data-zh="Koto 运行在你的电脑上——支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能自动化与长期记忆。数据不离本地，Web 与桌面双模式运行。">
+      Koto 运行在你的电脑上——支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能自动化与长期记忆。数据不离本地，Web 与桌面双模式运行。
     </p>
 
     <div class="hero-btns rv">
@@ -461,11 +461,9 @@
       <div class="feat-card rv">
         <div class="feat-icon">💬</div>
         <h3 data-en="Multi-model Chat" data-zh="多模型对话">多模型对话</h3>
-        <p data-en="Stream responses from Gemini 2.0 Flash / Pro, OpenAI GPT series, Claude, or locally-running Ollama models. Switch models per session with automatic circuit-breaker fallback." data-zh="流式调用 Gemini 2.0 Flash / Pro、OpenAI GPT 系列、Claude，或本机 Ollama 模型。每会话独立切换，支持熔断器自动降级回退。">流式调用 Gemini 2.0 Flash / Pro、OpenAI GPT 系列、Claude，或本机 Ollama 模型。每会话独立切换，支持熔断器自动降级回退。</p>
+        <p data-en="Stream responses from Gemini Flash / Pro (cloud) or any locally-running Ollama model. Switch models per session — your API key, your choice." data-zh="流式调用 Gemini Flash / Pro 云端模型，或本机运行的任意 Ollama 模型。每会话独立切换，API Key 自己掌控。">流式调用 Gemini Flash / Pro 云端模型，或本机运行的任意 Ollama 模型。每会话独立切换，API Key 自己掌控。</p>
         <div class="feat-tags">
           <span class="tag">Gemini</span>
-          <span class="tag">OpenAI</span>
-          <span class="tag">Claude</span>
           <span class="tag">Ollama</span>
           <span class="tag" data-en="Streaming" data-zh="流式输出">流式输出</span>
         </div>
@@ -640,7 +638,7 @@
       <h4 data-en="Requirements (source install)" data-zh="环境要求（源码安装）">环境要求（源码安装）</h4>
       <div class="req-list">
         <div class="req-item"><strong>Python</strong> 3.11+</div>
-        <div class="req-item"><strong>Gemini API Key</strong> <span data-en="(or OpenAI / Claude key)" data-zh="（或 OpenAI / Claude Key）">（或 OpenAI / Claude Key）</span></div>
+        <div class="req-item"><strong>Gemini API Key</strong> <span data-en="(required for cloud models)" data-zh="（云端模型必需）">（云端模型必需）</span></div>
         <div class="req-item"><strong>Ollama</strong> <span data-en="(optional, local models)" data-zh="（可选，本地模型）">（可选，本地模型）</span></div>
         <div class="req-item"><strong>Windows 10+</strong> / macOS / Linux</div>
       </div>
