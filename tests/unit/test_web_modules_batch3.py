@@ -77,8 +77,7 @@ class TestDocumentFeedback:
     # -- _INTERACTIONS_ONLY_MODELS ------------------------------------------
     def test_interactions_only_models_constant(self):
         from web.document_feedback import DocumentFeedbackSystem
-        assert "gemini-3-flash-preview" in DocumentFeedbackSystem._INTERACTIONS_ONLY_MODELS
-        assert "gemini-3-pro-preview" in DocumentFeedbackSystem._INTERACTIONS_ONLY_MODELS
+        assert "deep-research-pro-preview-12-2025" in DocumentFeedbackSystem._INTERACTIONS_ONLY_MODELS
 
     # -- _format_model_table ------------------------------------------------
     def test_format_model_table_empty(self):

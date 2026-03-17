@@ -356,7 +356,7 @@ class TestIsInteractionsOnly:
         self.fn = _is_interactions_only
 
     def test_known_interactions_model(self):
-        assert self.fn("gemini-3-flash-preview") is True
+        assert self.fn("deep-research-pro-preview-12-2025") is True
 
     def test_deep_research_prefix(self):
         assert self.fn("deep-research-pro-preview-2025-01") is True

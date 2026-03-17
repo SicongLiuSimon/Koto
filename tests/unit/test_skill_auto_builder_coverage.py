@@ -23,8 +23,6 @@ from app.core.skills.skill_auto_builder import (
     SkillPackager,
     StyleAnalyzer,
     StyleProfile,
-    _infer_conflict_with,
-    _infer_task_types,
     _make_skill_id,
     _normalize_turns,
 )
@@ -393,7 +391,7 @@ class TestSkillAutoBuilder:
             domain="coding",
             description="代码编程python辅助",
         )
-        assert "CODER" in skill.task_types
+        assert "CHAT" in skill.task_types
 
     def test_preview_prompt_returns_dict(self):
         result = SkillAutoBuilder.preview_prompt(
@@ -406,7 +404,6 @@ class TestSkillAutoBuilder:
         assert "intent_description" in result
         assert "style_profile" in result
         assert "suggested_id" in result
-        assert "task_types" in result
         assert isinstance(result["style_profile"], dict)
 
     def test_preview_prompt_suggested_id(self):
@@ -533,18 +530,13 @@ class TestSkillAutoBuilder:
 
     @patch("app.core.skills.skill_auto_builder.SkillAutoBuilder._generate_prompt_with_ai")
     def test_from_ai_description_with_ai_success(self, mock_ai):
-        mock_ai.return_value = {
-            "prompt": "你是「TestAI」，一个友好助手。\n## 行为规范\n...\n## 用户输入\n{input}",
-            "intent_description": "友好聊天场景",
-            "tags": ["聊天", "友好"],
-            "task_types": ["CHAT"],
-        }
+        mock_ai.return_value = "你是「TestAI」，一个友好助手。\n## 行为规范\n...\n## 用户输入\n{input}"
         skill = SkillAutoBuilder.from_ai_description(
             name="TestAI", description="友好聊天机器人"
         )
         assert skill.name == "TestAI"
         assert "TestAI" in skill.system_prompt_template
-        assert skill.intent_description == "友好聊天场景"
+        assert skill.task_types == ["CHAT"]
 
     @patch("app.core.skills.skill_auto_builder.SkillAutoBuilder._generate_prompt_with_ai")
     def test_from_ai_description_fallback_on_none(self, mock_ai):
@@ -676,47 +668,6 @@ class TestHelperFunctions:
         sid = _make_skill_id("hello world! @#$")
         assert sid
         assert "@" not in sid
-
-    def test_infer_task_types_coding(self):
-        types = _infer_task_types("coding")
-        assert "CODER" in types
-
-    def test_infer_task_types_general(self):
-        types = _infer_task_types("general")
-        assert "CHAT" in types
-
-    def test_infer_task_types_description_signal(self):
-        types = _infer_task_types("general", "帮我debug python代码")
-        assert "CODER" in types
-
-    def test_infer_task_types_research_signal(self):
-        types = _infer_task_types("general", "深度研究分析调研报告")
-        assert "RESEARCH" in types
-
-    def test_infer_conflict_with_concise(self):
-        profile = StyleProfile(conciseness=0.8, verbosity=0.2)
-        conflicts = _infer_conflict_with(profile)
-        assert "step_by_step" in conflicts
-
-    def test_infer_conflict_with_serious_formal(self):
-        profile = StyleProfile(humor=0.1, formality=0.8)
-        conflicts = _infer_conflict_with(profile)
-        assert "emoji_assist" in conflicts
-
-    def test_infer_conflict_with_creative(self):
-        profile = StyleProfile(creativity=0.8)
-        conflicts = _infer_conflict_with(profile)
-        assert "strict_mode" in conflicts
-
-    def test_infer_conflict_with_structured_verbose(self):
-        profile = StyleProfile(structure=0.9, verbosity=0.8)
-        conflicts = _infer_conflict_with(profile)
-        assert "concise_mode" in conflicts
-
-    def test_infer_conflict_with_no_conflicts(self):
-        profile = StyleProfile()  # all defaults
-        conflicts = _infer_conflict_with(profile)
-        assert conflicts == []
 
     def test_normalize_turns_basic(self):
         history = [

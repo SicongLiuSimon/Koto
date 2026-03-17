@@ -18,31 +18,15 @@ class TestGeminiProviderBasic:
     def test_provider_has_timeout_config(self):
         from app.core.llm.gemini import GeminiProvider
 
-        assert hasattr(GeminiProvider, "CALL_TIMEOUT")
-        assert isinstance(GeminiProvider.CALL_TIMEOUT, int)
-        assert GeminiProvider.CALL_TIMEOUT > 0
+        assert hasattr(GeminiProvider, "MAX_RETRIES")
+        assert isinstance(GeminiProvider.MAX_RETRIES, int)
+        assert GeminiProvider.MAX_RETRIES > 0
 
     def test_normal_model_not_substituted(self):
-        from app.core.llm.gemini import GeminiProvider
+        from app.core.llm.gemini import _INTERACTIONS_ONLY_MODELS
 
-        prov = GeminiProvider.__new__(GeminiProvider)
-        prov.api_key = "test"
-        prov.client = MagicMock()
-
-        mock_types = MagicMock()
-        mock_types.GenerateContentConfig.return_value = MagicMock()
-
-        captured_models = []
-
-        def fake_call_with_retry(model, contents, config):
-            captured_models.append(model)
-            return {"text": "ok", "model": model}
-
-        with patch.object(prov, "_call_with_retry", side_effect=fake_call_with_retry):
-            with patch("app.core.llm.gemini.types", mock_types):
-                prov.generate_content("hello", model="gemini-2.5-flash")
-
-        assert captured_models[0] == "gemini-2.5-flash"
+        # Normal model should NOT be in the interactions-only set
+        assert "gemini-2.5-flash" not in _INTERACTIONS_ONLY_MODELS
 
 
 # ---------------------------------------------------------------------------

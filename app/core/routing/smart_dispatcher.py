@@ -1296,6 +1296,18 @@ class SmartDispatcher:
                     _chat_candidate = _FLASH_FALLBACK
             except Exception:
                 pass
+
+            def _avail(model_id):
+                """Return model_id if a runtime executor can serve it, else best alternative."""
+                try:
+                    from app.core.llm.model_fallback import get_fallback_executor
+                    fbe = get_fallback_executor()
+                    if fbe.is_available():
+                        return model_id
+                    return fbe.get_best_available()
+                except Exception:
+                    return model_id
+
             return _avail(_chat_candidate)
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型

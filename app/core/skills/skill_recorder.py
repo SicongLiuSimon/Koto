@@ -414,12 +414,6 @@ class SkillRecorder:
                 f"[skill_recorder] SkillManager 注册失败（已保存到磁盘）: {e}"
             )
 
-        # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
-        _auto_register_intent_binding(skill_def)
-
-        # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
-        _auto_register_intent_binding(skill_def)
-
         # ── 注册触发关键词到决策层 ────────────────────────────────────────────
         kws = list(getattr(skill_def, "trigger_keywords", None) or [])
         if kws:

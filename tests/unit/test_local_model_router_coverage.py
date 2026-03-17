@@ -743,39 +743,54 @@ class TestLocalModelRouterCoverage:
         task, _, _, _, _ = LocalModelRouter.classify_with_hint("draw a cat")
         assert task == "PAINTER"
 
-    # ── pick_best_chat_model ───────────────────────────────────────
+    # ── _init_response_model ──────────────────────────────────────
 
-    def test_pick_best_chat_model_returns_cached(self):
+    def test_init_response_model_returns_cached(self):
         from app.core.routing.local_model_router import LocalModelRouter
 
         LocalModelRouter._response_model = "qwen3:8b"
-        result = LocalModelRouter.pick_best_chat_model()
-        assert result == "qwen3:8b"
+        LocalModelRouter._response_model_inited = True
+        result = LocalModelRouter._init_response_model()
+        assert result is True
 
     @patch("app.core.routing.local_model_router.requests.get")
-    def test_pick_best_chat_model_initializes(self, mock_get):
+    def test_init_response_model_from_ollama(self, mock_get):
         from app.core.routing.local_model_router import LocalModelRouter
+
+        LocalModelRouter._response_model = None
+        LocalModelRouter._response_model_inited = False
 
         with patch.object(LocalModelRouter, "is_ollama_available", return_value=True):
             mock_get.return_value = _mock_tags_response(["qwen3:8b"])
-            result = LocalModelRouter.pick_best_chat_model()
-        assert result is not None
+            result = LocalModelRouter._init_response_model()
+        assert result is True
+        assert LocalModelRouter._response_model is not None
 
-    def test_pick_best_chat_model_fallback_to_classifier(self):
+    def test_init_response_model_fallback_to_classifier(self):
         from app.core.routing.local_model_router import LocalModelRouter
 
+        LocalModelRouter._response_model = None
+        LocalModelRouter._response_model_inited = False
         LocalModelRouter._model_name = "qwen3:4b"
 
-        with patch.object(LocalModelRouter, "_init_response_model", return_value=False):
-            result = LocalModelRouter.pick_best_chat_model()
-        assert result == "qwen3:4b"
+        with patch.object(LocalModelRouter, "is_ollama_available", return_value=True), \
+             patch("app.core.routing.local_model_router.requests.get") as mock_get:
+            mock_get.return_value = _mock_tags_response(["unknown-model:latest"])
+            result = LocalModelRouter._init_response_model()
+        # Falls back to _model_name when no preferred model matches
+        assert result is True
+        assert LocalModelRouter._response_model == "qwen3:4b"
 
-    def test_pick_best_chat_model_none_when_nothing_available(self):
+    def test_init_response_model_false_when_unavailable(self):
         from app.core.routing.local_model_router import LocalModelRouter
 
-        with patch.object(LocalModelRouter, "_init_response_model", return_value=False):
-            result = LocalModelRouter.pick_best_chat_model()
-        assert result is None
+        LocalModelRouter._response_model = None
+        LocalModelRouter._response_model_inited = False
+        LocalModelRouter._model_name = None
+
+        with patch.object(LocalModelRouter, "is_ollama_available", return_value=False):
+            result = LocalModelRouter._init_response_model()
+        assert result is False
 
     # ── is_simple_query ────────────────────────────────────────────
 

@@ -248,6 +248,20 @@ def _load_history(session_id: str, max_turns: int = 30, token_budget: int = 4096
             parts = msg.get("parts", [])
             content = parts[0] if parts else msg.get("content", "")
             history.append({"role": role, "content": content})
+
+        # Apply token budget: walk from newest → oldest, accumulate
+        # estimated tokens (len(content) // 4), stop when budget exceeded.
+        if token_budget and token_budget > 0:
+            trimmed = []
+            used = 0
+            for msg in reversed(history):
+                est = len(msg.get("content", "")) // 4
+                if used + est > token_budget:
+                    break
+                trimmed.append(msg)
+                used += est
+            history = list(reversed(trimmed))
+
         return history
     except Exception as exc:
         logger.warning(f"Failed to load history for {session_id}: {exc}")

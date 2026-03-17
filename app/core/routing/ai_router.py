@@ -49,7 +49,7 @@ class AIRouter:
     @classmethod
     def _cache_set(cls, key, value):
         """Set a cache entry, evicting oldest half when full."""
-        if len(cls._cache) >= cls._CACHE_MAX_SIZE:
+        if len(cls._cache) >= cls._cache_max_size:
             keys = list(cls._cache.keys())
             for k in keys[:len(keys) // 2]:
                 del cls._cache[k]
@@ -131,18 +131,17 @@ class AIRouter:
                                 temperature=0.1,  # 低温度，更确定性
                             )
                         )
-                    )
-                    if response.candidates and response.candidates[0].content.parts:
-                        text = response.candidates[0].content.parts[0].text.strip().upper()
-                        # 清理输出
-                        valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH", "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
-                        for task in valid_tasks:
-                            if task in text:
-                                result_holder['task'] = task
-                                return
-                        result_holder['task'] = "CHAT"  # 默认
-                except Exception as e:
-                    result_holder['error'] = str(e)
+                        if response.candidates and response.candidates[0].content.parts:
+                            text = response.candidates[0].content.parts[0].text.strip().upper()
+                            # 清理输出
+                            valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH", "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+                            for task in valid_tasks:
+                                if task in text:
+                                    result_holder['task'] = task
+                                    return
+                            result_holder['task'] = "CHAT"  # 默认
+                    except Exception as e:
+                        result_holder['error'] = str(e)
             
             # 带超时的调用
             thread = threading.Thread(target=call_model, daemon=True)

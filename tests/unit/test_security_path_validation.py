@@ -325,12 +325,11 @@ class TestOpenUrlSchemeValidation:
         assert result["success"] is False
 
     def test_scheme_only_no_netloc(self):
-        """A bare 'http:' with no netloc should still be considered http scheme."""
+        """A bare 'http:' with no netloc is not a valid URL and should be rejected."""
         api = self._make_api()
-        with patch("webbrowser.open"):
-            result = api.open_url("http:")
-        # urlparse("http:").scheme == "http" so it passes the scheme check
-        assert result["success"] is True
+        result = api.open_url("http:")
+        # Implementation requires full 'http://' or 'https://' prefix
+        assert result["success"] is False
 
 
 # ---------------------------------------------------------------------------

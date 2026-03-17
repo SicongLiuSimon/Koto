@@ -1,5 +1,6 @@
 ﻿import os
 import asyncio
+import logging
 import re
 import json
 import time
@@ -11,6 +12,8 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+
+_app_logger = logging.getLogger("koto.app")
 
 # 确保 web/ 目录在模块搜索路径中（通过 koto_app.py 启动时需要）
 _web_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1567,6 +1570,34 @@ def _register_blueprints_deferred():
         _app_logger.warning(f"[HealthAPI] ⚠️ 未能导入健康检查蓝图: {e}")
     except Exception as e:
         _app_logger.error(f"[HealthAPI] ❌ 健康检查 API 注册失败: {e}")
+
+    # ── 新拆分的路由蓝图（从 app.py 提取的路由模块）──────────────────────────
+    _new_blueprints = [
+        ("web.blueprints.sessions", "sessions_bp", "Sessions"),
+        ("web.blueprints.analytics", "analytics_bp", "Analytics"),
+        ("web.blueprints.proactive", "proactive_bp", "Proactive"),
+        ("web.blueprints.execution", "execution_bp", "Execution"),
+        ("web.blueprints.knowledge", "knowledge_bp", "Knowledge"),
+        ("web.blueprints.file_editor", "file_editor_bp", "FileEditor"),
+        ("web.blueprints.dev", "dev_bp", "Dev"),
+        ("web.blueprints.voice", "voice_bp", "Voice"),
+        ("web.blueprints.document", "document_bp", "Document"),
+        ("web.blueprints.file_organize", "file_organize_bp", "FileOrganize"),
+        ("web.blueprints.workspace", "workspace_bp", "Workspace"),
+        ("web.blueprints.settings", "settings_bp", "Settings"),
+        ("web.blueprints.misc_api", "misc_api_bp", "MiscAPI"),
+        ("web.blueprints.pages", "pages_bp", "Pages"),
+    ]
+    for mod_path, bp_attr, label in _new_blueprints:
+        try:
+            _mod = importlib.import_module(mod_path)
+            _bp = getattr(_mod, bp_attr)
+            app.register_blueprint(_bp)
+            _app_logger.info("[%s] ✅ 蓝图已注册", label)
+        except ImportError as e:
+            _app_logger.warning("[%s] ⚠️ 蓝图导入失败: %s", label, e)
+        except Exception as e:
+            _app_logger.error("[%s] ❌ 蓝图注册失败: %s", label, e)
 
     _app_logger.info("[INIT] ✅ 所有蓝图注册完成")
 

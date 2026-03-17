@@ -2,10 +2,10 @@
 
 Covers:
 - AIRouter._cache is a dict class attribute
-- AIRouter._CACHE_MAX_SIZE == 500
+- AIRouter._cache_max_size == 100
 - Cache eviction: adding entries beyond max_size triggers half-eviction
 - RouterDecision dataclass construction and defaults
-- LocalModelRouter.pick_best_chat_model (no-arg classmethod, queries Ollama)
+- LocalModelRouter._init_response_model (classmethod, queries Ollama)
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ class TestAIRouterCacheType:
 
         assert isinstance(AIRouter._cache, dict)
 
-    def test_cache_max_size_is_500(self):
+    def test_cache_max_size_is_100(self):
         from app.core.routing.ai_router import AIRouter
 
-        assert AIRouter._CACHE_MAX_SIZE == 500
+        assert AIRouter._cache_max_size == 100
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ class TestAIRouterCacheEviction:
         from app.core.routing.ai_router import AIRouter
 
         cache = AIRouter._cache
-        max_size = AIRouter._CACHE_MAX_SIZE
+        max_size = AIRouter._cache_max_size
         # Fill to max_size
         for i in range(max_size):
             cache[f"key{i}"] = f"val{i}"
@@ -128,35 +128,41 @@ class TestRouterDecision:
 
 
 # ---------------------------------------------------------------------------
-# LocalModelRouter.pick_best_chat_model (no-arg classmethod)
+# LocalModelRouter._init_response_model
 # ---------------------------------------------------------------------------
 
 
-class TestPickBestChatModel:
-    def test_returns_cached_response_model(self):
+class TestInitResponseModel:
+    def test_returns_true_when_response_model_cached(self):
         from app.core.routing.local_model_router import LocalModelRouter
 
-        # If _response_model is set, pick_best_chat_model returns it directly
+        # If _response_model is already set and inited, returns True immediately
         original = LocalModelRouter._response_model
+        original_inited = LocalModelRouter._response_model_inited
         try:
             LocalModelRouter._response_model = "qwen3:8b"
-            assert LocalModelRouter.pick_best_chat_model() == "qwen3:8b"
+            LocalModelRouter._response_model_inited = True
+            assert LocalModelRouter._init_response_model() is True
+            assert LocalModelRouter._response_model == "qwen3:8b"
         finally:
             LocalModelRouter._response_model = original
+            LocalModelRouter._response_model_inited = original_inited
 
-    def test_returns_none_when_no_model_available(self):
+    def test_returns_false_when_no_model_available(self):
         from unittest.mock import patch
         from app.core.routing.local_model_router import LocalModelRouter
 
         original_resp = LocalModelRouter._response_model
+        original_inited = LocalModelRouter._response_model_inited
         original_model = LocalModelRouter._model_name
         try:
             LocalModelRouter._response_model = None
+            LocalModelRouter._response_model_inited = False
             LocalModelRouter._model_name = None
             with patch.object(LocalModelRouter, "is_ollama_available", return_value=False):
-                result = LocalModelRouter.pick_best_chat_model()
-                # Should return None or _model_name (which is None)
-                assert result is None
+                result = LocalModelRouter._init_response_model()
+                assert result is False
         finally:
             LocalModelRouter._response_model = original_resp
+            LocalModelRouter._response_model_inited = original_inited
             LocalModelRouter._model_name = original_model

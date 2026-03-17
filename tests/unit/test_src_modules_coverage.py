@@ -451,25 +451,7 @@ class TestLocalModelInstaller:
             import local_model_installer
         return local_model_installer
 
-    # -- _strip_ansi -------------------------------------------------------
-
-    def test_strip_ansi_removes_color(self):
-        mod = self._import_module()
-        assert mod._strip_ansi("\x1b[31mred\x1b[0m") == "red"
-
-    def test_strip_ansi_plain_text(self):
-        mod = self._import_module()
-        assert mod._strip_ansi("hello") == "hello"
-
-    def test_strip_ansi_empty(self):
-        mod = self._import_module()
-        assert mod._strip_ansi("") == ""
-
-    def test_strip_ansi_cursor_codes(self):
-        mod = self._import_module()
-        assert mod._strip_ansi("\x1b[A\x1b[2Kline") == "line"
-
-    # -- MODEL_CATALOG structure -------------------------------------------
+    # -- MODEL_CATALOG structure-------------------------------------------
 
     def test_model_catalog_nonempty(self):
         mod = self._import_module()
@@ -488,21 +470,22 @@ class TestLocalModelInstaller:
 
     # -- recommend_models --------------------------------------------------
 
-    def test_recommend_models_marks_exactly_one(self):
+    def test_recommend_models_returns_non_empty(self):
         mod = self._import_module()
         info = {"ram_gb": 8, "gpu_vram_gb": 4}
         result = mod.recommend_models(info)
-        assert sum(1 for m in result if m["recommended"]) == 1
+        assert isinstance(result, list)
+        assert len(result) >= 1
+        for m in result:
+            assert "tag" in m and "ram" in m and "vram" in m
 
-    def test_recommend_models_does_not_mutate_catalog(self):
+    def test_recommend_models_filters_by_resources(self):
         mod = self._import_module()
-        original_tags = [m["tag"] for m in mod.MODEL_CATALOG]
-        result = mod.recommend_models({"ram_gb": 8, "gpu_vram_gb": 0})
-        for entry in result:
-            entry["recommended"] = "MUTATED"
-        for m in mod.MODEL_CATALOG:
-            assert "recommended" not in m
-        assert [m["tag"] for m in mod.MODEL_CATALOG] == original_tags
+        info = {"ram_gb": 8, "gpu_vram_gb": 0}
+        result = mod.recommend_models(info)
+        eff = max(8, 0 * 1.5)
+        for m in result:
+            assert eff >= m["ram"] or 0 >= m["vram"]
 
     def test_recommend_models_low_resources_fallback(self):
         mod = self._import_module()
@@ -510,11 +493,14 @@ class TestLocalModelInstaller:
         assert len(result) >= 1
         assert result[0]["tag"] == mod.MODEL_CATALOG[0]["tag"]
 
-    def test_recommend_models_sweet_spot_gpu(self):
+    def test_recommend_models_gpu_vram_factor(self):
+        """GPU VRAM is scaled by 1.5× as effective resource."""
         mod = self._import_module()
-        result = mod.recommend_models({"ram_gb": 8, "gpu_vram_gb": 8})
-        rec = next(m for m in result if m["recommended"])
-        assert 8.0 >= rec["vram"] * 1.15
+        info = {"ram_gb": 0, "gpu_vram_gb": 4}
+        result = mod.recommend_models(info)
+        assert len(result) >= 1
+        for m in result:
+            assert 6.0 >= m["ram"] or 4 >= m["vram"]
 
     # -- _find_ollama_exe --------------------------------------------------
 

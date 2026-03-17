@@ -34,10 +34,10 @@ class TestAIRouterCacheSet:
         assert len(AIRouter._cache) == 2
 
     def test_no_eviction_at_exactly_max_size(self):
-        """Fill cache to _CACHE_MAX_SIZE via _cache_set — no eviction yet."""
+        """Fill cache to _cache_max_size via _cache_set — no eviction yet."""
         from app.core.routing.ai_router import AIRouter
 
-        max_size = AIRouter._CACHE_MAX_SIZE
+        max_size = AIRouter._cache_max_size
         for i in range(max_size):
             AIRouter._cache_set(f"key_{i}", f"val_{i}")
         assert len(AIRouter._cache) == max_size
@@ -49,8 +49,8 @@ class TestAIRouterCacheSet:
         """Adding one entry beyond max triggers half-eviction."""
         from app.core.routing.ai_router import AIRouter
 
-        max_size = AIRouter._CACHE_MAX_SIZE
-        half = max_size // 2  # 250
+        max_size = AIRouter._cache_max_size
+        half = max_size // 2  # 50
         for i in range(max_size):
             AIRouter._cache_set(f"key_{i}", f"val_{i}")
         # One more → eviction
@@ -61,7 +61,7 @@ class TestAIRouterCacheSet:
     def test_oldest_half_removed_newest_half_preserved(self):
         from app.core.routing.ai_router import AIRouter
 
-        max_size = AIRouter._CACHE_MAX_SIZE
+        max_size = AIRouter._cache_max_size
         half = max_size // 2
         for i in range(max_size):
             AIRouter._cache_set(f"key_{i}", f"val_{i}")
@@ -77,10 +77,10 @@ class TestAIRouterCacheSet:
         assert AIRouter._cache["key_overflow"] == "val_overflow"
 
     def test_cache_never_exceeds_max_size(self):
-        """Over many inserts the cache stays within _CACHE_MAX_SIZE."""
+        """Over many inserts the cache stays within _cache_max_size."""
         from app.core.routing.ai_router import AIRouter
 
-        max_size = AIRouter._CACHE_MAX_SIZE
+        max_size = AIRouter._cache_max_size
         for i in range(max_size + 100):
             AIRouter._cache_set(f"key_{i}", f"val_{i}")
             assert len(AIRouter._cache) <= max_size
@@ -89,7 +89,7 @@ class TestAIRouterCacheSet:
         """After first eviction, refilling and overflowing again works."""
         from app.core.routing.ai_router import AIRouter
 
-        max_size = AIRouter._CACHE_MAX_SIZE
+        max_size = AIRouter._cache_max_size
         half = max_size // 2
         # First cycle: fill and overflow
         for i in range(max_size + 1):

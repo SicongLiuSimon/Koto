@@ -373,6 +373,9 @@ class SkillDefinition:
     # 格式: [{"trigger_type": "cron", "config": {"time": "09:00"}}]
     default_triggers: List[Dict[str, Any]] = field(default_factory=list)
 
+    # 可选入口点（模块:函数 格式），用于 SkillCapabilityRegistry 直接调用
+    entry_point: Optional[str] = None
+
     # ── 方法 ─────────────────────────────────────────────────────────────────
 
 
@@ -524,6 +527,7 @@ class SkillDefinition:
             "update_url": self.update_url,
             "publisher": self.publisher or self.author,
             "default_triggers": self.default_triggers,
+            "entry_point": self.entry_point,
         }
 
     @classmethod
@@ -629,7 +633,6 @@ class SkillDefinition:
             synergizes_with=legacy.get("synergizes_with", []),
             output_keys=legacy.get("output_keys", []),
             examples=legacy.get("examples", []),
-            entry_point=legacy.get("entry_point"),
         )
 
 

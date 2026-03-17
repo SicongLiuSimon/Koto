@@ -720,9 +720,9 @@ class TestDataProcessPlugin:
 
     def test_get_tools(self):
         tools = self._make().get_tools()
-        assert len(tools) == 3
+        assert len(tools) == 6
         names = {t["name"] for t in tools}
-        assert names == {"load_data", "query_data", "save_data"}
+        assert names == {"load_data", "query_data", "describe_data", "suggest_questions", "save_data", "analyze_trends"}
 
     @patch("app.core.agent.plugins.data_process_plugin.DataProcessPlugin._load_df")
     def test_load_data_success(self, mock_load):
