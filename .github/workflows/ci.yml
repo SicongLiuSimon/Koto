@@ -97,6 +97,37 @@ jobs:
           path: coverage.xml
           retention-days: 14
 
+  e2e:
+    name: Playwright E2E Tests
+    runs-on: windows-latest
+    needs: test
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r config/requirements.txt
+          pip install pytest pytest-mock pytest-cov
+
+      - name: Install Playwright
+        run: |
+          pip install pytest-playwright
+          playwright install chromium
+
+      - name: Run E2E tests
+        env:
+          PYTHONPATH: .
+        run: python -m pytest tests/e2e/ -q --tb=short
+
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
