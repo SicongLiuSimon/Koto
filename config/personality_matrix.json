@@ -1,0 +1,11 @@
+{
+  "cognitive": {
+    "exploratory": 0.5,
+    "executor": 0.5,
+    "analytical": 0.5,
+    "creative": 0.5
+  },
+  "expertise": {},
+  "goals": [],
+  "recent_themes": []
+}

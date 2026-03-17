@@ -142,3 +142,29 @@ def ping():
               example: ok
     """
     return jsonify({"status": "ok"}), 200
+
+
+@health_bp.route("/api/ping/cloud", methods=["GET"])
+def ping_cloud():
+    """Measure round-trip latency to the configured cloud AI API endpoint."""
+    import os
+    from urllib.parse import urlparse
+
+    base = os.getenv("GEMINI_API_BASE", "").strip()
+    if base:
+        parsed = urlparse(base)
+        netloc = parsed.netloc or parsed.path.split("/")[0]
+        scheme = parsed.scheme or "https"
+        target_url = f"{scheme}://{netloc}"
+    else:
+        target_url = "https://generativelanguage.googleapis.com"
+
+    try:
+        t0 = time.monotonic()
+        requests.head(target_url, timeout=5, allow_redirects=False)
+        latency_ms = round((time.monotonic() - t0) * 1000)
+        return jsonify({"reachable": True, "latency_ms": latency_ms, "target": target_url}), 200
+    except requests.exceptions.Timeout:
+        return jsonify({"reachable": False, "latency_ms": None, "error": "timeout", "target": target_url}), 200
+    except Exception as exc:
+        return jsonify({"reachable": False, "latency_ms": None, "error": str(exc), "target": target_url}), 200

@@ -1121,12 +1121,31 @@ def main():
     if ico_path.exists():
         icon_path = str(ico_path)
 
+    # 检测屏幕分辨率，自动适配窗口大小（居中、占屏幕 88%）
+    try:
+        import ctypes as _ctypes
+        _u32 = _ctypes.windll.user32
+        _u32.SetProcessDPIAware()
+        _screen_w = _u32.GetSystemMetrics(0)
+        _screen_h = _u32.GetSystemMetrics(1)
+        _win_w = max(1024, int(_screen_w * 0.65))
+        _win_h = max(700, int(_screen_h * 0.65))
+        _win_x = (_screen_w - _win_w) // 2
+        _win_y = (_screen_h - _win_h) // 2
+        _write_log(f"✔ 屏幕分辨率: {_screen_w}x{_screen_h}，初始窗口: {_win_w}x{_win_h} 位于 ({_win_x},{_win_y})")
+    except Exception as _e:
+        _win_w, _win_h = 1200, 800
+        _win_x, _win_y = None, None
+        _write_log(f"⚠️ 无法检测屏幕分辨率，使用默认 1200x800: {_e}")
+
     # 创建桌面窗口
     window = webview.create_window(
         title="Koto - AI 个人助手",
         url=app_url,
-        width=1200,
-        height=800,
+        width=_win_w,
+        height=_win_h,
+        x=_win_x,
+        y=_win_y,
         resizable=True,
         fullscreen=False,
         min_size=(400, 300),
@@ -1142,6 +1161,7 @@ def main():
 
     # 绑定窗口控制API
     window_api = WindowAPI(window, app_url)
+    window_api.full_size = (_win_w, _win_h)  # 同步实际初始窗口尺寸
     window.expose(window_api.switch_to_mini)
     window.expose(window_api.switch_to_full)
     window.expose(window_api.get_mode)

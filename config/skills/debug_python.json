@@ -1,67 +1,86 @@
-{
-  "id": "debug_python",
-  "name": "Python 调试",
-  "icon": "🐍",
-  "category": "domain",
-  "description": "专项 Python 调试：精准定位 traceback、分析根因、给出最小复现和修复方案",
-  "intent_description": "用户遇到 Python 报错、traceback、AttributeError、ImportError 等 bug 需要调试",
-  "system_prompt_template": "",
-  "input_variables": [],
-  "output_spec": {
-    "format": "markdown",
-    "must_contain": [
-      "原因",
-      "修复"
-    ],
-    "must_not_contain": [],
-    "min_chars": null,
-    "max_chars": null,
-    "required_json_keys": [],
-    "description": "包含根因分析、最小复现代码和修复方案"
-  },
-  "bound_tools": [],
-  "task_types": [
-    "CODER"
-  ],
-  "enabled": true,
-  "prompt": "\n\n## 🐍 领域要求：Python 专项调试\n\n你是一名 Python 专家，擅长从 traceback 精准定位 bug 根因并给出最小可复现修复方案。\n\n### 调试分析框架\n\n**第一步：定位**\n- 从 traceback 最末帧（实际出错位置）开始，逆向分析调用链\n- 识别错误类型：TypeError / AttributeError / ImportError / KeyError / ValueError / RuntimeError\n- 特别关注：`NoneType object has no attribute` → 未判断 None；`'str' object is not callable` → 变量名覆盖了内置函数\n\n**第二步：根因分析**\n常见根因模式：\n| 症状 | 通常根因 |\n|------|---------|\n| AttributeError on None | 返回值假设为对象，未处理 None 路径 |\n| ImportError / ModuleNotFoundError | 虚拟环境未激活 / 包未安装 / 循环 import |\n| UnicodeDecodeError | 文件读取未指定 encoding='utf-8' |\n| RecursionError | 无终止条件的递归 / 类的 __repr__ 触发递归 |\n| RuntimeError: generator already running | 在生成器内部调用了自身 |\n| OSError / PermissionError | 路径权限 / 文件被其他进程占用 |\n\n**第三步：修复输出（固定结构）**\n\n```\n### 🔎 根本原因\n一句话定位：在 [文件:行号] 处，[具体原因]\n\n### 📋 最小复现代码\n```python\n# 可独立运行的最小片段，能复现该错误\n```\n\n### 🔧 修复代码\n```python\n# diff 或完整替换块\n```\n\n### 💡 防止复发\n- [类型检查/防御性断言/最佳实践建议]\n- 相关：`pip show <pkg>` 验证版本（如涉及第三方库兼容性）\n```\n\n### 特殊场景检查清单\n- [ ] 异常是否在异步/线程上下文中？（asyncio.run vs await 混用）\n- [ ] 是否有循环 import？（A import B，B import A）\n- [ ] Windows/Linux 路径分隔符差异？（`\\` vs `/`）\n- [ ] 编码问题？（GBK 环境读取 UTF-8 文件）",
-  "version": "1.0.0",
-  "author": "koto",
-  "created_at": "2026-03-07T00:00:00Z",
-  "tags": [
-    "python",
-    "debug",
-    "traceback",
-    "bug-fix"
-  ],
-  "trigger_keywords": [
-    "python报错",
-    "traceback",
-    "调试python",
-    "AttributeError",
-    "ImportError",
-    "TypeError",
-    "python bug",
-    "python错误",
-    "KeyError",
-    "ModuleNotFoundError"
-  ],
-  "executor_tools": [
-    "read_file"
-  ],
-  "examples": [
-    {
-      "input": "报错如下：\n```\nTraceback (most recent call last):\n  File \"app.py\", line 12, in process\n    result = data['user']['profile']['name']\nKeyError: 'profile'\n```\ndata 是从 API 返回的 JSON，有时用户没有填写 profile",
-      "output": "### 🔎 根本原因\n在 `app.py:12`，代码假设 `data['user']` 中必然存在 `'profile'` 键，但 API 返回的用户数据中该字段是可选的（未填写 profile 的用户不返回此键）。\n\n### 📋 最小复现代码\n```python\ndata = {\"user\": {}}  # 无 profile 的用户\nresult = data['user']['profile']['name']  # KeyError: 'profile'\n```\n\n### 🔧 修复代码\n**方案 A — 链式 .get()（推荐：简洁，返回 None 而非抛出）**\n```python\nresult = data.get('user', {}).get('profile', {}).get('name', '未填写')\n```\n\n**方案 B — 显式判断（推荐：逻辑清晰，适合有后续处理的场景）**\n```python\nuser = data.get('user', {})\nif 'profile' in user:\n    result = user['profile']['name']\nelse:\n    result = '未填写'\n```\n\n### 💡 防止复发\n- 处理 API 返回数据时，**永远不要假设键一定存在**，用 `.get()` 代替 `[]`\n- 如果这个字段在业务上是必须的，应在数据入库时做 schema 验证（如 pydantic）：\n```python\nfrom pydantic import BaseModel\nclass Profile(BaseModel):\n    name: str = \"未填写\"\nclass User(BaseModel):\n    profile: Profile = Profile()\n```",
-      "note": "KeyError 根因分析，.get()链式修复 + pydantic 彻底方案"
-    }
-  ],
-  "plan_template": [
-    "1. 读取完整 traceback，从最末帧定位实际出错位置（文件:行号）",
-    "2. 识别错误类型，匹配常见根因模式",
-    "3. 如有代码上下文，检查调用链和变量赋值路径",
-    "4. 提炼最小可复现代码片段",
-    "5. 给出修复代码（diff格式或完整替换）",
-    "6. 说明防止复发的最佳实践（类型检查/防御性断言/工具版本验证）"
-  ]
+﻿{
+    "id":  "debug_python",
+    "name":  "Python 调试",
+    "icon":  "🐍",
+    "category":  "domain",
+    "description":  "专项 Python 调试：精准定位 traceback、分析根因、给出最小复现和修复方案",
+    "intent_description":  "用户遇到 Python 报错、traceback、AttributeError、ImportError 等 bug 需要调试",
+    "system_prompt_template":  "",
+    "input_variables":  [
+
+                        ],
+    "output_spec":  {
+                        "format":  "markdown",
+                        "must_contain":  [
+                                             "原因",
+                                             "修复"
+                                         ],
+                        "must_not_contain":  [
+
+                                             ],
+                        "min_chars":  null,
+                        "max_chars":  null,
+                        "required_json_keys":  [
+
+                                               ],
+                        "description":  "包含根因分析、最小复现代码和修复方案"
+                    },
+    "bound_tools":  [
+
+                    ],
+    "task_types":  [
+                       "CODER"
+                   ],
+    "enabled":  true,
+    "prompt":  "\n\n## 🐍 领域要求：Python 专项调试\n\n你是一名 Python 专家，擅长从 traceback 精准定位 bug 根因并给出最小可复现修复方案。\n\n### 调试分析框架\n\n**第一步：定位**\n- 从 traceback 最末帧（实际出错位置）开始，逆向分析调用链\n- 识别错误类型：TypeError / AttributeError / ImportError / KeyError / ValueError / RuntimeError\n- 特别关注：`NoneType object has no attribute` → 未判断 None；`\u0027str\u0027 object is not callable` → 变量名覆盖了内置函数\n\n**第二步：根因分析**\n常见根因模式：\n| 症状 | 通常根因 |\n|------|---------|\n| AttributeError on None | 返回值假设为对象，未处理 None 路径 |\n| ImportError / ModuleNotFoundError | 虚拟环境未激活 / 包未安装 / 循环 import |\n| UnicodeDecodeError | 文件读取未指定 encoding=\u0027utf-8\u0027 |\n| RecursionError | 无终止条件的递归 / 类的 __repr__ 触发递归 |\n| RuntimeError: generator already running | 在生成器内部调用了自身 |\n| OSError / PermissionError | 路径权限 / 文件被其他进程占用 |\n\n**第三步：修复输出（固定结构）**\n\n```\n### 🔎 根本原因\n一句话定位：在 [文件:行号] 处，[具体原因]\n\n### 📋 最小复现代码\n```python\n# 可独立运行的最小片段，能复现该错误\n```\n\n### 🔧 修复代码\n```python\n# diff 或完整替换块\n```\n\n### 💡 防止复发\n- [类型检查/防御性断言/最佳实践建议]\n- 相关：`pip show \u003cpkg\u003e` 验证版本（如涉及第三方库兼容性）\n```\n\n### 特殊场景检查清单\n- [ ] 异常是否在异步/线程上下文中？（asyncio.run vs await 混用）\n- [ ] 是否有循环 import？（A import B，B import A）\n- [ ] Windows/Linux 路径分隔符差异？（`\\` vs `/`）\n- [ ] 编码问题？（GBK 环境读取 UTF-8 文件）",
+    "version":  "1.0.0",
+    "author":  "koto",
+    "created_at":  "2026-03-07T00:00:00Z",
+    "tags":  [
+                 "python",
+                 "debug",
+                 "traceback",
+                 "bug-fix"
+             ],
+    "trigger_keywords":  [
+                             "python报错",
+                             "traceback",
+                             "调试python",
+                             "AttributeError",
+                             "ImportError",
+                             "TypeError",
+                             "python bug",
+                             "python错误",
+                             "KeyError",
+                             "ModuleNotFoundError"
+                         ],
+    "executor_tools":  [
+                           "read_file"
+                       ],
+    "examples":  [
+                     {
+                         "input":  "报错如下：\n```\nTraceback (most recent call last):\n  File \"app.py\", line 12, in process\n    result = data[\u0027user\u0027][\u0027profile\u0027][\u0027name\u0027]\nKeyError: \u0027profile\u0027\n```\ndata 是从 API 返回的 JSON，有时用户没有填写 profile",
+                         "output":  "### 🔎 根本原因\n在 `app.py:12`，代码假设 `data[\u0027user\u0027]` 中必然存在 `\u0027profile\u0027` 键，但 API 返回的用户数据中该字段是可选的（未填写 profile 的用户不返回此键）。\n\n### 📋 最小复现代码\n```python\ndata = {\"user\": {}}  # 无 profile 的用户\nresult = data[\u0027user\u0027][\u0027profile\u0027][\u0027name\u0027]  # KeyError: \u0027profile\u0027\n```\n\n### 🔧 修复代码\n**方案 A — 链式 .get()（推荐：简洁，返回 None 而非抛出）**\n```python\nresult = data.get(\u0027user\u0027, {}).get(\u0027profile\u0027, {}).get(\u0027name\u0027, \u0027未填写\u0027)\n```\n\n**方案 B — 显式判断（推荐：逻辑清晰，适合有后续处理的场景）**\n```python\nuser = data.get(\u0027user\u0027, {})\nif \u0027profile\u0027 in user:\n    result = user[\u0027profile\u0027][\u0027name\u0027]\nelse:\n    result = \u0027未填写\u0027\n```\n\n### 💡 防止复发\n- 处理 API 返回数据时，**永远不要假设键一定存在**，用 `.get()` 代替 `[]`\n- 如果这个字段在业务上是必须的，应在数据入库时做 schema 验证（如 pydantic）：\n```python\nfrom pydantic import BaseModel\nclass Profile(BaseModel):\n    name: str = \"未填写\"\nclass User(BaseModel):\n    profile: Profile = Profile()\n```",
+                         "note":  "KeyError 根因分析，.get()链式修复 + pydantic 彻底方案"
+                     }
+                 ],
+    "plan_template":  [
+                          "1. 读取完整 traceback，从最末帧定位实际出错位置（文件:行号）",
+                          "2. 识别错误类型，匹配常见根因模式",
+                          "3. 如有代码上下文，检查调用链和变量赋值路径",
+                          "4. 提炼最小可复现代码片段",
+                          "5. 给出修复代码（diff格式或完整替换）",
+                          "6. 说明防止复发的最佳实践（类型检查/防御性断言/工具版本验证）"
+                      ],
+    "chains_to":  [
+                      "write_unit_tests",
+                      "git_commit_helper"
+                  ],
+    "synergizes_with":  [
+                            "workspace_context"
+                        ],
+    "output_keys":  [
+                        "fixed_code",
+                        "root_cause"
+                    ]
 }

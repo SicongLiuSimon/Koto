@@ -26,8 +26,9 @@ logger = logging.getLogger(__name__)
 # 每个任务所看重的能力维度及权重，权重之和不必等于 1。
 # 必须能力 (required=True) 的维度：模型不满足则直接排除。
 TASK_REQUIREMENTS: Dict[str, Dict[str, Any]] = {
+    # CHAT 极度优先 speed，确保 Flash 始终胜出 Pro 模型（Pro score≈19 < Flash score≈23.8）
     "CHAT": {
-        "speed": 8,
+        "speed": 14,   # 提高速度权重：Flash(speed=9)≈23.8 > Pro(speed=4)≈21.4
         "quality": 6,
         "context": 4,
         "reasoning": 4,
@@ -651,9 +652,17 @@ class ModelManager:
 
     def _select_best(self, task: str, model_ids: List[str]) -> Optional[str]:
         """从提供的模型列表中，为指定任务选出得分最高的模型。
-        跳过 interactions_only 模型（不支持 generate_content，无法直接路由）。"""
-        best_id    = None
-        best_score = -1.0
+        跳过 interactions_only 模型（不支持 generate_content，无法直接路由）。
+        CHAT 任务额外限制：只从 tier≤7 的 Flash 级模型中选择，确保不会路由到 Pro 模型。
+        """
+        # CHAT 只允许 Flash 级模型（tier ≤ 7），Pro 模型对会话消息是过度消耗
+        _CHAT_MAX_TIER = 7
+
+        best_id          = None
+        best_score       = -1.0
+        best_uncapped    = None   # CHAT 专用：如果无 Flash 可用时的终极兜底
+        best_uncapped_sc = -1.0
+
         for mid in model_ids:
             caps = self._cached_caps.get(mid)
             if not caps:
@@ -662,10 +671,18 @@ class ModelManager:
             if caps.get("interactions_only", False):
                 continue
             sc = score_model_for_task(caps, task)
+            # 记录不受限的最佳候选（仅 CHAT 需要）
+            if task == "CHAT" and sc > best_uncapped_sc:
+                best_uncapped_sc = sc
+                best_uncapped    = mid
+            # CHAT 任务：跳过 tier > _CHAT_MAX_TIER 的 Pro 级模型
+            if task == "CHAT" and caps.get("tier", 5) > _CHAT_MAX_TIER:
+                continue
             if sc > best_score:
                 best_score = sc
                 best_id = mid
-        return best_id
+        # 若所有可用模型 tier 均 > 7（极端情况），则退到不受限的最优候选
+        return best_id or (best_uncapped if task == "CHAT" else None)
 
     def _preload_static_caps(self):
         """将注册表的能力描述预加载到缓存，供 API 失败时使用。"""

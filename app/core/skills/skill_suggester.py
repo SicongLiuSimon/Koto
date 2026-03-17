@@ -262,3 +262,104 @@ class SkillSuggester:
         """生成字符 n-gram 集合（移除空格后）。"""
         t = text.lower().replace(" ", "")
         return {t[i:i + n] for i in range(max(0, len(t) - n + 1))}
+
+    # ── 联动：chains_to 下一步推荐 ────────────────────────────────────────────
+
+    @classmethod
+    def suggest_chains(
+        cls,
+        active_skill_ids: List[str],
+        already_suggested_ids: Optional[List[str]] = None,
+        max_n: int = 2,
+    ) -> List[Dict]:
+        """
+        根据本轮已激活 Skill 的 ``chains_to`` 字段，推荐"下一步自然后续"技能。
+
+        只返回尚未启用、也不在 ``already_suggested_ids`` 里的 Skill。
+
+        Parameters
+        ----------
+        active_skill_ids      : 本轮实际激活的 Skill ID 列表（用户启用 + 临时注入）
+        already_suggested_ids : 本轮已通过 suggest() 推荐过的 ID，避免重复
+        max_n                 : 最多返回几个后续推荐
+
+        Returns
+        -------
+        List of dicts: [{"id", "name", "icon", "description", "source_skill"}]
+            source_skill 是哪个 Skill 触发了这条推荐，用于 UI 展示上下文。
+        """
+        if not active_skill_ids:
+            return []
+
+        exclude = set(already_suggested_ids or []) | set(active_skill_ids)
+
+        try:
+            from app.core.skills.skill_manager import SkillManager
+            SkillManager._ensure_init()
+        except Exception as exc:
+            logger.debug(f"[SkillSuggester] suggest_chains SkillManager 加载失败: {exc}")
+            return []
+
+        seen_chain_ids: set = set()
+        result: List[Dict] = []
+
+        for src_id in active_skill_ids:
+            if len(result) >= max_n:
+                break
+            s_def = SkillManager._def_registry.get(src_id)
+            if not s_def:
+                continue
+            chains = getattr(s_def, "chains_to", []) or []
+            for chain_id in chains:
+                if len(result) >= max_n:
+                    break
+                if chain_id in exclude or chain_id in seen_chain_ids:
+                    continue
+                seen_chain_ids.add(chain_id)
+                target = SkillManager._registry.get(chain_id)
+                # 只推荐已注册但尚未启用的 Skill
+                if not target or target.get("enabled", False):
+                    continue
+                t_def = SkillManager._def_registry.get(chain_id)
+                result.append({
+                    "id": chain_id,
+                    "name": target.get("name", chain_id),
+                    "icon": target.get("icon", "🔧"),
+                    "description": target.get("description", ""),
+                    "intent_description": getattr(t_def, "intent_description", "") if t_def else "",
+                    "source_skill": s_def.name or src_id,
+                })
+                logger.debug(
+                    "[SkillSuggester] 🔗 chains_to 推荐: %s → %s", src_id, chain_id
+                )
+
+        return result
+
+    @classmethod
+    def format_chain_hint(cls, chain_suggestions: List[Dict]) -> str:
+        """
+        将 ``suggest_chains()`` 结果格式化为"下一步推荐"提示块。
+
+        与 ``format_hint()`` 的区别：
+        - 标题为"下一步推荐"而非"相关 Skill 推荐"
+        - 显示 source_skill（哪个技能触发了这条推荐）
+        """
+        if not chain_suggestions:
+            return ""
+
+        lines = [
+            "\n\n---",
+            "\n⏩ **下一步推荐** — 完成本次任务后，下列技能是自然的后续步骤：\n",
+        ]
+        for s in chain_suggestions:
+            icon = s.get("icon", "🔧")
+            name = s.get("name", s["id"])
+            src = s.get("source_skill", "")
+            desc = (s.get("intent_description") or s.get("description") or "").strip()
+            if len(desc) > 60:
+                desc = desc[:57] + "…"
+            src_note = f"（接续 {src}）" if src else ""
+            lines.append(f"- {icon} **{name}**{src_note} — {desc}")
+
+        lines.append("\n> 在侧边栏「Skills」面板中开启 ↗")
+        return "\n".join(lines)

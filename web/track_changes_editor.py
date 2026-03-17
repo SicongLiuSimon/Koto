@@ -21,10 +21,80 @@ import zipfile
 import shutil
 import tempfile
 import os
+import re
 import logging
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_text_for_match(text: str) -> str:
+    """Normalize AI-returned text so it matches the plain text stored in Word para.text.
+
+    format_for_ai() decorates paragraphs with Markdown symbols (##, -, >, **...)
+    that are NOT present in the Word document's para.text.  When the AI echoes those
+    symbols back in the '原文片段' field, exact matching fails silently.
+
+    Normalization steps (safe to apply to both original and modified text):
+      1. Unicode NFC  – prevent composed/decomposed CJK mismatch
+      2. Strip leading block-level Markdown (headings, lists, blockquotes)
+      3. Remove inline bold / italic markers anywhere in the string
+      4. Strip the image-caption suffix added by format_for_ai
+      5. Normalize all Unicode whitespace variants to a regular space
+      6. Collapse runs of whitespace to a single space
+    """
+    import unicodedata
+    t = unicodedata.normalize('NFC', text)
+    # Block-level prefixes (only at string start)
+    t = re.sub(r'^#{1,6}[ \t]+', '', t)         # ## Heading
+    t = re.sub(r'^[-*+][ \t]+', '', t)           # - list item
+    t = re.sub(r'^\d+\.[ \t]+', '', t)           # 1. list item
+    t = re.sub(r'^>[ \t]+', '', t)               # > blockquote
+    # Inline bold / italic (anywhere in string)
+    t = re.sub(r'\*\*([^*]+?)\*\*', r'\1', t)   # **bold**
+    t = re.sub(r'\*([^*]+?)\*', r'\1', t)        # *italic*
+    t = re.sub(r'`([^`]+?)`', r'\1', t)          # `code`
+    # Image caption suffix from format_for_ai: "  *(图片，无法直接编辑文本)*"
+    t = re.sub(r'\s*\*\([^)]*图片[^)]*\)\*\s*$', '', t)
+    # Unicode spaces → regular space
+    t = re.sub(r'[\u00a0\u3000\u2009\u2003\u200b]', ' ', t)
+    # Collapse whitespace runs
+    t = re.sub(r'[ \t]{2,}', ' ', t)
+    return t.strip()
+
+
+# Keep old name as alias so any external call still works
+_strip_md_formatting = _normalize_text_for_match
+
+
+def _find_para_with_text(
+    all_paragraphs,
+    original_text: str,
+) -> tuple:
+    """Return (para, effective_text) for the first paragraph containing original_text.
+
+    Uses a two-level search:
+      Level 1 – exact match against para.text (fastest, no transformation)
+      Level 2 – normalized original vs raw para.text
+               (handles ## / - / ** markers echoed by AI)
+
+    Returns (None, '') if no paragraph found at any level.
+    """
+    if not original_text:
+        return None, ''
+
+    norm = _normalize_text_for_match(original_text)
+    candidates = [original_text]
+    if norm and norm != original_text:
+        candidates.append(norm)
+
+    for candidate in candidates:
+        for para in all_paragraphs:
+            if candidate in para.text:
+                return para, candidate
+
+    return None, ''
+
 
 class TrackChangesEditor:
     """Word Track Changes 修订编辑器（改进版）"""
@@ -858,208 +928,150 @@ class TrackChangesEditor:
         modified_text: str,
         reason: str = ""
     ) -> bool:
-        """应用单个修订标记（保留格式版）"""
+        """Apply a single Track-Changes revision (del + ins) preserving run formatting."""
         try:
             from copy import deepcopy
-            
-            # 收集所有段落（正文 + 表格）
+
+            # Build paragraph list: body paragraphs + all table cell paragraphs
             all_paragraphs = list(doc.paragraphs)
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         all_paragraphs.extend(cell.paragraphs)
-            
-            for para in all_paragraphs:
-                if original_text not in para.text:
-                    continue
-                    
-                # 找到匹配的段落
-                # 1. 映射 run
-                run_map = []
-                current_pos = 0
-                full_text_parts = []
-                for i, run in enumerate(para.runs):
-                    text = run.text
-                    run_map.append({
-                        "start": current_pos,
-                        "end": current_pos + len(text),
-                        "run": run,
-                        "index": i
-                    })
-                    full_text_parts.append(text)
-                    current_pos += len(text)
-                
-                full_text = "".join(full_text_parts)
-                start_idx = full_text.find(original_text)
-                if start_idx == -1:
-                    continue
-                end_idx = start_idx + len(original_text)
-                
-                # 2. 找到涉及的 runs
-                target_runs = []
-                start_run_info = None
-                end_run_info = None
-                
-                for info in run_map:
-                    # 如果 run 与 [start_idx, end_idx] 有交集
-                    if max(start_idx, info["start"]) < min(end_idx, info["end"]):
-                        target_runs.append(info)
-                        if info["start"] <= start_idx < info["end"]:
-                            start_run_info = info
-                        if info["start"] < end_idx <= info["end"]:
-                            end_run_info = info
-                
-                if not target_runs:
-                    continue
 
-                # 3. 准备修改
-                runs_to_move = []
-                parent = para._element
-                
-                # Helper: Split run content
-                def split_run_element(run, keep_start, keep_end):
-                    """返回 (elem_to_keep_before, elem_to_move, elem_to_keep_after)"""
-                    # 这比较复杂，简单处理：
-                    # 对于被完全包含的 run，直接移动
-                    # 对于部分包含的 run，修改原 run 并克隆出移动部分
-                    pass
+            # Multi-level normalized search
+            found_para, effective_original = _find_para_with_text(all_paragraphs, original_text)
+            if not found_para:
+                return False
 
-                # 逻辑简化：
-                # 我们不再尝试完美分割，因为太复杂。
-                # 采用如下策略：
-                # 1. 对涉及的 runs，如果是首尾 run，且只涉及部分：
-                #    - 修改原 run text 为剩余部分
-                #    - 克隆一个新 run 包含被删除部分（保持格式）
-                # 2. 中间的 runs 直接整个移动
-                
-                # 处理 Start Run
-                processed_start_elem = None
-                
-                s_info = target_runs[0] # start run
-                s_run = s_info["run"]
-                s_offset = start_idx - s_info["start"]
-                
-                # 处理 End Run (可能是同一个)
-                e_info = target_runs[-1]
-                e_run = e_info["run"]
-                e_offset = end_idx - e_info["start"]
-                
-                current_time = datetime.now().isoformat()
-                self.change_id += 1
-                cid = str(self.change_id)
+            para = found_para
+            # Strip markdown from modified_text so Track Change text looks clean in Word
+            effective_modified = _normalize_text_for_match(modified_text) or modified_text
 
-                # -------------------------------------------------
-                # 情况 A: 单个 run 内修改
-                # -------------------------------------------------
-                if s_info["index"] == e_info["index"]:
-                    original_run_text = s_run.text
-                    prefix = original_run_text[:s_offset]
-                    middle = original_run_text[s_offset:e_offset]
-                    suffix = original_run_text[e_offset:]
-                    
-                    # 1. 修改原 run 为 prefix
-                    s_run.text = prefix
-                    
-                    # 2. 如果 prefix 为空，原 run 变空（可能会被 Word 清理，但为了插入点保留它）
-                    # 插入点：s_run 之后
-                    insert_point = s_run._element
-                    
-                    # 3. 创建 middle run (将被删除的)
-                    middle_run_elem = deepcopy(s_run._element)
-                    t = middle_run_elem.find(qn('w:t'))
-                    if t is None: t = etree.SubElement(middle_run_elem, qn('w:t'))
-                    t.text = middle
-                    
-                    # 4. 创建 suffix run
-                    if suffix:
-                        suffix_run_elem = deepcopy(s_run._element)
-                        t = suffix_run_elem.find(qn('w:t'))
-                        if t is None: t = etree.SubElement(suffix_run_elem, qn('w:t'))
-                        t.text = suffix
-                    else:
-                        suffix_run_elem = None
-                        
-                    runs_to_move.append(middle_run_elem)
-                    
-                    # 插入 suffix
-                    if suffix_run_elem is not None:
-                        parent.insert(parent.index(insert_point) + 1, suffix_run_elem)
-                        
-                # -------------------------------------------------
-                # 情况 B: 跨越多个 runs
-                # -------------------------------------------------
-                else:
-                    # --- Start Run ---
-                    s_text = s_run.text
-                    s_prefix = s_text[:s_offset]
-                    s_del = s_text[s_offset:]
-                    
-                    s_run.text = s_prefix
-                    insert_point = s_run._element
-                    
-                    s_del_elem = deepcopy(s_run._element)
-                    t = s_del_elem.find(qn('w:t'))
-                    if t is None: t = etree.SubElement(s_del_elem, qn('w:t'))
-                    t.text = s_del
-                    runs_to_move.append(s_del_elem)
-                    
-                    # --- Middle Runs ---
-                    for info in target_runs[1:-1]:
-                        # 移动这些 run (先从文档移除，后续加到 del)
-                        r_elem = info["run"]._element
-                        parent.remove(r_elem)
-                        runs_to_move.append(r_elem)
-                        
-                    # --- End Run ---
-                    e_text = e_run.text
-                    e_del = e_text[:e_offset]
-                    e_suffix = e_text[e_offset:]
-                    
-                    # 这里稍微特别：end_run 应该保留 e_suffix，而 e_del 被移走
-                    # 我们修改 end_run 为 e_suffix
-                    # 并克隆一个 e_del_elem
-                    
-                    e_del_elem = deepcopy(e_run._element)
-                    t = e_del_elem.find(qn('w:t'))
-                    if t is None: t = etree.SubElement(e_del_elem, qn('w:t'))
-                    t.text = e_del
-                    runs_to_move.append(e_del_elem)
-                    
-                    e_run.text = e_suffix
-                
-                # =================================================
-                # 构建 <w:del> 和 <w:ins>
-                # =================================================
-                
-                # 找到插入位置：insert_point 之后
-                base_idx = parent.index(insert_point)
-                
-                # 1. 构建 <w:del>
-                del_el = parse_xml(f'<w:del w:id="{cid}" w:author="{self.author}" w:date="{current_time}" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>')
-                
-                for r in runs_to_move:
-                    # 转换 w:t -> w:delText
-                    for t in r.findall(qn('w:t')):
-                        t.tag = qn('w:delText')
-                    del_el.append(r)
-                
-                parent.insert(base_idx + 1, del_el)
-                
-                # 2. 构建 <w:ins>
-                self.change_id += 1
-                ins_el = parse_xml(f'''
-                <w:ins w:id="{str(self.change_id)}" w:author="{self.author}" w:date="{current_time}" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-                    <w:r>
-                        <w:t>{self._esc(modified_text)}</w:t>
-                    </w:r>
-                </w:ins>
-                ''')
-                
-                parent.insert(base_idx + 2, ins_el)
-                
-                return True
-                
-            return False
+            # Map runs to character positions
+            run_map = []
+            current_pos = 0
+            full_text_parts = []
+            for i, run in enumerate(para.runs):
+                text = run.text
+                run_map.append({
+                    "start": current_pos,
+                    "end": current_pos + len(text),
+                    "run": run,
+                    "index": i
+                })
+                full_text_parts.append(text)
+                current_pos += len(text)
+
+            full_text = "".join(full_text_parts)
+            start_idx = full_text.find(effective_original)
+            if start_idx == -1:
+                return False
+            end_idx = start_idx + len(effective_original)
+
+            # Find runs overlapping [start_idx, end_idx]
+            target_runs = []
+            for info in run_map:
+                if max(start_idx, info["start"]) < min(end_idx, info["end"]):
+                    target_runs.append(info)
+
+            if not target_runs:
+                return False
+
+            runs_to_move = []
+            parent = para._element
+
+            s_info = target_runs[0]
+            s_run = s_info["run"]
+            s_offset = start_idx - s_info["start"]
+
+            e_info = target_runs[-1]
+            e_run = e_info["run"]
+            e_offset = end_idx - e_info["start"]
+
+            current_time = datetime.now().isoformat()
+            self.change_id += 1
+            cid = str(self.change_id)
+
+            # ── Case A: change within a single run ───────────────────────────
+            if s_info["index"] == e_info["index"]:
+                original_run_text = s_run.text
+                prefix = original_run_text[:s_offset]
+                middle = original_run_text[s_offset:e_offset]
+                suffix = original_run_text[e_offset:]
+
+                s_run.text = prefix
+                insert_point = s_run._element
+
+                middle_run_elem = deepcopy(s_run._element)
+                t = middle_run_elem.find(qn('w:t'))
+                if t is None:
+                    t = etree.SubElement(middle_run_elem, qn('w:t'))
+                t.text = middle
+
+                if suffix:
+                    suffix_run_elem = deepcopy(s_run._element)
+                    t2 = suffix_run_elem.find(qn('w:t'))
+                    if t2 is None:
+                        t2 = etree.SubElement(suffix_run_elem, qn('w:t'))
+                    t2.text = suffix
+                    parent.insert(parent.index(insert_point) + 1, suffix_run_elem)
+
+                runs_to_move.append(middle_run_elem)
+
+            # ── Case B: change spans multiple runs ───────────────────────────
+            else:
+                s_text = s_run.text
+                s_run.text = s_text[:s_offset]
+                insert_point = s_run._element
+
+                s_del_elem = deepcopy(s_run._element)
+                t = s_del_elem.find(qn('w:t'))
+                if t is None:
+                    t = etree.SubElement(s_del_elem, qn('w:t'))
+                t.text = s_text[s_offset:]
+                runs_to_move.append(s_del_elem)
+
+                for info in target_runs[1:-1]:
+                    r_elem = info["run"]._element
+                    parent.remove(r_elem)
+                    runs_to_move.append(r_elem)
+
+                e_text = e_run.text
+                e_del_elem = deepcopy(e_run._element)
+                t = e_del_elem.find(qn('w:t'))
+                if t is None:
+                    t = etree.SubElement(e_del_elem, qn('w:t'))
+                t.text = e_text[:e_offset]
+                runs_to_move.append(e_del_elem)
+
+                e_run.text = e_text[e_offset:]
+
+            # ── Build <w:del> and <w:ins> ─────────────────────────────────────
+            base_idx = parent.index(insert_point)
+
+            del_el = parse_xml(
+                f'<w:del w:id="{cid}" w:author="{self.author}" w:date="{current_time}"'
+                f' xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
+            )
+            for r in runs_to_move:
+                for t_el in r.findall(qn('w:t')):
+                    t_el.tag = qn('w:delText')
+                del_el.append(r)
+            parent.insert(base_idx + 1, del_el)
+
+            self.change_id += 1
+            ins_el = parse_xml(
+                f'<w:ins w:id="{str(self.change_id)}" w:author="{self.author}"'
+                f' w:date="{current_time}"'
+                f' xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                f'<w:r><w:t xml:space="preserve">{self._esc(effective_modified)}</w:t></w:r>'
+                f'</w:ins>'
+            )
+            parent.insert(base_idx + 2, ins_el)
+
+            return True
+
         except Exception as e:
             logger.error(f"[TrackChange] Error: {e}")
             import traceback
@@ -1171,8 +1183,19 @@ class TrackChangesEditor:
     ) -> bool:
         """应用单个批注（内部方法）"""
         try:
-            for para in doc.paragraphs:
-                if original_text in para.text:
+            # Strip Markdown formatting from original_text (same as track-change path)
+            stripped = _strip_md_formatting(original_text)
+            effective_original = stripped if (stripped and stripped != original_text) else original_text
+
+            # Search body paragraphs AND table cells
+            all_paragraphs = list(doc.paragraphs)
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        all_paragraphs.extend(cell.paragraphs)
+
+            for para in all_paragraphs:
+                if effective_original in para.text:
                     self.change_id += 1
                     comment_id = str(self.change_id)
                     
@@ -1197,7 +1220,7 @@ class TrackChangesEditor:
                     comments_el.append(parse_xml(comment_xml))
                     
                     # 在段落中标记批注范围
-                    pos = para.text.index(original_text)
+                    pos = para.text.index(effective_original)
                     
                     # 分割 runs
                     accumulated = 0
@@ -1213,9 +1236,9 @@ class TrackChangesEditor:
                             start_run_idx = idx
                             start_offset = pos - accumulated
                         
-                        if accumulated + run_len >= pos + len(original_text):
+                        if accumulated + run_len >= pos + len(effective_original):
                             end_run_idx = idx
-                            end_offset = pos + len(original_text) - accumulated
+                            end_offset = pos + len(effective_original) - accumulated
                             break
                         
                         accumulated += run_len

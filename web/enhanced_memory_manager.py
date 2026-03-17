@@ -194,9 +194,462 @@ class UserProfile:
         return f"{level}级别开发者" + (f"，熟悉{'/'.join(langs)}" if langs else "")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PersonalityMatrix — 动态个人记忆矩阵
+# 追踪用户的认知风格、专长领域、近期目标和价值偏好。
+# 持续在后台通过 LLM + ShadowWatcher 观察数据自动更新，无感知、零延迟。
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PersonalityMatrix:
+    """
+    动态个人记忆矩阵 — 四维度持续学习用户个性：
+      cognitive     : 主导思维风格（探索/执行/分析/创意）
+      expertise     : 专长领域打分（由 ShadowWatcher 话题频次驱动）
+      goals         : 近期目标列表（LLM 从每轮对话提取）
+      recent_themes : 近期高频关注话题（ShadowWatcher 7 天窗口）
+      values        : 偏好价值维度（效率/深度/正式程度）
+
+    更新路径：
+      1. ShadowWatcher 整合（无 LLM，毫秒级）— topics → expertise + cognitive
+      2. LLM 深度分析（异步线程，不阻塞对话）— 提取 goal / cognitive_hint
+    """
+
+    _MATRIX_PATH: str = "config/personality_matrix.json"
+
+    _DEFAULT_DATA: Dict = {
+        "cognitive": {
+            "exploratory": 0.5,   # 探索型：喜欢发散思维、追问机制
+            "executor":    0.5,   # 执行型：聚焦动手完成任务
+            "analytical":  0.5,   # 分析型：偏好逻辑推导和比较
+            "creative":    0.5,   # 创意型：喜欢头脑风暴和想象
+        },
+        "expertise":      {},     # {域名: 分值 0–1}，如 "编程开发": 0.82
+        "goals":          [],     # 近期目标（最多 10 条）
+        "recent_themes":  [],     # 近期高频话题（最多 10 条）
+        "values": {
+            "efficiency": 0.5,    # 效率倾向（vs. 质量/深度）
+            "depth":      0.5,    # 深度倾向（vs. 宽度/速度）
+            "formality":  0.5,    # 正式程度偏好
+        },
+        "last_updated": None,
+    }
+
+    # ShadowWatcher 话题 → PersonalityMatrix 专长域 映射
+    _TOPIC_TO_DOMAIN: Dict[str, str] = {
+        "编程开发": "编程开发",
+        "数据分析": "数据分析",
+        "写作翻译": "写作翻译",
+        "学习研究": "学习研究",
+        "工作规划": "工作规划",
+        "文件处理": "文件处理",
+        "生活日常": "生活日常",
+        "沟通协作": "沟通协作",
+        "创意设计": "创意设计",
+        "系统设置": "系统设置",
+    }
+
+    def __init__(self, path: str = None):
+        self._path = path or self._MATRIX_PATH
+        self.data: Dict = self._load()
+
+    # ── 持久化 ────────────────────────────────────────────────────────────────
+
+    def _load(self) -> Dict:
+        import copy
+        default = copy.deepcopy(self._DEFAULT_DATA)
+        if os.path.exists(self._path):
+            try:
+                with open(self._path, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                return self._deep_merge(default, saved)
+            except Exception:
+                pass
+        return default
+
+    def _save(self):
+        try:
+            os.makedirs(os.path.dirname(self._path) or ".", exist_ok=True)
+            with open(self._path, "w", encoding="utf-8") as f:
+                self.data["last_updated"] = datetime.now().isoformat()
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"[PersonalityMatrix] 保存失败: {e}")
+
+    @staticmethod
+    def _deep_merge(base: Dict, override: Dict) -> Dict:
+        result = base.copy()
+        for k, v in override.items():
+            if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+                result[k] = PersonalityMatrix._deep_merge(result[k], v)
+            else:
+                result[k] = v
+        return result
+
+    # ── 上下文生成 ───────────────────────────────────────────────────────────
+
+    def to_context_string(self) -> str:
+        """返回适合注入 LLM Prompt 的个人矩阵摘要（精炼、不超过 150 字）。"""
+        parts = []
+
+        # 主导认知风格（仅当某维度 > 0.55 时才有意义）
+        cog = self.data.get("cognitive", {})
+        if cog:
+            dominant = max(cog, key=lambda k: cog[k])
+            if cog[dominant] > 0.55:
+                labels = {
+                    "exploratory": "探索", "executor": "执行",
+                    "analytical": "分析", "creative": "创意",
+                }
+                parts.append(f"思维风格：{labels.get(dominant, dominant)}")
+
+        # 专长领域 Top 3（分值 > 0.2 才显示）
+        expertise = self.data.get("expertise", {})
+        if expertise:
+            top3 = [
+                t[0] for t in sorted(expertise.items(), key=lambda x: -x[1])[:3]
+                if t[1] > 0.2
+            ]
+            if top3:
+                parts.append(f"专长：{', '.join(top3)}")
+
+        # 近期目标（最近 2 条）
+        goals = [g for g in self.data.get("goals", []) if g][-2:]
+        if goals:
+            parts.append(f"近期目标：{' / '.join(goals)}")
+
+        # 近期话题（最近 3 条）
+        themes = self.data.get("recent_themes", [])[-3:]
+        if themes:
+            parts.append(f"近期关注：{', '.join(themes)}")
+
+        if not parts:
+            return ""
+
+        return "\n[个人记忆矩阵]\n" + "\n".join(f"• {p}" for p in parts)
+
+    # ── 异步更新入口（外部调用）─────────────────────────────────────────────
+
+    @classmethod
+    def update_async(
+        cls,
+        user_msg: str,
+        ai_msg: str,
+        llm_fn,
+        instance: "PersonalityMatrix",
+    ):
+        """非阻塞触发矩阵更新，在后台线程执行，不影响主对话延迟。"""
+        threading.Thread(
+            target=cls._update_sync,
+            args=(user_msg, ai_msg, llm_fn, instance),
+            daemon=True,
+            name="pm_update",
+        ).start()
+
+    @classmethod
+    def _update_sync(
+        cls,
+        user_msg: str,
+        ai_msg: str,
+        llm_fn,
+        instance: "PersonalityMatrix",
+    ):
+        """同步更新逻辑（在后台线程中运行）。"""
+        try:
+            # 步骤 1：整合 ShadowWatcher 行为数据（无需 LLM）
+            instance._sync_from_shadow()
+            # 步骤 2：LLM 深度提取（认知风格 + 目标）
+            instance._llm_update(user_msg, ai_msg, llm_fn)
+            instance._save()
+            logger.debug("[PersonalityMatrix] ✅ 矩阵已更新")
+        except Exception as e:
+            logger.warning(f"[PersonalityMatrix] 更新异常: {e}")
+
+    # ── 内部更新逻辑 ─────────────────────────────────────────────────────────
+
+    def _sync_from_shadow(self):
+        """
+        从 ShadowWatcher 同步行为观察数据：
+          - topics 频次 → expertise 分值（EMA 融合）
+          - recent_topics_7d → recent_themes
+          - task_types 分布 → cognitive 风格权重
+        """
+        try:
+            from app.core.monitoring.shadow_watcher import ShadowWatcher
+            obs = ShadowWatcher.get().get_observations()
+        except Exception:
+            return
+
+        # ── expertise: ShadowWatcher 话题频次 → 专长分值 ──────────────────
+        topics: Dict[str, int] = obs.get("topics", {})
+        if topics:
+            max_count = max(topics.values()) or 1
+            for topic, count in topics.items():
+                domain = self._TOPIC_TO_DOMAIN.get(topic, topic)
+                new_score = min(1.0, count / max_count)
+                existing = self.data["expertise"].get(domain, 0.0)
+                # 慢速 EMA（α=0.10），防止单次对话大幅扰动
+                self.data["expertise"][domain] = round(
+                    existing * 0.90 + new_score * 0.10, 3
+                )
+
+        # ── recent_themes: 7 天窗口高频话题 ──────────────────────────────
+        recent_7d: Dict[str, int] = obs.get("recent_topics_7d", {})
+        if recent_7d:
+            top5 = [
+                t for t, _ in sorted(recent_7d.items(), key=lambda x: -x[1])[:5]
+            ]
+            self.data["recent_themes"] = top5
+
+        # ── cognitive: 任务风格分布 → 风格维度 EMA ──────────────────────
+        task_style = obs.get("task_style", {})
+        task_types: Dict[str, int] = task_style.get("task_types", {})
+        if task_types:
+            total = sum(task_types.values()) or 1
+            mapping = {
+                "executor":    task_types.get("执行", 0) / total,
+                "analytical":  task_types.get("分析", 0) / total,
+                "creative":    task_types.get("创作", 0) / total,
+                "exploratory": task_types.get("问答", 0) / total,
+            }
+            alpha = 0.10
+            cog = self.data["cognitive"]
+            for dim, ratio in mapping.items():
+                cog[dim] = round(cog.get(dim, 0.5) * (1 - alpha) + ratio * alpha, 3)
+
+        # ── values: 对话风格 → 价值偏好 ──────────────────────────────────
+        conv_style = obs.get("conversation_style", {})
+        if conv_style.get("samples", 0) >= 5:
+            alpha = 0.08
+            vals = self.data["values"]
+            # polite_ratio 高 → formality 偏高
+            polite = conv_style.get("polite_ratio", 0.5)
+            vals["formality"] = round(vals.get("formality", 0.5) * (1 - alpha) + polite * alpha, 3)
+            # avg_query_len > 80 字 → 深度倾向
+            avg_len = conv_style.get("avg_query_len", 50)
+            depth_signal = min(1.0, avg_len / 160)
+            vals["depth"] = round(vals.get("depth", 0.5) * (1 - alpha) + depth_signal * alpha, 3)
+
+    def _llm_update(self, user_msg: str, ai_msg: str, llm_fn):
+        """用 LLM 分析单轮对话，提取 cognitive_hint / goal / interest。"""
+        if not llm_fn or not user_msg:
+            return
+
+        prompt = (
+            "分析以下对话，提取用户的思维风格倾向和当前目标，只返回JSON，不要解释：\n\n"
+            f"用户：{user_msg[:400]}\n"
+            f"AI：{ai_msg[:200]}\n\n"
+            "{\n"
+            '  "cognitive_hint": "exploratory|executor|analytical|creative（选一个，不确定则空字符串）",\n'
+            '  "goal": "用户的当前具体目标（10-30字，无明确目标则返回空字符串）",\n'
+            '  "interest": "近期偏好或关注点（10-20字，无则空字符串）"\n'
+            "}"
+        )
+        try:
+            raw = (llm_fn(prompt) or "").strip()
+            if raw.startswith("```"):
+                raw = raw.split("```")[1 if raw.count("```") >= 2 else 0]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+            parsed = json.loads(raw.strip())
+
+            # cognitive_hint → EMA 更新风格权重
+            hint = parsed.get("cognitive_hint", "").strip()
+            if hint in self.data["cognitive"]:
+                alpha = 0.08
+                cog = self.data["cognitive"]
+                for k in cog:
+                    if k == hint:
+                        cog[k] = round(cog[k] * (1 - alpha) + 0.9 * alpha, 3)
+                    else:
+                        # 其他维度温和回归中值
+                        cog[k] = round(cog[k] * (1 - alpha * 0.3) + 0.45 * alpha * 0.3, 3)
+
+            # goal → 追加至目标列表（去重，最多 10 条）
+            goal = (parsed.get("goal") or "").strip()
+            if goal and len(goal) > 3:
+                goals = self.data.get("goals", [])
+                if goal not in goals:
+                    goals.append(goal)
+                    self.data["goals"] = goals[-10:]
+
+            # interest → 追加至 recent_themes（去重，最多 10 条）
+            interest = (parsed.get("interest") or "").strip()
+            if interest and len(interest) > 2:
+                themes = self.data.get("recent_themes", [])
+                if interest not in themes:
+                    themes.append(interest)
+                    self.data["recent_themes"] = themes[-10:]
+
+        except Exception as e:
+            logger.debug(f"[PersonalityMatrix] LLM 提取跳过: {e}")
+
+
 # ── 记忆生命周期管理（GC）常量 ──────────────────────────────────────────────────
 _GC_STALE_DAYS: int = 90        # 未被访问的自动提取记忆超过此天数将被清理
 _GC_MAX_PER_CATEGORY: int = 150  # 单类别记忆条数上限（超出时保留最新 + 用户手动）
+
+_PERSONALITY_MATRIX_PATH = "config/personality_matrix.json"
+
+
+class PersonalityMatrix:
+    """动态个人记忆矩阵：从对话中持续学习用户的认知风格、专长领域、目标与近期主题。
+
+    数据结构（self.data）：
+      cognitive     : dict[str, float]  — 认知风格得分 (exploratory/executor/analytical/creative)
+      expertise     : dict[str, float]  — 专长领域及熟练度
+      goals         : list[str]         — 用户近期目标（最多 10 条，滚动）
+      recent_themes : list[str]         — 近期对话主题（最多 20 条，滚动）
+    """
+
+    _DEFAULT_COGNITIVE = {
+        "exploratory": 0.5,
+        "executor": 0.5,
+        "analytical": 0.5,
+        "creative": 0.5,
+    }
+
+    def __init__(self, path: str = _PERSONALITY_MATRIX_PATH):
+        self._path = path
+        self.data: Dict = self._load()
+
+    # ── 持久化 ──────────────────────────────────────────────────────────────
+
+    def _load(self) -> Dict:
+        try:
+            if os.path.exists(self._path):
+                with open(self._path, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                # 补全缺失键，保证结构完整
+                return {
+                    "cognitive": {**self._DEFAULT_COGNITIVE, **saved.get("cognitive", {})},
+                    "expertise": saved.get("expertise", {}),
+                    "goals": saved.get("goals", []),
+                    "recent_themes": saved.get("recent_themes", []),
+                }
+        except Exception:
+            pass
+        return {
+            "cognitive": dict(self._DEFAULT_COGNITIVE),
+            "expertise": {},
+            "goals": [],
+            "recent_themes": [],
+        }
+
+    def save(self):
+        try:
+            os.makedirs(os.path.dirname(self._path) or ".", exist_ok=True)
+            with open(self._path, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"[PersonalityMatrix] 保存失败: {e}")
+
+    # ── 上下文字符串 ─────────────────────────────────────────────────────────
+
+    def to_context_string(self) -> str:
+        """返回注入 LLM 上下文的个人记忆矩阵摘要字符串。"""
+        parts = []
+
+        # 认知风格
+        cog = self.data.get("cognitive", {})
+        if cog:
+            dominant = max(cog, key=lambda k: cog[k])
+            score = cog[dominant]
+            if score > 0.55:
+                labels = {
+                    "exploratory": "探索型",
+                    "executor": "执行型",
+                    "analytical": "分析型",
+                    "creative": "创意型",
+                }
+                parts.append(f"认知风格:{labels.get(dominant, dominant)}({score:.2f})")
+
+        # 专长领域（取前 3）
+        expertise = self.data.get("expertise", {})
+        if expertise:
+            top = sorted(expertise.items(), key=lambda x: x[1], reverse=True)[:3]
+            parts.append(f"专长:{', '.join(t[0] for t in top)}")
+
+        # 近期目标（最后 2 条）
+        goals = [g for g in self.data.get("goals", []) if g]
+        if goals:
+            parts.append(f"目标:{' / '.join(goals[-2:])}")
+
+        # 近期主题（最后 3 条）
+        themes = self.data.get("recent_themes", [])
+        if themes:
+            parts.append(f"近期主题:{', '.join(themes[-3:])}")
+
+        if not parts:
+            return ""
+        return "[个人矩阵] " + " | ".join(parts)
+
+    # ── 异步更新（静态入口）──────────────────────────────────────────────────
+
+    @staticmethod
+    def update_async(user_msg: str, ai_msg: str, llm_fn, instance: "PersonalityMatrix"):
+        """在后台线程中使用 LLM 分析对话，更新 instance 中的矩阵数据。"""
+
+        def _worker():
+            try:
+                prompt = (
+                    "请根据以下对话片段，提取用户的个人特征，以 JSON 格式返回，"
+                    "不要包含任何其他文字：\n"
+                    f'用户: {user_msg[:400]}\nAI: {ai_msg[:400]}\n\n'
+                    "返回格式（所有字段可选，无法判断时留空/省略）：\n"
+                    '{"cognitive":{"exploratory":0.0-1.0,"executor":0.0-1.0,'
+                    '"analytical":0.0-1.0,"creative":0.0-1.0},'
+                    '"expertise":{"话题A":0.0-1.0},'
+                    '"goals":["目标（若有）"],'
+                    '"recent_themes":["主题1","主题2"]}'
+                )
+                raw = llm_fn(prompt)
+                if not raw:
+                    return
+
+                # 提取 JSON 块
+                import re
+                m = re.search(r"\{.*\}", raw, re.DOTALL)
+                if not m:
+                    return
+                extracted = json.loads(m.group())
+
+                # ── 软更新认知风格（指数平滑，α=0.15）──
+                new_cog = extracted.get("cognitive", {})
+                for k, v in new_cog.items():
+                    if isinstance(v, (int, float)):
+                        old = instance.data["cognitive"].get(k, 0.5)
+                        instance.data["cognitive"][k] = round(0.85 * old + 0.15 * float(v), 4)
+
+                # ── 软更新专长（α=0.2）──
+                new_exp = extracted.get("expertise", {})
+                for topic, score in new_exp.items():
+                    if isinstance(score, (int, float)) and topic:
+                        old = instance.data["expertise"].get(topic, 0.0)
+                        instance.data["expertise"][topic] = round(0.80 * old + 0.20 * float(score), 4)
+                # 专长超过 30 条时删最低分
+                if len(instance.data["expertise"]) > 30:
+                    sorted_exp = sorted(instance.data["expertise"].items(), key=lambda x: x[1])
+                    instance.data["expertise"] = dict(sorted_exp[5:])  # 删最低 5 条
+
+                # ── 滚动追加目标（最多保留 10 条）──
+                for g in extracted.get("goals", []):
+                    if g and g not in instance.data["goals"]:
+                        instance.data["goals"].append(g)
+                instance.data["goals"] = instance.data["goals"][-10:]
+
+                # ── 滚动追加近期主题（最多保留 20 条）──
+                for t in extracted.get("recent_themes", []):
+                    if t:
+                        instance.data["recent_themes"].append(t)
+                instance.data["recent_themes"] = instance.data["recent_themes"][-20:]
+
+                instance.save()
+                logger.debug("[PersonalityMatrix] ✅ 矩阵已更新")
+            except Exception as e:
+                logger.warning(f"[PersonalityMatrix] ⚠️ 后台更新失败: {e}")
+
+        t = threading.Thread(target=_worker, daemon=True, name="PersonalityMatrix-update")
+        t.start()
 
 
 class EnhancedMemoryManager:

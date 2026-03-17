@@ -555,18 +555,17 @@ function renderSessions(sessions) {
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
             <span class="session-name">${escapeHtml(session)}</span>
+            <button class="session-rename-btn" data-session="${escapeHtml(session)}" onclick="renameSession(this.dataset.session, event)" title="重命名对话">✎</button>
             <button class="session-delete-btn" data-session="${escapeHtml(session)}" onclick="deleteSession(this.dataset.session, event)" title="删除对话">✕</button>
         </div>
     `).join('');
 
-    // 用 addEventListener 替代内联 onclick，避免 session 名含单引号/特殊字符时 JS 注入
+    // Per-item click: skip button clicks and active rename inputs
     container.querySelectorAll('.session-item').forEach(el => {
-        el.addEventListener('click', function() {
-            selectSession(this.dataset.session);
-        });
-        el.querySelector('.session-del-btn').addEventListener('click', function(e) {
-            e.stopPropagation();
-            deleteCurrentSession(el.dataset.session);
+        el.addEventListener('click', function(e) {
+            if (e.target.closest('.session-rename-btn') || e.target.closest('.session-delete-btn')) return;
+            if (el.querySelector('.session-name-input')) return; // rename in progress
+            selectSession(el.dataset.session);
         });
     });
 }
@@ -840,9 +839,9 @@ async function deleteSession(sessionName, event) {
         
         const data = await response.json();
         if (data.success) {
-            // 实时移除该话题的 DOM 元素
+            // 实时移除该话题的 DOM 元素（用 data-session 属性匹配，避免 textContent 为 input 时失配）
             document.querySelectorAll('.session-item').forEach(item => {
-                if (item.querySelector('.session-name').textContent === sessionName) {
+                if (item.dataset.session === sessionName) {
                     item.remove();
                 }
             });
@@ -864,6 +863,84 @@ async function deleteSession(sessionName, event) {
 
 async function deleteCurrentSession() {
     return deleteSession(currentSession, null);
+}
+
+async function renameSession(sessionName, event) {
+    if (event) event.stopPropagation();
+    const item = document.querySelector(`.session-item[data-session="${CSS.escape(sessionName)}"]`);
+    if (!item) return;
+    const nameSpan = item.querySelector('.session-name');
+    if (!nameSpan) return;
+    const oldName = nameSpan.textContent;
+
+    // Replace span with inline input
+    const input = document.createElement('input');
+    input.className = 'session-name-input';
+    input.value = oldName;
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+    input.addEventListener('click', e => e.stopPropagation());
+
+    let committed = false;
+
+    async function commit() {
+        if (committed) return;
+        committed = true;
+        const newName = input.value.trim();
+        const restore = () => {
+            const span = document.createElement('span');
+            span.className = 'session-name';
+            span.textContent = oldName;
+            input.replaceWith(span);
+        };
+        if (!newName || newName === oldName) { restore(); return; }
+        try {
+            const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}/rename`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ new_name: newName }),
+            });
+            const data = await resp.json();
+            if (data.success) {
+                const newSession = data.new_session;
+                const span = document.createElement('span');
+                span.className = 'session-name';
+                span.textContent = newSession;
+                input.replaceWith(span);
+                item.dataset.session = newSession;
+                const delBtn = item.querySelector('.session-delete-btn');
+                if (delBtn) delBtn.dataset.session = newSession;
+                const renBtn = item.querySelector('.session-rename-btn');
+                if (renBtn) renBtn.dataset.session = newSession;
+                if (currentSession === sessionName) {
+                    currentSession = newSession;
+                    document.getElementById('chatTitle').textContent = newSession;
+                }
+            } else {
+                alert('重命名失败: ' + (data.error || '未知错误'));
+                restore();
+            }
+        } catch (e) {
+            alert('重命名失败: ' + e.message);
+            restore();
+        }
+    }
+
+    function cancel() {
+        if (committed) return;
+        committed = true;
+        const span = document.createElement('span');
+        span.className = 'session-name';
+        span.textContent = oldName;
+        input.replaceWith(span);
+    }
+
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
 }
 
 // ================= Chat =================
@@ -1717,11 +1794,16 @@ async function sendMessage(event) {
                         noticeDiv.remove();
                         streamComplete = true;
                         hideMiniGame();
+                        // 中止当前挂起的请求
+                        const controller = getSessionAbortController(thisSession);
+                        if (controller) { controller.abort(); }
+                        // 重置会话生成状态，确保下一次点击发送时不被识别为中断操作
+                        setSessionGenerating(thisSession, false);
                         // 将原始消息重新填入输入框并发送
-                        const inputEl = document.getElementById('user-input') || document.querySelector('.chat-input') || document.querySelector('textarea[data-input]');
+                        const inputEl = document.getElementById('messageInput');
                         if (inputEl) { inputEl.value = message; inputEl.dispatchEvent(new Event('input')); }
                         setTimeout(() => {
-                            const sendBtn = document.getElementById('send-btn') || document.querySelector('[data-send]');
+                            const sendBtn = document.getElementById('sendBtn');
                             if (sendBtn) sendBtn.click();
                         }, 100);
                     });
@@ -2979,18 +3061,15 @@ function openPath(path) {
 async function checkStatus() {
     const dot = document.querySelector('.status-dot');
     const text = document.querySelector('.status-text');
-    try {
-        const t0 = Date.now();
-        const response = await fetch('/api/ping');
-        const latency = Date.now() - t0;
-        const data = await response.json();
 
+    // 1. Liveness check (local)
+    try {
+        const response = await fetch('/api/ping');
+        const data = await response.json();
         if (data.status === 'ok') {
             dot.classList.add('online');
             dot.classList.remove('offline');
-            let label = `${latency.toFixed(0)}ms`;
-            if (data.ollama) label += ' | 🦙';
-            text.textContent = label;
+            text.textContent = data.ollama ? '🦙 ...' : '...';
         } else {
             dot.classList.add('offline');
             dot.classList.remove('online');
@@ -3002,13 +3081,27 @@ async function checkStatus() {
         text.textContent = 'Error';
     }
 
-    // Ops metrics — best-effort, non-blocking
+    // 2. Cloud latency — measured server-side (Gemini API endpoint)
+    try {
+        const cResp = await fetch('/api/ping/cloud', { signal: AbortSignal.timeout(6000) });
+        if (cResp.ok) {
+            const c = await cResp.json();
+            const ollamaHint = text.textContent.startsWith('🦙') ? ' | 🦙' : '';
+            if (c.reachable && c.latency_ms != null) {
+                text.textContent = `☁ ${c.latency_ms}ms${ollamaHint}`;
+            } else {
+                text.textContent = `☁ 超时${ollamaHint}`;
+            }
+        }
+    } catch (_) {
+        // cloud ping optional — silently ignore
+    }
+
+    // 3. Ops metrics — best-effort, non-blocking
     try {
         const mResp = await fetch('/api/ops/metrics', { signal: AbortSignal.timeout(3000) });
         if (mResp.ok) {
             const m = await mResp.json();
-            const running = (m.jobs && m.jobs.running) || 0;
-            const pending = (m.jobs && m.jobs.pending) || 0;
             const trigEnabled = (m.triggers && m.triggers.enabled) || 0;
 
             // Jobs running pill
@@ -3634,6 +3727,12 @@ function applySettingsToUI() {
     if (showTaskTypeCheckbox) {
         showTaskTypeCheckbox.checked = currentSettings.ai?.show_task_type === true;
     }
+
+    // 自动保存文件开关
+    const autoSaveFilesCheckbox = document.getElementById('settingAutoSaveFiles');
+    if (autoSaveFilesCheckbox) {
+        autoSaveFilesCheckbox.checked = currentSettings.ai?.auto_save_files !== false; // 默认开启
+    }
     
     // 语音自动模式设置
     const voiceAutoModeCheckbox = document.getElementById('settingVoiceAutoMode');
@@ -3782,6 +3881,7 @@ function renderSkills(filter) {
                         ${SKILL_CATEGORY_LABELS[skill.category] || skill.category} &nbsp;·&nbsp; ${scope}
                     </span>
                 </div>
+                <button class="skill-gear-btn" onclick="event.stopPropagation();openSkillEditor('${skill.id}')" title="编辑 Prompt">⚙</button>
                 <label class="toggle" title="${skill.enabled ? '点击禁用' : '点击启用'}">
                     <input type="checkbox" ${skill.enabled ? 'checked' : ''}
                         onchange="toggleSkill('${skill.id}', this.checked)">
@@ -3789,9 +3889,6 @@ function renderSkills(filter) {
                 </label>
             </div>
             <p class="skill-desc">${skill.description}</p>
-            <div class="skill-footer">
-                <button class="skill-edit-btn" onclick="openSkillEditor('${skill.id}')">✏️ 编辑 Prompt</button>
-            </div>
         </div>`;
     }).join('');
 }
@@ -7212,8 +7309,13 @@ function _shadowUpdateBanner() {
     if (!banner) return;
     if (!_shadowPending.length) {
         banner.style.display = 'none';
+        // 清理重试按钮
+        const rb = document.getElementById('shadowRetryBtn');
+        if (rb) rb.remove();
         return;
     }
+    const msg = _shadowPending[_shadowCurrentIdx];  // fix: msg was previously undefined
+    if (!msg) return;
     banner.style.display = 'flex';
     const textEl = document.getElementById('shadowBannerText');
     if (textEl) textEl.textContent = msg.content;
@@ -7233,6 +7335,64 @@ function _shadowUpdateBanner() {
 
     // Store current message id for dismiss
     banner.dataset.msgId = msg.id;
+
+    // ── 重试按钮（仅 failed_retry 类型）────────────────────────────────────────
+    const existingRetryBtn = document.getElementById('shadowRetryBtn');
+    if (existingRetryBtn) existingRetryBtn.remove();
+    if (msg.type === 'failed_retry') {
+        const taskId = msg.task_id || (msg.triggered_by || '').replace('failed_task:', '');
+        if (taskId) {
+            const retryBtn = document.createElement('button');
+            retryBtn.id = 'shadowRetryBtn';
+            retryBtn.textContent = '🔄 立即重试';
+            retryBtn.title = '重新发送原始请求';
+            retryBtn.style.cssText = [
+                'padding:4px 12px',
+                'border:none',
+                'border-radius:6px',
+                'background:#4361ee',
+                'color:#fff',
+                'cursor:pointer',
+                'font-size:12px',
+                'flex-shrink:0',
+            ].join(';');
+            retryBtn.addEventListener('click', () => shadowRetryFailedTask(taskId, msg.id));
+            banner.appendChild(retryBtn);
+        }
+    }
+}
+
+async function shadowRetryFailedTask(taskId, msgId) {
+    try {
+        const resp = await fetch(`/api/shadow/retry-context/${encodeURIComponent(taskId)}`);
+        const data = await resp.json();
+        if (!data.ok || !data.data?.original_text) {
+            showNotification('获取不到原始请求内容，请手动重新输入', 'warning', 3000);
+            return;
+        }
+        const originalText = data.data.original_text;
+        // 关闭通知
+        try { await fetch(`/api/shadow/dismiss/${msgId}`, { method: 'POST' }); } catch(e) {}
+        _shadowPending = _shadowPending.filter(m => m.id !== msgId);
+        _shadowCurrentIdx = Math.min(_shadowCurrentIdx, Math.max(0, _shadowPending.length - 1));
+        _shadowUpdateBanner();
+        _shadowUpdateBadge();
+        // 填入输入框并发送
+        const inputEl = document.getElementById('messageInput');
+        if (inputEl) {
+            inputEl.value = originalText;
+            inputEl.dispatchEvent(new Event('input'));
+            setTimeout(() => {
+                const sendBtn = document.getElementById('sendBtn');
+                if (sendBtn) sendBtn.click();
+            }, 80);
+        } else {
+            showNotification('请在对话框中重新输入：' + originalText.slice(0, 60), 'info', 5000);
+        }
+    } catch(e) {
+        console.error('[ShadowRetry]', e);
+        showNotification('重试失败，请手动重新输入', 'error', 3000);
+    }
 }
 
 function shadowNextMsg() {

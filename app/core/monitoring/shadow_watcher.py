@@ -187,6 +187,20 @@ _OUTPUT_FORMAT_SIGNALS: Dict[str, str] = {
 }
 
 # ── AI 拒绝/失败模式（用于检测 AI 无法完成的请求） ──────────────────────────────
+
+# ── 用户修正信号（用户指出 AI 理解有误或回答错误） ──────────────────────────────
+_USER_CORRECTION_PATTERNS = [
+    r"(不对|不是|你搞错了|你理解错了|不是这个意思|不是这样|那不是|错了|并不是|我的意思是|我是说|我说的是|实际上|其实是|应该是|不是我想要的)",
+    r"(no[,，]|nope|wrong|not right|that'?s not|you misunderstood|not what i|actually[,，])",
+]
+
+# ── 高频请求短语（用于 insight 触发创建 Skill）───────────────────────────────────
+_RECURRING_PHRASE_PATTERNS = [
+    r"(帮我写|帮我分析|帮我总结|帮我翻译|帮我优化|帮我生成|帮我检查|帮我解释|帮我整理)",
+    r"(总结一下|分析一下|解释一下|翻译一下|优化一下|写一个|生成一个|整理一下)",
+    r"(help me write|help me analyze|summarize|translate|optimize|generate a|explain this)",
+]
+
 _AI_FAILURE_PATTERNS = [
     "我无法",
     "我不能",
@@ -242,6 +256,9 @@ def _default_obs() -> Dict[str, Any]:
             "avg_session_length": 0,
             "sessions_last_30d": 0,
         },
+        "recurring_phrases": {},   # {phrase: count}  — 高频请求动作短语，触发 Skill 建议
+        "hourly_task_type": {},    # {"9": {"代码": 3, "分析": 1}} — 时段×任务交叉
+        "corrections": 0,          # 用户修正 AI 次数（质量信号）
     }
 
 
@@ -332,6 +349,14 @@ class ShadowWatcher:
                     counts[t] = counts.get(t, 0) + 1
         return dict(sorted(counts.items(), key=lambda x: -x[1]))
 
+    def get_failed_task_context(self, task_id: str) -> Optional[Dict]:
+        """根据 id 返回单条失败任务（含完整文本），供前端重试使用。"""
+        with self._obs_lock:
+            for t in self._obs.get("failed_tasks", []):
+                if t["id"] == task_id:
+                    return dict(t)
+        return None
+
     def dismiss_task(self, task_id: str):
         with self._obs_lock:
             for t in self._obs.get("open_tasks", []):
@@ -396,6 +421,15 @@ class ShadowWatcher:
                     > _prev_open
                 )
                 _should_trigger = _new_failed or _new_open
+
+                # 高频请求短语（用于 insight → 创建 Skill 建议）
+                self._extract_recurring_phrases(user_msg)
+
+                # 用户修正信号
+                self._detect_correction(user_msg)
+
+                # 时段×任务交叉分析
+                self._track_hourly_task(user_msg, str(now.hour))
 
                 # 工作会话统计
                 wp = self._obs.setdefault("work_pattern", {})
@@ -611,6 +645,37 @@ class ShadowWatcher:
         lower = ai_msg.lower()
         return any(p.lower() in lower for p in _AI_FAILURE_PATTERNS)
 
+    def _extract_recurring_phrases(self, text: str):
+        """统计高频请求动作短语，用于后续 Skill 创建建议。"""
+        phrases: Dict[str, int] = self._obs.setdefault("recurring_phrases", {})
+        lower = text.lower()
+        for pattern in _RECURRING_PHRASE_PATTERNS:
+            for m in re.finditer(pattern, lower):
+                phrase = m.group(1).strip()
+                if phrase:
+                    phrases[phrase] = phrases.get(phrase, 0) + 1
+        # 上限 50 条，淘汰最低频
+        if len(phrases) > 50:
+            sorted_p = sorted(phrases.items(), key=lambda x: x[1], reverse=True)
+            self._obs["recurring_phrases"] = dict(sorted_p[:50])
+
+    def _detect_correction(self, user_msg: str):
+        """检测用户是否在纠正 AI 的理解或回答，累计修正次数。"""
+        lower = user_msg.lower()
+        for pattern in _USER_CORRECTION_PATTERNS:
+            if re.search(pattern, lower):
+                self._obs["corrections"] = self._obs.get("corrections", 0) + 1
+                break
+
+    def _track_hourly_task(self, text: str, hour_key: str):
+        """追踪每个时段对应的任务类型分布（时段×任务交叉）。"""
+        hourly: Dict[str, Dict[str, int]] = self._obs.setdefault("hourly_task_type", {})
+        slot: Dict[str, int] = hourly.setdefault(hour_key, {})
+        lower = text.lower()
+        for t_name, keywords in _TASK_TYPE_KEYWORDS.items():
+            if any(kw in lower for kw in keywords):
+                slot[t_name] = slot.get(t_name, 0) + 1
+
     def _detect_failed_request(
         self, user_msg: str, ai_msg: str, session_id: str, now: datetime
     ):
@@ -627,6 +692,7 @@ class ShadowWatcher:
         failed.append({
             "id": str(uuid.uuid4())[:8],
             "text": user_msg[:150],
+            "full_text": user_msg[:2000],  # 保留完整文本供重试
             "asked_at": now.isoformat(timespec="seconds"),
             "session": session_id,
             "retried": False,

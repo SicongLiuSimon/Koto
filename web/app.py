@@ -3283,6 +3283,7 @@ def _get_system_instruction():
 ### 代码生成模式（仅当需要特殊格式时）
 - 必须使用 ---BEGIN_FILE: filename.py--- 和 ---END_FILE--- 标记
 - 代码控制在 80 行以内
+- **保存路径必须使用**: `import os; OUTPUT_DIR = os.environ.get('KOTO_OUTPUT_DIR', os.getcwd())`，然后把生成的文件保存到 `OUTPUT_DIR`
 - 必须包含中文字体处理（特别是PDF生成）
 - 使用 try/except 包装错误处理
 - **仅当直接输出无法满足需求时才使用此模式**
@@ -5297,7 +5298,10 @@ class TaskOrchestrator:
                 model_id = _INTERACTIONS_FALLBACK_MODEL
 
             # 自动保存代码文件
-            saved = Utils.auto_save_files(result_text)
+            if settings_manager.get("ai", "auto_save_files") is not False:
+                saved = Utils.auto_save_files(result_text)
+            else:
+                saved = []
             _report(
                 "✅ 代码生成完成",
                 f"已保存 {len(saved)} 个文件" if saved else "未检测到文件标记",
@@ -6088,6 +6092,26 @@ class SessionManager:
                 _app_logger.warning("Failed to delete session %s: %s", filename, e)
                 return False
         return False
+
+    def rename(self, filename, new_name):
+        """将会话文件重命名。new_name 为用户输入的显示名称（非文件名）。"""
+        old_path = os.path.join(CHAT_DIR, filename)
+        if not os.path.exists(old_path):
+            return {"success": False, "error": "会话不存在"}
+        safe = "".join([c if c.isalnum() or c in "_- " else "_" for c in new_name]).strip()
+        if not safe:
+            return {"success": False, "error": "名称无效"}
+        new_filename = f"{safe}.json"
+        new_path = os.path.join(CHAT_DIR, new_filename)
+        if os.path.exists(new_path) and os.path.abspath(new_path) != os.path.abspath(old_path):
+            new_filename = f"{safe}_{int(time.time())}.json"
+            new_path = os.path.join(CHAT_DIR, new_filename)
+        try:
+            os.rename(old_path, new_path)
+            return {"success": True, "new_filename": new_filename}
+        except OSError as e:
+            _app_logger.warning("Failed to rename session %s -> %s: %s", filename, new_filename, e)
+            return {"success": False, "error": str(e)}
 
 
 session_manager = SessionManager()
@@ -6971,7 +6995,10 @@ class KotoBrain:
             result["latency"] = first_token_latency
 
             # Auto-save files
-            saved_files = Utils.auto_save_files(accumulated_text)
+            if settings_manager.get("ai", "auto_save_files") is not False:
+                saved_files = Utils.auto_save_files(accumulated_text)
+            else:
+                saved_files = []
             result["saved_files"] = saved_files
 
             # 添加文件保存提示
@@ -7200,6 +7227,20 @@ def get_session(session_name):
     # 返回完整历史供前端渲染（不截断），截断仅用于模型上下文
     history = session_manager.load_full(f"{session_name}.json")
     return jsonify({"session": session_name, "history": history})
+
+
+@app.route("/api/sessions/<session_name>/rename", methods=["PATCH"])
+def rename_session(session_name):
+    """Rename a chat session."""
+    data = request.json or {}
+    new_name = (data.get("new_name") or "").strip()
+    if not new_name:
+        return jsonify({"success": False, "error": "新名称不能为空"}), 400
+    result = session_manager.rename(f"{session_name}.json", new_name)
+    if result["success"]:
+        new_session = result["new_filename"].replace(".json", "")
+        return jsonify({"success": True, "new_session": new_session})
+    return jsonify({"success": False, "error": result.get("error", "重命名失败")}), 400
 
 
 @app.route("/api/sessions/<session_name>", methods=["DELETE"])
@@ -10236,16 +10277,26 @@ def chat_stream():
 
             # === 🌳 Tree of Thought Mode (RESEARCH / FILE_GEN 并行多路推理选优) ===
             # 触发条件：legacy 路由 + RESEARCH/FILE_GEN + 非 Deep-Research-Pro + ToT 未被用户禁用
+            # 排除 Excel/脚本类文件生成请求：ToT 产出文本，而这类请求需要代码脚本，两者不兼容
+            _excel_request = any(
+                k in (effective_input or "").lower()
+                for k in ["excel", "xlsx", ".xls", "电子表格", "spreadsheet"]
+            )
             _tot_enabled = (
                 _wf_route == "legacy"
                 and task_type in ("RESEARCH", "FILE_GEN")
                 and len(str(effective_input)) >= 20
                 and not str(model_id or "").startswith("deep-research-pro-preview")
                 and settings_manager.get("ai", "use_tree_of_thought") is not False
+                and not _excel_request  # Excel 走代码生成路径，ToT 文本输出无法生成文件
             )
 
             if _tot_enabled:
-                _tot_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash")
+                # FILE_GEN 的 ToT 使用 flash 级别模型，避免 pro 模型响应慢导致前端 25s 无心跳触发卡住检测
+                if task_type == "FILE_GEN":
+                    _tot_model = MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
+                else:
+                    _tot_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash")
                 _tot_n     = 2 if task_type == "FILE_GEN" else 3   # FILE_GEN 用 2 路，RESEARCH 用 3 路
                 _tot_label = "📄 文档生成" if task_type == "FILE_GEN" else "🔬 深度研究"
                 yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'route_method': 'TreeOfThought', 'message': f'🌳 Tree of Thought 启动：{_tot_n} 条并行推理分支 ({_tot_label})'}, ensure_ascii=False)}\n\n"
@@ -12349,12 +12400,26 @@ def chat_stream():
 
                     response_holder = {"data": None, "error": None}
 
-                    def call_api(m=current_model):
+                    # 构建含对话历史的 contents 列表，使模型能参考之前的财务模型等上下文
+                    _fg_history_for_model = ContextAnalyzer.filter_history(user_input, history)
+                    _fg_formatted_history = []
+                    for _fg_turn in _fg_history_for_model[-6:]:  # 最多保留最近 6 轮，避免 token 过长
+                        _fg_formatted_history.append(
+                            types.Content(
+                                role=_fg_turn["role"],
+                                parts=[types.Part.from_text(text=p) for p in _fg_turn["parts"]],
+                            )
+                        )
+                    _fg_contents = _fg_formatted_history + [
+                        types.Content(role="user", parts=[types.Part.from_text(text=file_gen_input)])
+                    ]
+
+                    def call_api(m=current_model, _contents=_fg_contents):
                         try:
                             _app_logger.debug(f"[FILE_GEN] Calling API: {m}")
                             response = client.models.generate_content(
                                 model=m,
-                                contents=file_gen_input,  # 使用上下文增强的输入
+                                contents=_contents,
                                 config=types.GenerateContentConfig(
                                     system_instruction=_get_system_instruction(),
                                     max_output_tokens=8192,
@@ -12510,6 +12575,11 @@ def chat_stream():
                                 try:
                                     _prev = os.getcwd()
                                     os.chdir(WORKSPACE_DIR)
+                                    # 注入 KOTO_OUTPUT_DIR 到 exec 命名空间，让脚本能保存到正确目录
+                                    _exec_globals = {
+                                        "__file__": temp_script,
+                                        "KOTO_OUTPUT_DIR": settings_manager.documents_dir,
+                                    }
                                     with _ctx.redirect_stdout(
                                         _out
                                     ), _ctx.redirect_stderr(_err):
@@ -12517,7 +12587,7 @@ def chat_stream():
                                             open(
                                                 temp_script, "r", encoding="utf-8"
                                             ).read(),
-                                            {"__file__": temp_script},
+                                            _exec_globals,
                                         )
                                     os.chdir(_prev)
                                 except Exception as _ex:
@@ -12531,12 +12601,15 @@ def chat_stream():
 
                                 result = _FgR()
                             else:
+                                _script_env = os.environ.copy()
+                                _script_env["KOTO_OUTPUT_DIR"] = settings_manager.documents_dir
                                 result = subprocess.run(
                                     [sys.executable, temp_script],
                                     capture_output=True,
                                     text=True,
                                     timeout=60,
                                     cwd=WORKSPACE_DIR,
+                                    env=_script_env,
                                     creationflags=(
                                         subprocess.CREATE_NO_WINDOW
                                         if sys.platform == "win32"
@@ -12548,34 +12621,42 @@ def chat_stream():
                             _app_logger.debug(f"[FILE_GEN] Script stderr: {result.stderr}")
 
                             if result.returncode == 0:
-                                # 检查生成的文件
+                                # 检查生成的文件 — 同时扫描 documents_dir 和 WORKSPACE_DIR 根目录
                                 docs_dir = settings_manager.documents_dir
-                                if os.path.exists(docs_dir):
-                                    for f in os.listdir(docs_dir):
-                                        if f.endswith(
-                                            (
-                                                ".pdf",
-                                                ".docx",
-                                                ".xlsx",
-                                                ".pptx",
-                                                ".ppt",
-                                                ".png",
-                                                ".jpg",
-                                            )
-                                        ):
-                                            full_path = os.path.join(docs_dir, f)
-                                            age = time.time() - os.path.getmtime(
-                                                full_path
-                                            )
-                                            if age < 60:
-                                                rel_path = os.path.relpath(
-                                                    full_path, WORKSPACE_DIR
-                                                ).replace("\\", "/")
-                                                if rel_path not in generated_files:
-                                                    generated_files.append(rel_path)
-                                                    _app_logger.debug(
-                                                        f"[FILE_GEN] Generated: {rel_path}"
-                                                    )
+                                _FILE_EXTS = (".pdf", ".docx", ".xlsx", ".pptx", ".ppt", ".png", ".jpg")
+                                _scan_dirs = [docs_dir, WORKSPACE_DIR]
+                                for _scan_dir in _scan_dirs:
+                                    if os.path.exists(_scan_dir):
+                                        for f in os.listdir(_scan_dir):
+                                            if f.endswith(_FILE_EXTS):
+                                                full_path = os.path.join(_scan_dir, f)
+                                                age = time.time() - os.path.getmtime(full_path)
+                                                if age < 90:  # 90s 窗口，因为脚本执行可能需要一些时间
+                                                    rel_path = os.path.relpath(
+                                                        full_path, WORKSPACE_DIR
+                                                    ).replace("\\", "/")
+                                                    if rel_path not in generated_files:
+                                                        generated_files.append(rel_path)
+                                                        _app_logger.debug(
+                                                            f"[FILE_GEN] Generated: {rel_path}"
+                                                        )
+
+                                # 若仍未找到，尝试从 stdout 解析文件路径
+                                if not generated_files and result.stdout:
+                                    import re as _re_fp
+                                    _fp_matches = _re_fp.findall(
+                                        r'[\w./\\:\- ]+\.(?:xlsx|docx|pptx|pdf|ppt)',
+                                        result.stdout, _re_fp.IGNORECASE
+                                    )
+                                    for _fp in _fp_matches:
+                                        _fp = _fp.strip()
+                                        # 相对路径 → 基于 WORKSPACE_DIR 解析
+                                        _abs = _fp if os.path.isabs(_fp) else os.path.join(WORKSPACE_DIR, _fp)
+                                        if os.path.exists(_abs):
+                                            _rp = os.path.relpath(_abs, WORKSPACE_DIR).replace("\\", "/")
+                                            if _rp not in generated_files:
+                                                generated_files.append(_rp)
+                                                _app_logger.debug(f"[FILE_GEN] Found via stdout: {_rp}")
 
                                 if generated_files:
                                     files_list = ", ".join(
@@ -13138,7 +13219,10 @@ def chat_stream():
                             full_text = corrected_text
 
             # 处理自动保存的文件
-            saved_files = Utils.auto_save_files(full_text)
+            if settings_manager.get("ai", "auto_save_files") is not False:
+                saved_files = Utils.auto_save_files(full_text)
+            else:
+                saved_files = []
 
             # 代码任务: 检测并自动安装依赖
             if task_type == "CODER":
@@ -13226,6 +13310,15 @@ def chat_stream():
                 or "connection reset" in error_str.lower()
                 or "connection aborted" in error_str.lower()
             ):
+                # 将连接中断的模型标记为短期不可用（2 分钟），下次请求自动降级到 Flash
+                try:
+                    from app.core.llm.model_fallback import get_fallback_executor
+                    get_fallback_executor().mark_unavailable(model_id, ttl=120)
+                    _app_logger.warning(
+                        f"[CHAT] 连接中断，已将 {model_id} 标记不可用 120s，下次自动降级"
+                    )
+                except Exception:
+                    pass
                 error_response = (
                     "❌ **服务器连接中断**\n\n"
                     "与 Gemini API 的连接被意外断开，这通常是临时性问题。\n\n"
@@ -14571,7 +14664,8 @@ def chat_with_file():
             source_path = filepath
             target_path = os.path.join(docs_dir, filename)
             if os.path.abspath(source_path) != os.path.abspath(target_path):
-                shutil.copy2(source_path, target_path)
+                import shutil as _shutil_ann
+                _shutil_ann.copy2(source_path, target_path)
 
             # 使用流式SSE返回进度，让前端能实时显示
             # 捕获闭包变量（防止generator延迟执行时变量已改变）
@@ -18615,6 +18709,7 @@ def notebook_upload():
 
     try:
         # Save temp file
+        import tempfile
         filename = file.filename
         temp_path = os.path.join(
             tempfile.gettempdir(), f"koto_{int(time.time())}_{filename}"

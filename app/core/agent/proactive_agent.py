@@ -34,17 +34,18 @@ _QUEUE_FILE = _BASE / "proactive_queue.json"
 _MAX_QUEUE = 20
 # 同类消息最小冷却（小时）
 _COOLDOWN_HOURS = {
-    "greeting":       4,    # 4h 冷却，更快响应回访
-    "follow_up":      3,    # 3h（原 12h）
-    "suggestion":     12,
-    "reminder":       1,
-    "failed_retry":   24,   # 24h（原 48h）
-    "context_carry":  0.25, # 15 分钟 — 任务完成后立即接续
-    "session_summary": 1,   # 每小时最多一次
-    "insight":        8,    # 模式洞察，每 8h 最多一次
+    "greeting":        4,
+    "follow_up":       3,
+    "suggestion":      12,
+    "reminder":        1,
+    "failed_retry":    24,
+    "context_carry":   0.25,
+    "session_summary": 1,
+    "insight":         8,
+    "correction_hint": 48,   # 48h — 相当低频，避免打扰
 }
 # 这些类型入队新消息时自动淘汰同类旧消息（时效性单槽）
-_SINGLE_SLOT_TYPES = {"greeting", "session_summary", "insight"}
+_SINGLE_SLOT_TYPES = {"greeting", "session_summary", "insight", "correction_hint"}
 
 # 任务类型 → 接续建议（用于 context_carry）
 _TASK_CARRY_HINTS: Dict[str, str] = {
@@ -249,6 +250,12 @@ class ProactiveAgent:
         # 3. 模式洞察（高频话题/短语 → 建议建 Skill / 工作流）
         if self._can_fire("insight"):
             msg = self._build_insight(obs)
+            if msg:
+                self._enqueue(msg)
+
+        # 4. 修正次数过多 → 提示用户精确描述需求
+        if self._can_fire("correction_hint", min_cooldown_h=24.0):
+            msg = self._build_correction_hint(obs)
             if msg:
                 self._enqueue(msg)
 
@@ -497,7 +504,49 @@ class ProactiveAgent:
                     ttl_hours=12,
                 )
 
+        # 时段×任务洞察：当前时段某任务类型出现 ≥ 4 次时，主动预热
+        hourly_tasks: Dict[str, Dict[str, int]] = obs.get("hourly_task_type", {})
+        current_hour = str(datetime.now().hour)
+        current_slot: Dict[str, int] = hourly_tasks.get(current_hour, {})
+        if current_slot:
+            top_task_type = max(current_slot, key=lambda k: current_slot[k])
+            top_count = current_slot[top_task_type]
+            if top_count >= 4:
+                _TASK_TYPE_LABELS = {
+                    "分析": "分析工作", "创作": "写作",
+                    "执行": "系统操作", "问答": "学习研究",
+                    "修改": "内容优化", "搜索": "资料查找",
+                    "翻译": "翻译任务", "讨论": "探讨",
+                }
+                label = _TASK_TYPE_LABELS.get(top_task_type, top_task_type)
+                content = (
+                    f"⏰ 这个时间段你通常在做「{label}」——今天也有需要处理的吗？"
+                )
+                return _make_msg(
+                    "insight", content,
+                    priority="low",
+                    triggered_by=f"hourly_habit:{current_hour}:{top_task_type}",
+                    ttl_hours=6,
+                )
+
         return None
+
+    def _build_correction_hint(self, obs: Dict) -> Optional[Dict]:
+        """当用户修正 AI 次数较多时，主动提示如何更精确地描述需求。"""
+        corrections = obs.get("corrections", 0)
+        # 修正 ≥ 5 次才触发，降低噪音
+        if corrections < 5:
+            return None
+        content = (
+            f"💬 我注意到你在对话中纠正过我 {corrections} 次，"
+            "如果我经常误解你的意图，可以试试在问题前加一句背景说明，效果会更好哦。"
+        )
+        return _make_msg(
+            "correction_hint", content,
+            priority="low",
+            triggered_by=f"corrections:{corrections}",
+            ttl_hours=48,
+        )
 
     def _build_failed_retry(
         self, failed_tasks: List[Dict], llm_fn=None
@@ -527,13 +576,15 @@ class ProactiveAgent:
             except Exception:
                 pass
 
-        return _make_msg(
+        msg = _make_msg(
             "failed_retry",
             content,
             priority="medium",
             triggered_by=f"failed_task:{task['id']}",
             ttl_hours=48,
         )
+        msg["task_id"] = task["id"]  # 方便前端直接取用，无需解析 triggered_by
+        return msg
 
     # ── 队列管理 ──────────────────────────────────────────────────────────────
 

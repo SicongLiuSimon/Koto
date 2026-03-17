@@ -290,6 +290,8 @@ class SkillDefinition:
 
     # ── 新增：意图 & Prompt 模板 ─────────────────────────────────────────────
     intent_description: str = ""
+    # 说明本技能「不适合」哪些场景，帮助 LLM 避免误调用
+    when_not_to_use: str = ""
     system_prompt_template: str = ""
 
     # ── 新增：IO 约束 ─────────────────────────────────────────────────────────
@@ -330,6 +332,22 @@ class SkillDefinition:
     # 声明与此 Skill 逻辑互斥的其他 Skill ID
     # SkillManager.detect_conflicts() 会合并此字段与内置规则表
     conflict_with: List[str] = field(default_factory=list)
+
+    # ── 联动字段（v3）──────────────────────────────────────────────────────────
+    # 本 Skill 执行完后的自然后续 Skill 列表（顺序流建议）。
+    # SkillSuggester 在每次回答后检查此字段，向用户推荐"下一步可用 X 技能"。
+    # 例：debug_python.chains_to = ["write_unit_tests", "git_commit_helper"]
+    chains_to: List[str] = field(default_factory=list)
+
+    # 与此 Skill 同时激活时效果显著提升的协同 Skill 列表。
+    # SkillAutoMatcher 匹配到本 Skill 时，分数达标的协同 Skill 也会一起纳入注入；
+    # inject_into_prompt 检测到协同对时会生成"协同工作说明"块。
+    # 例：workspace_context.synergizes_with = ["debug_python", "debug_web_frontend"]
+    synergizes_with: List[str] = field(default_factory=list)
+
+    # 本 Skill 执行后可输出的数据键名（供下游 Skill 通过 SkillPipeline 读取）。
+    # 例：excel_analyst.output_keys = ["analysis_result", "chart_data"]
+    output_keys: List[str] = field(default_factory=list)
 
     # 示例 I/O 对，供 UI 展示和测试
     # 格式: [{"input": "...", "output": "...", "note": "...（可选）"}, ...]
@@ -474,7 +492,9 @@ class SkillDefinition:
 
         tool_description = f"{self.description}"
         if self.intent_description:
-            tool_description += f"\n\n适用场景：{self.intent_description}"
+            tool_description += f"\n\n✅ 适用场景：{self.intent_description}"
+        if self.when_not_to_use:
+            tool_description += f"\n\n❌ 不适用场景：{self.when_not_to_use}"
 
         return {
             "name": self.id,
@@ -516,6 +536,7 @@ class SkillDefinition:
             ),
             "description": self.description,
             "intent_description": self.intent_description,
+            "when_not_to_use": self.when_not_to_use,
             "system_prompt_template": self.system_prompt_template,
             "input_variables": [
                 {
@@ -556,6 +577,9 @@ class SkillDefinition:
             "tags": self.tags,
             "priority": self.priority,
             "conflict_with": self.conflict_with,
+            "chains_to": self.chains_to,
+            "synergizes_with": self.synergizes_with,
+            "output_keys": self.output_keys,
             "examples": self.examples,
             # manifest v2
             "compatibility": self.compatibility,
@@ -605,6 +629,7 @@ class SkillDefinition:
             skill_nature=data.get("skill_nature", SkillNature.DOMAIN_SKILL),
             description=data.get("description", ""),
             intent_description=data.get("intent_description", ""),
+            when_not_to_use=data.get("when_not_to_use", ""),
             system_prompt_template=data.get("system_prompt_template", ""),
             input_variables=input_variables,
             output_spec=output_spec,
@@ -620,6 +645,9 @@ class SkillDefinition:
             tags=data.get("tags", []),
             priority=data.get("priority", 50),
             conflict_with=data.get("conflict_with", []),
+            chains_to=data.get("chains_to", []),
+            synergizes_with=data.get("synergizes_with", []),
+            output_keys=data.get("output_keys", []),
             examples=data.get("examples", []),
             # manifest v2
             compatibility=data.get("compatibility", {}),
@@ -647,6 +675,7 @@ class SkillDefinition:
             skill_nature=legacy.get("skill_nature", SkillNature.DOMAIN_SKILL),
             description=legacy.get("description", ""),
             intent_description=legacy.get("intent_description", ""),
+            when_not_to_use=legacy.get("when_not_to_use", ""),
             system_prompt_template=legacy.get("system_prompt_template", ""),
             input_variables=[],
             output_spec=OutputSpec(),
@@ -664,6 +693,9 @@ class SkillDefinition:
             tags=[legacy.get("category", "")],
             priority=legacy.get("priority", 50),
             conflict_with=legacy.get("conflict_with", []),
+            chains_to=legacy.get("chains_to", []),
+            synergizes_with=legacy.get("synergizes_with", []),
+            output_keys=legacy.get("output_keys", []),
             examples=legacy.get("examples", []),
             entry_point=legacy.get("entry_point"),
         )

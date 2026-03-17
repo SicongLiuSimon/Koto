@@ -1,73 +1,89 @@
-{
-  "id": "write_unit_tests",
-  "name": "单元测试生成",
-  "icon": "🧪",
-  "category": "domain",
-  "description": "为 Python 函数/类/模块生成可运行的 pytest 测试套件，含边界用例和 mock",
-  "intent_description": "用户希望为代码生成测试、写 test 文件、提到 pytest / unittest / 测试覆盖率",
-  "output_spec": {
-    "format": "code",
-    "must_contain": [
-      "def test_",
-      "assert"
-    ],
-    "must_not_contain": [],
-    "min_chars": 200,
-    "max_chars": null,
-    "required_json_keys": [],
-    "description": "完整可运行的 pytest 测试文件，含导入、fixture、测试函数和中文场景注释"
-  },
-  "bound_tools": [
-    "read_file"
-  ],
-  "executor_tools": [
-    "read_file"
-  ],
-  "task_types": [
-    "CODER"
-  ],
-  "priority": 80,
-  "conflict_with": [],
-  "enabled": false,
-  "prompt": "\n\n## 🧪 领域要求：Python 单元测试生成\n\n你是一名专业 Python 测试工程师，遵循 pytest 最佳实践，为现有代码编写高质量测试套件。\n\n### 必须覆盖的用例类型\n\n| 类型 | 描述 | 示例 |\n|------|------|------|\n| 正常路径 (Happy Path) | 典型有效输入的预期输出 | 正常参数的正常返回值 |\n| 边界条件 | 空/None/零值/最大值/特殊字符/Unicode | `\"\"`, `None`, `0`, `2^31-1`, `\"你好\"` |\n| 异常情况 | 应抛出异常时用 `pytest.raises` | 验证类型和消息 |\n| Mock 依赖 | 外部 HTTP/文件 IO/DB 必须 mock | `unittest.mock.patch` |\n| 参数化 | 同类逻辑合并，避免重复 | `@pytest.mark.parametrize` |\n\n### 安全意识（重要）\n\n在测试以下模式时，必须包含安全验证用例：\n```python\n# SQL 注入测试\ndef test_get_user_SQL注入字符串():\n    malicious = \"' OR '1'='1\"\n    # 函数应安全处理，不返回数据或抛出 ValueError，不暴露数据\n    with pytest.raises(ValueError):\n        get_user(malicious)\n\n# XSS 测试\ndef test_render_template_XSS脚本注入():\n    payload = \"<script>alert('xss')</script>\"\n    result = render(payload)\n    assert \"<script>\" not in result  # 必须被转义\n```\n\n### 命名规则\n\n格式：`test_<被测函数>_<中文场景描述>`\n\n✅ `test_parse_date_空字符串` / `test_send_email_网络超时`  \n❌ `test_case_1` / `test_happy_path`\n\n- async 函数加 `@pytest.mark.asyncio`\n- 每个测试只验证一个具体行为\n- Fixture 用于共享的测试数据和环境准备\n\n### 文件结构模板\n\n```python\nimport pytest\nfrom unittest.mock import patch, MagicMock\n# from <module> import <被测函数>  ← 请替换为实际导入路径\n\n# ── Fixtures ─────────────────────────────────────────────────\n@pytest.fixture\ndef sample_data():\n    return {...}\n\n# ── 正常路径 ──────────────────────────────────────────────────\n@pytest.mark.parametrize(\"input,expected\", [...])\ndef test_xxx_正常情况(input, expected):\n    ...\n\n# ── 边界条件 ──────────────────────────────────────────────────\ndef test_xxx_空输入():\n    ...\n\n# ── 异常情况 ──────────────────────────────────────────────────\ndef test_xxx_无效参数_抛出ValueError():\n    with pytest.raises(ValueError, match=\"<期望的错误消息>\"):\n        ...\n\n# ── Mock 外部依赖 ─────────────────────────────────────────────\n@patch(\"<module>.<dependency>\")\ndef test_xxx_外部服务不可用(mock_dep):\n    ...\n```\n\n### 约束\n- **不要**生成 `assert True` 等无意义断言\n- **不要**让测试之间产生状态依赖（每个测试可独立运行）\n- 发现代码有安全风险（SQL拼接/eval/路径拼接）：在测试注释中标注 `⚠️ 安全风险：[描述]`\n- 如无法推断导入路径：写 `from <module> import ...` 并注释 `# 请替换为实际导入路径`",
-  "examples": [
-    {
-      "input": "```python\ndef divide(a: float, b: float) -> float:\n    if b == 0:\n        raise ValueError('除数不能为零')\n    return a / b\n```",
-      "output": "```python\nimport pytest\nfrom mymodule import divide\n\n# ── 正常路径 ─────────────────────────────────\n@pytest.mark.parametrize('a,b,expected', [\n    (10, 2, 5.0),\n    (-6, 3, -2.0),\n    (1, 3, pytest.approx(0.333, rel=1e-3)),\n])\ndef test_divide_正常除法(a, b, expected):\n    # 验证：整数/浮点除法返回正确结果\n    assert divide(a, b) == expected\n\n# ── 边界条件 ─────────────────────────────────\ndef test_divide_被除数为零():\n    # 验证：a=0 时返回 0.0，不抛异常\n    assert divide(0, 5) == 0.0\n\n# ── 异常情况 ─────────────────────────────────\ndef test_divide_除数为零_抛出ValueError():\n    # 验证：b=0 时必须抛出含「除数」描述的 ValueError\n    with pytest.raises(ValueError, match='除数不能为零'):\n        divide(10, 0)\n```",
-      "note": "参数化合并同类用例，精确匹配异常消息"
-    },
-    {
-      "input": "```python\nimport httpx\n\ndef get_user(user_id: int) -> dict:\n    resp = httpx.get(f'https://api.example.com/users/{user_id}')\n    resp.raise_for_status()\n    return resp.json()\n```",
-      "output": "```python\nimport pytest\nfrom unittest.mock import patch, MagicMock\nfrom mymodule import get_user\n\n@patch('mymodule.httpx.get')\ndef test_get_user_正常返回(mock_get):\n    # 验证：API 返回 200 时正确解析 JSON\n    mock_resp = MagicMock()\n    mock_resp.json.return_value = {'id': 1, 'name': 'Alice'}\n    mock_resp.raise_for_status.return_value = None\n    mock_get.return_value = mock_resp\n    result = get_user(1)\n    assert result == {'id': 1, 'name': 'Alice'}\n    mock_get.assert_called_once_with('https://api.example.com/users/1')\n\n@patch('mymodule.httpx.get')\ndef test_get_user_HTTP错误_向上抛出(mock_get):\n    # 验证：4xx/5xx 时 raise_for_status 向外传播\n    mock_resp = MagicMock()\n    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(\n        '404', request=MagicMock(), response=MagicMock()\n    )\n    mock_get.return_value = mock_resp\n    with pytest.raises(httpx.HTTPStatusError):\n        get_user(999)\n```",
-      "note": "Mock 外部 HTTP 请求，验证调用参数和异常传播"
-    }
-  ],
-  "plan_template": [
-    "1. 阅读被测代码，识别所有公开函数/方法及其输入输出契约",
-    "2. 列出每个函数的正常路径、边界条件、异常情况",
-    "3. 识别外部依赖（HTTP/IO/DB）并规划 mock 策略",
-    "4. 生成完整 pytest 测试文件，函数名含中文场景描述",
-    "5. 检查：每个函数至少 3 个用例，无 assert True 等无意义断言"
-  ],
-  "trigger_keywords": [
-    "写测试",
-    "生成测试",
-    "单元测试",
-    "pytest",
-    "测试用例",
-    "测试覆盖",
-    "test file"
-  ],
-  "version": "1.0.0",
-  "author": "koto",
-  "created_at": "2026-03-15T00:00:00Z",
-  "tags": [
-    "pytest",
-    "unit-test",
-    "testing",
-    "mock",
-    "coverage",
-    "tdd",
-    "github-copilot"
-  ]
+﻿{
+    "id":  "write_unit_tests",
+    "name":  "单元测试生成",
+    "icon":  "🧪",
+    "category":  "domain",
+    "description":  "为 Python 函数/类/模块生成可运行的 pytest 测试套件，含边界用例和 mock",
+    "intent_description":  "用户希望为代码生成测试、写 test 文件、提到 pytest / unittest / 测试覆盖率",
+    "output_spec":  {
+                        "format":  "code",
+                        "must_contain":  [
+                                             "def test_",
+                                             "assert"
+                                         ],
+                        "must_not_contain":  [
+
+                                             ],
+                        "min_chars":  200,
+                        "max_chars":  null,
+                        "required_json_keys":  [
+
+                                               ],
+                        "description":  "完整可运行的 pytest 测试文件，含导入、fixture、测试函数和中文场景注释"
+                    },
+    "bound_tools":  [
+                        "read_file"
+                    ],
+    "executor_tools":  [
+                           "read_file"
+                       ],
+    "task_types":  [
+                       "CODER"
+                   ],
+    "priority":  80,
+    "conflict_with":  [
+
+                      ],
+    "enabled":  false,
+    "prompt":  "\n\n## 🧪 领域要求：Python 单元测试生成\n\n你是一名专业 Python 测试工程师，遵循 pytest 最佳实践，为现有代码编写高质量测试套件。\n\n### 必须覆盖的用例类型\n\n| 类型 | 描述 | 示例 |\n|------|------|------|\n| 正常路径 (Happy Path) | 典型有效输入的预期输出 | 正常参数的正常返回值 |\n| 边界条件 | 空/None/零值/最大值/特殊字符/Unicode | `\"\"`, `None`, `0`, `2^31-1`, `\"你好\"` |\n| 异常情况 | 应抛出异常时用 `pytest.raises` | 验证类型和消息 |\n| Mock 依赖 | 外部 HTTP/文件 IO/DB 必须 mock | `unittest.mock.patch` |\n| 参数化 | 同类逻辑合并，避免重复 | `@pytest.mark.parametrize` |\n\n### 安全意识（重要）\n\n在测试以下模式时，必须包含安全验证用例：\n```python\n# SQL 注入测试\ndef test_get_user_SQL注入字符串():\n    malicious = \"\u0027 OR \u00271\u0027=\u00271\"\n    # 函数应安全处理，不返回数据或抛出 ValueError，不暴露数据\n    with pytest.raises(ValueError):\n        get_user(malicious)\n\n# XSS 测试\ndef test_render_template_XSS脚本注入():\n    payload = \"\u003cscript\u003ealert(\u0027xss\u0027)\u003c/script\u003e\"\n    result = render(payload)\n    assert \"\u003cscript\u003e\" not in result  # 必须被转义\n```\n\n### 命名规则\n\n格式：`test_\u003c被测函数\u003e_\u003c中文场景描述\u003e`\n\n✅ `test_parse_date_空字符串` / `test_send_email_网络超时`  \n❌ `test_case_1` / `test_happy_path`\n\n- async 函数加 `@pytest.mark.asyncio`\n- 每个测试只验证一个具体行为\n- Fixture 用于共享的测试数据和环境准备\n\n### 文件结构模板\n\n```python\nimport pytest\nfrom unittest.mock import patch, MagicMock\n# from \u003cmodule\u003e import \u003c被测函数\u003e  ← 请替换为实际导入路径\n\n# ── Fixtures ─────────────────────────────────────────────────\n@pytest.fixture\ndef sample_data():\n    return {...}\n\n# ── 正常路径 ──────────────────────────────────────────────────\n@pytest.mark.parametrize(\"input,expected\", [...])\ndef test_xxx_正常情况(input, expected):\n    ...\n\n# ── 边界条件 ──────────────────────────────────────────────────\ndef test_xxx_空输入():\n    ...\n\n# ── 异常情况 ──────────────────────────────────────────────────\ndef test_xxx_无效参数_抛出ValueError():\n    with pytest.raises(ValueError, match=\"\u003c期望的错误消息\u003e\"):\n        ...\n\n# ── Mock 外部依赖 ─────────────────────────────────────────────\n@patch(\"\u003cmodule\u003e.\u003cdependency\u003e\")\ndef test_xxx_外部服务不可用(mock_dep):\n    ...\n```\n\n### 约束\n- **不要**生成 `assert True` 等无意义断言\n- **不要**让测试之间产生状态依赖（每个测试可独立运行）\n- 发现代码有安全风险（SQL拼接/eval/路径拼接）：在测试注释中标注 `⚠️ 安全风险：[描述]`\n- 如无法推断导入路径：写 `from \u003cmodule\u003e import ...` 并注释 `# 请替换为实际导入路径`",
+    "examples":  [
+                     {
+                         "input":  "```python\ndef divide(a: float, b: float) -\u003e float:\n    if b == 0:\n        raise ValueError(\u0027除数不能为零\u0027)\n    return a / b\n```",
+                         "output":  "```python\nimport pytest\nfrom mymodule import divide\n\n# ── 正常路径 ─────────────────────────────────\n@pytest.mark.parametrize(\u0027a,b,expected\u0027, [\n    (10, 2, 5.0),\n    (-6, 3, -2.0),\n    (1, 3, pytest.approx(0.333, rel=1e-3)),\n])\ndef test_divide_正常除法(a, b, expected):\n    # 验证：整数/浮点除法返回正确结果\n    assert divide(a, b) == expected\n\n# ── 边界条件 ─────────────────────────────────\ndef test_divide_被除数为零():\n    # 验证：a=0 时返回 0.0，不抛异常\n    assert divide(0, 5) == 0.0\n\n# ── 异常情况 ─────────────────────────────────\ndef test_divide_除数为零_抛出ValueError():\n    # 验证：b=0 时必须抛出含「除数」描述的 ValueError\n    with pytest.raises(ValueError, match=\u0027除数不能为零\u0027):\n        divide(10, 0)\n```",
+                         "note":  "参数化合并同类用例，精确匹配异常消息"
+                     },
+                     {
+                         "input":  "```python\nimport httpx\n\ndef get_user(user_id: int) -\u003e dict:\n    resp = httpx.get(f\u0027https://api.example.com/users/{user_id}\u0027)\n    resp.raise_for_status()\n    return resp.json()\n```",
+                         "output":  "```python\nimport pytest\nfrom unittest.mock import patch, MagicMock\nfrom mymodule import get_user\n\n@patch(\u0027mymodule.httpx.get\u0027)\ndef test_get_user_正常返回(mock_get):\n    # 验证：API 返回 200 时正确解析 JSON\n    mock_resp = MagicMock()\n    mock_resp.json.return_value = {\u0027id\u0027: 1, \u0027name\u0027: \u0027Alice\u0027}\n    mock_resp.raise_for_status.return_value = None\n    mock_get.return_value = mock_resp\n    result = get_user(1)\n    assert result == {\u0027id\u0027: 1, \u0027name\u0027: \u0027Alice\u0027}\n    mock_get.assert_called_once_with(\u0027https://api.example.com/users/1\u0027)\n\n@patch(\u0027mymodule.httpx.get\u0027)\ndef test_get_user_HTTP错误_向上抛出(mock_get):\n    # 验证：4xx/5xx 时 raise_for_status 向外传播\n    mock_resp = MagicMock()\n    mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(\n        \u0027404\u0027, request=MagicMock(), response=MagicMock()\n    )\n    mock_get.return_value = mock_resp\n    with pytest.raises(httpx.HTTPStatusError):\n        get_user(999)\n```",
+                         "note":  "Mock 外部 HTTP 请求，验证调用参数和异常传播"
+                     }
+                 ],
+    "plan_template":  [
+                          "1. 阅读被测代码，识别所有公开函数/方法及其输入输出契约",
+                          "2. 列出每个函数的正常路径、边界条件、异常情况",
+                          "3. 识别外部依赖（HTTP/IO/DB）并规划 mock 策略",
+                          "4. 生成完整 pytest 测试文件，函数名含中文场景描述",
+                          "5. 检查：每个函数至少 3 个用例，无 assert True 等无意义断言"
+                      ],
+    "trigger_keywords":  [
+                             "写测试",
+                             "生成测试",
+                             "单元测试",
+                             "pytest",
+                             "测试用例",
+                             "测试覆盖",
+                             "test file"
+                         ],
+    "version":  "1.0.0",
+    "author":  "koto",
+    "created_at":  "2026-03-15T00:00:00Z",
+    "tags":  [
+                 "pytest",
+                 "unit-test",
+                 "testing",
+                 "mock",
+                 "coverage",
+                 "tdd",
+                 "github-copilot"
+             ],
+    "chains_to":  [
+                      "git_commit_helper"
+                  ],
+    "synergizes_with":  [
+                            "debug_python",
+                            "annotate_code_review"
+                        ],
+    "output_keys":  [
+                        "test_code"
+                    ]
 }

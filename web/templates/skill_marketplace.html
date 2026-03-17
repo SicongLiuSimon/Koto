@@ -535,7 +535,49 @@
   </div>
 </div>
 
-<!-- ════════════ Toast Container ════════════ -->
+<!-- ═══════════ Edit Skill Modal ════════════ -->
+<div class="edit-modal-overlay" id="skill-edit-overlay"></div>
+<div class="edit-modal" id="skill-edit-modal">
+  <div class="edit-modal-header">
+    <span id="edit-modal-title">⚙ 编辑技能</span>
+    <button class="sm-drawer-close" onclick="closeEditModal()">✕</button>
+  </div>
+  <div class="edit-modal-body">
+    <input type="hidden" id="edit-skill-id">
+    <div class="edit-form-row">
+      <div class="form-group" style="flex:1">
+        <label for="edit-skill-name">名称 *</label>
+        <input class="form-control" id="edit-skill-name" type="text" placeholder="技能名称">
+      </div>
+      <div class="form-group" style="width:80px">
+        <label for="edit-skill-icon">图标</label>
+        <input class="form-control" id="edit-skill-icon" type="text" maxlength="4" style="text-align:center;font-size:20px">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="edit-skill-description">描述</label>
+      <textarea class="form-control" id="edit-skill-description" rows="2" placeholder="技能功能描述"></textarea>
+    </div>
+    <div class="form-group">
+      <label for="edit-skill-intent">激活意图</label>
+      <input class="form-control" id="edit-skill-intent" type="text" placeholder="描述该技能应在什么情况下激活">
+    </div>
+    <div class="form-group">
+      <label for="edit-skill-prompt">System Prompt</label>
+      <textarea class="form-control" id="edit-skill-prompt" rows="6" style="font-family:monospace;font-size:12px" placeholder="系统提示词模板"></textarea>
+    </div>
+    <div class="form-group">
+      <label for="edit-skill-tags">标签 <span style="color:var(--text-muted);font-weight:400;font-size:11px">（逗号分隔）</span></label>
+      <input class="form-control" id="edit-skill-tags" type="text" placeholder="tag1, tag2, tag3">
+    </div>
+  </div>
+  <div class="edit-modal-footer">
+    <button class="btn btn-secondary" onclick="closeEditModal()">取消</button>
+    <button class="btn btn-primary" id="edit-save-btn" onclick="saveSkillEdit()">保存更改</button>
+  </div>
+</div>
+
+<!-- ═══════════ Toast Container ════════════ -->
 <div id="sm-toast-container"></div>
 
 <script src="/static/js/skill_marketplace.js"></script>

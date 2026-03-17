@@ -43,6 +43,7 @@ DEFAULT_SETTINGS = {
         "voice_auto_send": False,  # 语音输入后自动发送
         "stream_response": True,
         "show_thinking": False,  # 显示思考过程（推理链）
+        "auto_save_files": True,  # 自动保存回复中的文件（代码/文档/总结等）
         "enable_mini_game": True,  # 启用等待时的小游戏
     },
     "proxy": {

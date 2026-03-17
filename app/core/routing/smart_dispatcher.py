@@ -1300,7 +1300,22 @@ class SmartDispatcher:
 
         # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
         if task_type == "CHAT":
-            return _avail(MODEL_MAP.get("CHAT", "gemini-3-flash-preview"))
+            _chat_candidate = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+            # 安全网：如果 ModelManager 将 CHAT 路由到 Pro 模型（tier>7），强制回退到 Flash
+            _FLASH_FALLBACK = "gemini-3-flash-preview"
+            try:
+                from web.model_manager import KNOWN_MODEL_REGISTRY
+                _candidate_tier = KNOWN_MODEL_REGISTRY.get(_chat_candidate, {}).get("tier", 5)
+                if _candidate_tier > 7:
+                    import logging as _lg
+                    _lg.getLogger(__name__).warning(
+                        "[Dispatcher] CHAT MODEL_MAP 指向 tier-%d 模型 %s，强制回退到 %s",
+                        _candidate_tier, _chat_candidate, _FLASH_FALLBACK,
+                    )
+                    _chat_candidate = _FLASH_FALLBACK
+            except Exception:
+                pass
+            return _avail(_chat_candidate)
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型
         if complexity == "complex":

@@ -101,7 +101,15 @@ class UnifiedAgent(Agent):
             "- 当用户询问任何实时/当前/外部数据（金价、油价、汇率、天气、股票行情、新闻、最新价格等），"
             "必须调用 web_search 工具获取真实答案。\n"
             "- 严禁以「我没有联网接口」、「我无法获取实时数据」作为回复，也严禁生成 Python 代码片段（如 yfinance/akshare/requests）作为替代答案。\n"
-            "- 如果 web_search 工具可用，直接调用；如不可用，则明确告知用户「当前环境下网络工具不可用」。"
+            "- 如果 web_search 工具可用，直接调用；如不可用，则明确告知用户「当前环境下网络工具不可用」。\n"
+            "## P2: 记忆工具主动使用规则\n"
+            "- 当用户明确要求「记住」「不要忘记」某事，立即调用 memory_save 工具保存。\n"
+            "- 当你在对话中发现用户的重要偏好、习惯、决定或个人事实（如：用户偏好简短回答、用户是 Python 开发者），"
+            "主动调用 memory_save 保存，无需等待用户要求。\n"
+            "- 当用户询问关于自身的历史偏好、过去的决策、或之前讨论过的内容时，"
+            "先调用 memory_search 检索相关记忆，再结合检索结果回答，不要凭空猜测。\n"
+            "- memory_save 的 category 参数：user_fact（用户事实）、preference（偏好）、"
+            "decision（决策）、reminder（提醒）、topic_summary（主题摘要）。"
         )
         # v2
         self.skill_id = skill_id
@@ -225,6 +233,8 @@ class UnifiedAgent(Agent):
 
         final_answer: Optional[str] = None
         validation_retries = 0
+        # P0: 记录本次会话中 LLM 原生调用的 skill_* 工具（不含用户手动激活的 skill）
+        _native_skill_calls: list = []
 
         # ── Skill 注入：将启用的 Skills 注入到 system_instruction ──────────────
         _effective_instruction = self.base_system_instruction
@@ -488,6 +498,52 @@ class UnifiedAgent(Agent):
                         except Exception as e:
                             logger.warning(f"[UnifiedAgent] 输出验收异常（跳过）: {e}")
 
+                    # ── 2b. P1: Skill OutputSpec 格式验收 ─────────────
+                    # 当激活了某个 Skill 且其 output_spec 有非空约束时，
+                    # 验证输出是否符合格式要求，不符合则注入修正提示并重试。
+                    _spec_skill_id = _skill_id or (
+                        _auto_skill_ids[0] if _auto_skill_ids else None
+                    )
+                    if (
+                        validated_text
+                        and _spec_skill_id
+                        and validation_retries < self.MAX_VALIDATION_RETRIES
+                    ):
+                        try:
+                            from app.core.skills.skill_manager import (
+                                SkillManager as _SM_spec,
+                            )
+
+                            _sk_def = _SM_spec.get_definition(_spec_skill_id)
+                            if _sk_def and _sk_def.output_spec:
+                                _spec_ok, _spec_reason = _sk_def.output_spec.validate(
+                                    validated_text
+                                )
+                                if not _spec_ok:
+                                    validation_retries += 1
+                                    logger.info(
+                                        "[UnifiedAgent] 📋 OutputSpec 格式检查未通过 "
+                                        "(%s): %s — 触发重试 %d/%d",
+                                        _spec_skill_id,
+                                        _spec_reason,
+                                        validation_retries,
+                                        self.MAX_VALIDATION_RETRIES,
+                                    )
+                                    current_history.append(
+                                        {
+                                            "role": "user",
+                                            "content": (
+                                                f"你的回答格式不符合「{_sk_def.name}」技能要求："
+                                                f"{_spec_reason}。请严格按照要求重新输出。"
+                                            ),
+                                        }
+                                    )
+                                    continue
+                        except Exception as _spec_err:
+                            logger.debug(
+                                "[UnifiedAgent] OutputSpec 检查跳过: %s", _spec_err
+                            )
+
                     # ── 3. PII 还原 ──────────────────────────────────
                     final_answer = validated_text
                     if (
@@ -501,6 +557,36 @@ class UnifiedAgent(Agent):
                             logger.warning(f"[UnifiedAgent] PII 还原异常（跳过）: {e}")
                             final_answer = validated_text
 
+                    # ── 4. Skill 感知提示：告知用户 LLM 调用了他未手动开启的 Skill ──
+                    # 条件：本次会话中有 skill_* 工具被 LLM 原生调用，
+                    # 且该 skill 未被用户在技能面板中手动启用（无论 _skill_id 是否存在）
+                    if _native_skill_calls:
+                        try:
+                            from app.core.skills.skill_manager import (
+                                SkillManager as _SM_notify,
+                            )
+                            _SM_notify._ensure_init()
+                            _skill_tags: list = []
+                            for _stn in _native_skill_calls:
+                                _sid_notify = _stn[len("skill_"):]
+                                _entry = _SM_notify._registry.get(_sid_notify, {})
+                                _icon = _entry.get("icon", "")
+                                _name = _entry.get("name", _sid_notify)
+                                _skill_tags.append(
+                                    f"{_icon}**{_name}**" if _icon else f"**{_name}**"
+                                )
+                            if _skill_tags:
+                                _tags_str = "、".join(_skill_tags)
+                                _notice = (
+                                    f"\n\n---\n💡 *本次回答自动启用了技能：{_tags_str}"
+                                    f"。你也可以在技能面板中手动开启它们以持续生效。*"
+                                )
+                                final_answer = (final_answer or "") + _notice
+                        except Exception as _nfy_err:
+                            logger.debug(
+                                "[UnifiedAgent] Skill 感知提示跳过: %s", _nfy_err
+                            )
+
                     yield AgentStep(
                         step_type=AgentStepType.ANSWER,
                         content=final_answer,
@@ -510,6 +596,7 @@ class UnifiedAgent(Agent):
                             "task_type": _task_type,
                             "pii_masked": mask_result.has_pii if mask_result else False,
                             "task_id": _task_id,
+                            "native_skills_used": _native_skill_calls or None,
                         },
                     )
                     _pub("ANSWER", (final_answer or "")[:500], progress=100)
@@ -571,6 +658,23 @@ class UnifiedAgent(Agent):
                 for tool_call in tool_calls:
                     tool_name = tool_call.get("name")
                     tool_args = tool_call.get("args", {})
+
+                    # 追踪 LLM 原生调用的 skill_* 工具中，用户 *未手动启用* 的部分
+                    # 判断「用户是否启用」：SkillManager._registry[sid].enabled == True
+                    if (
+                        tool_name
+                        and tool_name.startswith("skill_")
+                        and tool_name not in _native_skill_calls
+                    ):
+                        try:
+                            from app.core.skills.skill_manager import SkillManager as _SM_tr
+                            _sid_tr = tool_name[len("skill_"):]
+                            _entry_tr = _SM_tr._registry.get(_sid_tr, {})
+                            _user_enabled = bool(_entry_tr.get("enabled", False))
+                        except Exception:
+                            _user_enabled = False
+                        if not _user_enabled:
+                            _native_skill_calls.append(tool_name)
 
                     action_obj = AgentAction(
                         tool_name=tool_name, tool_args=tool_args, tool_call_id=None

@@ -193,6 +193,24 @@ def shadow_dismiss(msg_id: str):
         return _err(str(exc), 500)
 
 
+@shadow_bp.get("/retry-context/<task_id>")
+def shadow_retry_context(task_id: str):
+    """返回失败任务的完整原始用户消息，供前端一键重试。"""
+    try:
+        ctx = _get_watcher().get_failed_task_context(task_id)
+        if not ctx:
+            return _err("Task not found", 404)
+        return _ok({
+            "task_id": task_id,
+            "original_text": ctx.get("full_text") or ctx.get("text", ""),
+            "session": ctx.get("session", ""),
+            "asked_at": ctx.get("asked_at", ""),
+        })
+    except Exception as exc:
+        logger.exception("[shadow/retry-context] error")
+        return _err(str(exc), 500)
+
+
 @shadow_bp.post("/dismiss-all")
 def shadow_dismiss_all():
     """全部关闭。"""
