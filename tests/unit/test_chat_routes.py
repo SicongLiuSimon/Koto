@@ -142,7 +142,11 @@ class TestGlobalErrorHandlers:
         from web import app as web_app_module
 
         # Blueprint registers view as "health.health"
-        view_name = "health.health" if "health.health" in web_app_module.app.view_functions else "health"
+        view_name = (
+            "health.health"
+            if "health.health" in web_app_module.app.view_functions
+            else "health"
+        )
         original_fn = web_app_module.app.view_functions.get(view_name)
 
         def _raise():

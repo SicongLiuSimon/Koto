@@ -15,10 +15,10 @@ from unittest.mock import patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helper: invoke the fallback branch of _md_to_html by blocking `import markdown`
 # ---------------------------------------------------------------------------
+
 
 def _run_md_to_html_fallback(md_text: str) -> str:
     """Write *md_text* to a temp .md file, call _md_to_html with the
@@ -28,7 +28,11 @@ def _run_md_to_html_fallback(md_text: str) -> str:
         out = str(Path(tmp) / "output.html")
         Path(src).write_text(md_text, encoding="utf-8")
 
-        real_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        real_import = (
+            __builtins__.__import__
+            if hasattr(__builtins__, "__import__")
+            else __import__
+        )
 
         def _fake_import(name, *args, **kwargs):
             if name == "markdown":
@@ -37,6 +41,7 @@ def _run_md_to_html_fallback(md_text: str) -> str:
 
         with patch("builtins.__import__", side_effect=_fake_import):
             from web.file_converter import _md_to_html
+
             _md_to_html(src, out)
 
         return Path(out).read_text(encoding="utf-8")
@@ -150,7 +155,7 @@ class TestMdToHtmlXssPrevention:
     def test_title_special_chars_stripped(self):
         """The filename is used as <title> after stripping dangerous chars."""
         with tempfile.TemporaryDirectory() as tmp:
-            src = str(Path(tmp) / '<script>alert(1)<.md')
+            src = str(Path(tmp) / "<script>alert(1)<.md")
             # Windows won't allow < > in filenames, so test via a safe name
             # that contains the other stripped chars: & " ' \
             safe_name = "test&file\"name'.md"
@@ -158,7 +163,11 @@ class TestMdToHtmlXssPrevention:
             out = str(Path(tmp) / "output.html")
             Path(src).write_text("hello", encoding="utf-8")
 
-            real_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+            real_import = (
+                __builtins__.__import__
+                if hasattr(__builtins__, "__import__")
+                else __import__
+            )
 
             def _fake_import(name, *args, **kwargs):
                 if name == "markdown":
@@ -167,13 +176,14 @@ class TestMdToHtmlXssPrevention:
 
             with patch("builtins.__import__", side_effect=_fake_import):
                 from web.file_converter import _md_to_html
+
                 _md_to_html(src, out)
 
             html_text = Path(out).read_text(encoding="utf-8")
             title_match = re.search(r"<title>(.*?)</title>", html_text)
             assert title_match
             title = title_match.group(1)
-            for ch in '<>&"\'\\':
+            for ch in "<>&\"'\\":
                 assert ch not in title
 
     # -- complex / combined payloads ---------------------------------------

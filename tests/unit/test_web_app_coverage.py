@@ -131,7 +131,9 @@ class TestLoadUserSettings:
 
         settings_path = tmp_path / "config" / "user_settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        settings_path.write_text(json.dumps({"storage": {"workspace_dir": "/w"}}), encoding="utf-8")
+        settings_path.write_text(
+            json.dumps({"storage": {"workspace_dir": "/w"}}), encoding="utf-8"
+        )
 
         # Clear cache before test
         webapp._user_settings_cache.clear()
@@ -166,12 +168,14 @@ class TestLoadUserSettings:
 class TestStorageHelpers:
     def _with_settings(self, settings_dict):
         from web import app as webapp
+
         webapp._user_settings_cache.clear()
         webapp._user_settings_cache["data"] = settings_dict
         return webapp
 
     def teardown_method(self):
         from web import app as webapp
+
         webapp._user_settings_cache.clear()
 
     def test_workspace_root_from_settings(self):
@@ -208,6 +212,7 @@ class TestStorageHelpers:
 class TestNormalizeProxyUrl:
     def setup_method(self):
         from web.app import _normalize_proxy_url
+
         self.fn = _normalize_proxy_url
 
     def test_empty_string(self):
@@ -237,18 +242,22 @@ class TestExtractSystemProxyCandidates:
     def test_collects_env_proxy(self):
         from web import app as webapp
 
-        with patch.dict(os.environ, {"HTTPS_PROXY": "http://env-proxy:8080"}, clear=False), \
-             patch.object(webapp, "settings_manager", MagicMock(**{"get.return_value": False})), \
-             patch.object(webapp, "PROXY_OPTIONS", []):
+        with patch.dict(
+            os.environ, {"HTTPS_PROXY": "http://env-proxy:8080"}, clear=False
+        ), patch.object(
+            webapp, "settings_manager", MagicMock(**{"get.return_value": False})
+        ), patch.object(
+            webapp, "PROXY_OPTIONS", []
+        ):
             result = webapp._extract_system_proxy_candidates()
         assert "http://env-proxy:8080" in result
 
     def test_includes_proxy_options(self):
         from web import app as webapp
 
-        with patch.dict(os.environ, {}, clear=False), \
-             patch.object(webapp, "settings_manager", MagicMock(**{"get.return_value": False})), \
-             patch.object(webapp, "PROXY_OPTIONS", ["http://127.0.0.1:7890"]):
+        with patch.dict(os.environ, {}, clear=False), patch.object(
+            webapp, "settings_manager", MagicMock(**{"get.return_value": False})
+        ), patch.object(webapp, "PROXY_OPTIONS", ["http://127.0.0.1:7890"]):
             # Remove env vars that might interfere
             env_copy = os.environ.copy()
             env_copy.pop("HTTPS_PROXY", None)
@@ -260,9 +269,13 @@ class TestExtractSystemProxyCandidates:
     def test_deduplication(self):
         from web import app as webapp
 
-        with patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:7890"}, clear=False), \
-             patch.object(webapp, "settings_manager", MagicMock(**{"get.return_value": False})), \
-             patch.object(webapp, "PROXY_OPTIONS", ["http://127.0.0.1:7890"]):
+        with patch.dict(
+            os.environ, {"HTTPS_PROXY": "http://127.0.0.1:7890"}, clear=False
+        ), patch.object(
+            webapp, "settings_manager", MagicMock(**{"get.return_value": False})
+        ), patch.object(
+            webapp, "PROXY_OPTIONS", ["http://127.0.0.1:7890"]
+        ):
             result = webapp._extract_system_proxy_candidates()
         # Should appear only once
         assert result.count("http://127.0.0.1:7890") == 1
@@ -275,6 +288,7 @@ class TestExtractSystemProxyCandidates:
 class TestFakeGenerateContentResponse:
     def setup_method(self):
         from web.app import _FakeGenerateContentResponse
+
         self.cls = _FakeGenerateContentResponse
 
     def test_stores_text(self):
@@ -303,6 +317,7 @@ class TestFakeGenerateContentResponse:
 class TestExtractPromptText:
     def setup_method(self):
         from web.app import _extract_prompt_text
+
         self.fn = _extract_prompt_text
 
     def test_none_contents(self):
@@ -353,6 +368,7 @@ class TestExtractPromptText:
 class TestIsInteractionsOnly:
     def setup_method(self):
         from web.app import _is_interactions_only
+
         self.fn = _is_interactions_only
 
     def test_known_interactions_model(self):
@@ -378,6 +394,7 @@ class TestIsInteractionsOnly:
 class TestFileOperator:
     def setup_method(self):
         from web.app import FileOperator
+
         self.cls = FileOperator
 
     # -- is_file_operation --
@@ -442,6 +459,7 @@ class TestFileOperator:
 class TestWebSearcher:
     def setup_method(self):
         from web.app import WebSearcher
+
         self.cls = WebSearcher
 
     # -- needs_web_search --
@@ -501,6 +519,7 @@ class TestWebSearcher:
 class TestContextAnalyzer:
     def setup_method(self):
         from web.app import ContextAnalyzer
+
         self.cls = ContextAnalyzer
 
     # -- extract_entities --
@@ -575,7 +594,9 @@ class TestContextAnalyzer:
             {"role": "user", "parts": ["画一只猫"]},
             {"role": "model", "parts": ["图像已生成"]},
         ]
-        result = self.cls.analyze_context("帮我写一份详细的市场分析报告关于人工智能发展趋势", history)
+        result = self.cls.analyze_context(
+            "帮我写一份详细的市场分析报告关于人工智能发展趋势", history
+        )
         # Long new-topic input should not be a continuation
         assert result["confidence"] < 0.6 or result["is_continuation"] is False
 
@@ -587,6 +608,7 @@ class TestContextAnalyzer:
 class TestUtils:
     def setup_method(self):
         from web.app import Utils
+
         self.cls = Utils
 
     # -- sanitize_string --
@@ -643,7 +665,10 @@ class TestUtils:
     # -- adapt_prompt_to_markdown --
     def test_adapt_prompt_fallback(self):
         # When PromptAdapter is not available, should return original input
-        with patch("web.app.Utils.adapt_prompt_to_markdown", wraps=self.cls.adapt_prompt_to_markdown):
+        with patch(
+            "web.app.Utils.adapt_prompt_to_markdown",
+            wraps=self.cls.adapt_prompt_to_markdown,
+        ):
             result = self.cls.adapt_prompt_to_markdown("FILE_GEN", "make a report")
         # It should return a string (either adapted or original)
         assert isinstance(result, str)
@@ -751,20 +776,26 @@ class TestSessionManager:
 class TestChatSystemInstruction:
     def test_default_instruction_returns_string(self):
         from web.app import _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION
+
         result = _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION()
         assert isinstance(result, str)
         assert "Koto" in result
 
     def test_instruction_without_question(self):
         from web.app import _get_chat_system_instruction
+
         result = _get_chat_system_instruction()
         assert isinstance(result, str)
         assert "Koto" in result
 
     def test_instruction_with_question_fallback(self):
         from web.app import _get_chat_system_instruction
+
         # When context_injector fails, should fall back
-        with patch("web.context_injector.get_dynamic_system_instruction", side_effect=Exception("fail")):
+        with patch(
+            "web.context_injector.get_dynamic_system_instruction",
+            side_effect=Exception("fail"),
+        ):
             result = _get_chat_system_instruction(question="hello")
         assert isinstance(result, str)
         assert "Koto" in result
@@ -777,6 +808,7 @@ class TestChatSystemInstruction:
 class TestTimeInfoParsing:
     def setup_method(self):
         from web.app import _parse_time_info_for_filegen, _build_filegen_time_context
+
         self.parse = _parse_time_info_for_filegen
         self.build = _build_filegen_time_context
 
@@ -818,6 +850,7 @@ class TestTimeInfoParsing:
 class TestFilterHistory:
     def setup_method(self):
         from web.app import ContextAnalyzer
+
         self.cls = ContextAnalyzer
 
     def test_empty_history(self):
@@ -927,8 +960,25 @@ class TestBuildAnalysisTitle:
             if intent != "分析":
                 break
 
-        stop_words = ["帮我", "请", "一下", "把", "这个", "这篇", "文件", "文章", "内容",
-                       "生成", "写一个", "做一份", "koto", "分析", "阅读", "提取", "识别"]
+        stop_words = [
+            "帮我",
+            "请",
+            "一下",
+            "把",
+            "这个",
+            "这篇",
+            "文件",
+            "文章",
+            "内容",
+            "生成",
+            "写一个",
+            "做一份",
+            "koto",
+            "分析",
+            "阅读",
+            "提取",
+            "识别",
+        ]
         text_lower_work = (user_text or "").lower()
         zh_stops = [w for w in stop_words if re.match(r"[\u4e00-\u9fa5]+", w)]
         for stop in zh_stops + found_intent_keywords:
@@ -1044,11 +1094,17 @@ class TestParsePptOutline:
         lines = md_text.split("\n")
         outline = {"title": "", "slides": []}
         _tmap = {
-            "过渡页": "divider", "过渡": "divider",
-            "详细": "detail", "重点": "detail",
-            "亮点": "highlight", "数据": "highlight",
-            "概览": "overview", "速览": "overview", "简要": "overview",
-            "对比": "comparison", "比较": "comparison",
+            "过渡页": "divider",
+            "过渡": "divider",
+            "详细": "detail",
+            "重点": "detail",
+            "亮点": "highlight",
+            "数据": "highlight",
+            "概览": "overview",
+            "速览": "overview",
+            "简要": "overview",
+            "对比": "comparison",
+            "比较": "comparison",
         }
         cur_type = "detail"
         cur_slide = None
@@ -1064,12 +1120,21 @@ class TestParsePptOutline:
             if line.startswith("# ") and not line.startswith("## "):
                 outline["title"] = line[2:].strip()
             elif line.startswith("## "):
-                if cur_sub and cur_slide and cur_slide.get("type") in ("overview", "comparison"):
+                if (
+                    cur_sub
+                    and cur_slide
+                    and cur_slide.get("type") in ("overview", "comparison")
+                ):
                     cur_slide.setdefault("subsections", []).append(cur_sub)
                     cur_sub = None
                 if cur_slide:
                     outline["slides"].append(cur_slide)
-                cur_slide = {"type": cur_type, "title": line[3:].strip(), "points": [], "content": []}
+                cur_slide = {
+                    "type": cur_type,
+                    "title": line[3:].strip(),
+                    "points": [],
+                    "content": [],
+                }
                 if cur_type == "divider":
                     cur_slide["description"] = ""
                 cur_type = "detail"
@@ -1077,7 +1142,11 @@ class TestParsePptOutline:
             elif line.startswith("### ") and cur_slide:
                 if cur_sub:
                     cur_slide.setdefault("subsections", []).append(cur_sub)
-                cur_sub = {"subtitle": line[4:].strip(), "label": line[4:].strip(), "points": []}
+                cur_sub = {
+                    "subtitle": line[4:].strip(),
+                    "label": line[4:].strip(),
+                    "points": [],
+                }
             elif re.match(r"^[\s]*[-•*]\s", line) and cur_slide is not None:
                 pt = re.sub(r"^[\s]*[-•*]\s+", "", line).strip()
                 if cur_sub is not None:
@@ -1087,7 +1156,11 @@ class TestParsePptOutline:
                     cur_slide["content"].append(pt)
             elif cur_slide and cur_slide.get("type") == "divider" and line.strip():
                 cur_slide["description"] = line.strip()
-        if cur_sub and cur_slide and cur_slide.get("type") in ("overview", "comparison"):
+        if (
+            cur_sub
+            and cur_slide
+            and cur_slide.get("type") in ("overview", "comparison")
+        ):
             cur_slide.setdefault("subsections", []).append(cur_sub)
         if cur_slide:
             outline["slides"].append(cur_slide)
@@ -1131,10 +1204,7 @@ class TestParsePptOutline:
         assert len(overview["subsections"]) == 2
 
     def test_comparison_left_right(self):
-        md = (
-            "[对比]\n## Compare\n### Left\n- l1\n### Right\n- r1\n"
-            "## After\n- x"
-        )
+        md = "[对比]\n## Compare\n### Left\n- l1\n### Right\n- r1\n" "## After\n- x"
         outline = self._parse_ppt_outline(md)
         comp = outline["slides"][0]
         assert comp["type"] == "comparison"
@@ -1155,6 +1225,7 @@ class TestWebAppRoutes:
     @pytest.fixture(autouse=True)
     def setup_client(self):
         from web.app import app as flask_app
+
         flask_app.config["TESTING"] = True
         self.app = flask_app
         with flask_app.test_client() as c:
@@ -1236,7 +1307,10 @@ class TestWebAppRoutes:
             mock_gnm.return_value = mock_mgr
             # The route uses `from note_manager import get_note_manager`
             # so we need to patch at the import level
-            with patch.dict("sys.modules", {"note_manager": MagicMock(get_note_manager=lambda: mock_mgr)}):
+            with patch.dict(
+                "sys.modules",
+                {"note_manager": MagicMock(get_note_manager=lambda: mock_mgr)},
+            ):
                 resp = self.client.get("/api/notes/list")
         assert resp.status_code in (200, 500)
 
@@ -1244,7 +1318,10 @@ class TestWebAppRoutes:
     def test_reminders_list(self):
         mock_mgr = MagicMock()
         mock_mgr.list_reminders.return_value = []
-        with patch.dict("sys.modules", {"reminder_manager": MagicMock(get_reminder_manager=lambda: mock_mgr)}):
+        with patch.dict(
+            "sys.modules",
+            {"reminder_manager": MagicMock(get_reminder_manager=lambda: mock_mgr)},
+        ):
             resp = self.client.get("/api/reminders/list")
         assert resp.status_code in (200, 500)
 
@@ -1252,7 +1329,10 @@ class TestWebAppRoutes:
     def test_clipboard_history(self):
         mock_mgr = MagicMock()
         mock_mgr.get_history.return_value = []
-        with patch.dict("sys.modules", {"clipboard_manager": MagicMock(get_clipboard_manager=lambda: mock_mgr)}):
+        with patch.dict(
+            "sys.modules",
+            {"clipboard_manager": MagicMock(get_clipboard_manager=lambda: mock_mgr)},
+        ):
             resp = self.client.get("/api/clipboard/history")
         assert resp.status_code in (200, 500)
 
@@ -1273,14 +1353,20 @@ class TestWebAppRoutes:
     def test_search_all(self):
         mock_engine = MagicMock()
         mock_engine.search_all.return_value = {"results": []}
-        with patch.dict("sys.modules", {"search_engine": MagicMock(get_search_engine=lambda: mock_engine)}):
+        with patch.dict(
+            "sys.modules",
+            {"search_engine": MagicMock(get_search_engine=lambda: mock_engine)},
+        ):
             resp = self.client.get("/api/search/all?query=test")
         assert resp.status_code in (200, 500)
 
     # -- GET /api/voice/engines --
     def test_voice_engines(self):
         mock_result = {"success": True, "engines": []}
-        with patch.dict("sys.modules", {"web.voice_fast": MagicMock(get_available_engines=lambda: mock_result)}):
+        with patch.dict(
+            "sys.modules",
+            {"web.voice_fast": MagicMock(get_available_engines=lambda: mock_result)},
+        ):
             resp = self.client.get("/api/voice/engines")
         assert resp.status_code in (200, 500)
 
@@ -1294,35 +1380,42 @@ class TestEdgeCases:
 
     def test_lazy_module_repr_unloaded(self):
         from web.app import _LazyModule
+
         lm = _LazyModule(lambda: None)
         assert "not loaded" in repr(lm)
 
     def test_normalize_proxy_url_with_scheme(self):
         from web.app import _normalize_proxy_url
+
         assert _normalize_proxy_url("https://proxy:443") == "https://proxy:443"
 
     def test_fake_response_empty_text(self):
         from web.app import _FakeGenerateContentResponse
+
         r = _FakeGenerateContentResponse("")
         assert r.text == ""
 
     def test_extract_prompt_text_list_fallback(self):
         from web.app import _extract_prompt_text
+
         text, _ = _extract_prompt_text([123, 456])
         assert "123" in text
         assert "456" in text
 
     def test_file_operator_keywords_exist(self):
         from web.app import FileOperator
+
         assert len(FileOperator.FILE_KEYWORDS) > 10
         assert len(FileOperator.FOLDER_ORGANIZE_KEYWORDS) > 5
 
     def test_web_searcher_keywords_exist(self):
         from web.app import WebSearcher
+
         assert len(WebSearcher.WEB_KEYWORDS) > 20
 
     def test_context_analyzer_task_signatures(self):
         from web.app import ContextAnalyzer
+
         assert "PAINTER" in ContextAnalyzer.TASK_SIGNATURES
         assert "FILE_GEN" in ContextAnalyzer.TASK_SIGNATURES
         assert "CODER" in ContextAnalyzer.TASK_SIGNATURES
@@ -1330,12 +1423,14 @@ class TestEdgeCases:
 
     def test_context_analyzer_continuation_patterns(self):
         from web.app import ContextAnalyzer
+
         assert "modify" in ContextAnalyzer.CONTINUATION_PATTERNS
         assert "convert" in ContextAnalyzer.CONTINUATION_PATTERNS
         assert "continue" in ContextAnalyzer.CONTINUATION_PATTERNS
 
     def test_utils_package_allowlist(self):
         from web.app import Utils
+
         assert "pygame" in Utils._PACKAGE_ALLOWLIST
         assert Utils._PACKAGE_ALLOWLIST["cv2"] == "opencv-python"
         assert Utils._PACKAGE_ALLOWLIST["PIL"] == "Pillow"
@@ -1360,14 +1455,17 @@ class TestEdgeCases:
 
     def test_web_searcher_news_keyword(self):
         from web.app import WebSearcher
+
         assert WebSearcher.needs_web_search("最新新闻") is True
 
     def test_web_searcher_flight_keyword(self):
         from web.app import WebSearcher
+
         assert WebSearcher.needs_web_search("查航班动态") is True
 
     def test_context_build_rag_prompt(self):
         from web.app import ContextAnalyzer
+
         summary = {
             "conversation_topic": "PAINTER",
             "key_entities": [{"type": "color", "value": "红色"}],

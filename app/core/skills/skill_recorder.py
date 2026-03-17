@@ -238,6 +238,7 @@ class SkillRecorder:
 
         # 获取共享 Gemini client（与 LocalPlanner / AIRouter 同一模式）
         import sys as _sys
+
         _app_module = _sys.modules.get("web.app") or _sys.modules.get("app")
         _client = getattr(_app_module, "client", None) if _app_module else None
         if _client is None:
@@ -254,6 +255,7 @@ class SkillRecorder:
         def _call():
             try:
                 import importlib
+
                 _types = importlib.import_module("google.genai.types")
                 resp = _client.models.generate_content(
                     model="gemini-2.5-flash",
@@ -287,11 +289,14 @@ class SkillRecorder:
                 return None
             logger.info(
                 "[skill_recorder] ✅ LLM 语义分析完成: %s → %s",
-                skill_name, data.get("intent_description", ""),
+                skill_name,
+                data.get("intent_description", ""),
             )
             return data
         except json.JSONDecodeError as e:
-            logger.debug("[skill_recorder] LLM JSON 解析失败: %s | raw=%r", e, raw[:200])
+            logger.debug(
+                "[skill_recorder] LLM JSON 解析失败: %s | raw=%r", e, raw[:200]
+            )
             return None
 
     # ── 从 session 对话文件提取 ──────────────────────────────────────────────
@@ -421,28 +426,37 @@ class SkillRecorder:
             # 1) SkillAutoMatcher._PATTERN_MAP（关键词即时匹配）
             try:
                 from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+
                 # 避免重复注册
-                existing_ids = {e.get("skill_id") for e in SkillAutoMatcher._PATTERN_MAP}
+                existing_ids = {
+                    e.get("skill_id") for e in SkillAutoMatcher._PATTERN_MAP
+                }
                 if skill_id not in existing_ids:
                     SkillAutoMatcher._PATTERN_MAP.append(
                         {"skill_id": skill_id, "patterns": kws}
                     )
                     logger.info(
                         "[skill_recorder] ✅ AutoMatcher 注册 %d 个关键词: %s",
-                        len(kws), kws,
+                        len(kws),
+                        kws,
                     )
             except Exception as e:
                 logger.debug("[skill_recorder] AutoMatcher 注册失败: %s", e)
 
             # 2) SkillBindingManager.bind_intent()（对话 intent 持久绑定）
             try:
-                from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+                from app.core.skills.skill_trigger_binding import (
+                    get_skill_binding_manager,
+                )
+
                 get_skill_binding_manager().bind_intent(
                     skill_id=skill_id,
                     intent_patterns=kws,
                     auto_disable_after_turns=3,
                 )
-                logger.info("[skill_recorder] ✅ BindingManager intent 绑定: %s", skill_id)
+                logger.info(
+                    "[skill_recorder] ✅ BindingManager intent 绑定: %s", skill_id
+                )
             except Exception as e:
                 logger.debug("[skill_recorder] BindingManager 绑定失败: %s", e)
 
@@ -547,7 +561,9 @@ class SkillRecorder:
             icon="🤖",
             category="custom",
             skill_nature=skill_nature,
-            description=description or intent_desc or f"自动从对话提取的技能：{skill_name}",
+            description=description
+            or intent_desc
+            or f"自动从对话提取的技能：{skill_name}",
             intent_description=intent_desc,
             task_types=task_types,
             version="1.0.0",

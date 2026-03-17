@@ -154,8 +154,20 @@ _OPEN_TASK_PATTERNS = [
 
 # ── 高频请求模式 ─────────────────────────────────────────────────────────────
 _PHRASE_PATTERNS = [
-    "帮我写", "帮我", "总结", "翻译", "解释", "分析", "生成", "优化",
-    "检查", "修复", "整理", "创建", "查找", "比较",
+    "帮我写",
+    "帮我",
+    "总结",
+    "翻译",
+    "解释",
+    "分析",
+    "生成",
+    "优化",
+    "检查",
+    "修复",
+    "整理",
+    "创建",
+    "查找",
+    "比较",
 ]
 
 # ── AI 拒绝/失败模式（用于检测 AI 无法完成的请求） ──────────────────────────────
@@ -205,20 +217,20 @@ def _default_obs() -> Dict[str, Any]:
         "last_updated": None,
         "total_observations": 0,
         "topics": {},
-        "active_hours": {},        # "9": count, "14": count …
-        "open_tasks": [],          # [{id, text, mentioned_at, session, done, revisited_at?, completed_at?}]
-        "failed_tasks": [],        # [{id, text, asked_at, session, retried, resolved}]
-        "topic_history": [],       # [{topic, date}] capped 500 — for recency calculation
-        "recurring_phrases": {},   # phrase: count
+        "active_hours": {},  # "9": count, "14": count …
+        "open_tasks": [],  # [{id, text, mentioned_at, session, done, revisited_at?, completed_at?}]
+        "failed_tasks": [],  # [{id, text, asked_at, session, retried, resolved}]
+        "topic_history": [],  # [{topic, date}] capped 500 — for recency calculation
+        "recurring_phrases": {},  # phrase: count
         "last_seen": None,
         "streak": {"days": 0, "last_date": None},
         "work_pattern": {
             "avg_session_length": 0,
             "sessions_last_30d": 0,
         },
-        "recurring_phrases": {},   # {phrase: count}  — 高频请求动作短语，触发 Skill 建议
-        "hourly_task_type": {},    # {"9": {"代码": 3, "分析": 1}} — 时段×任务交叉
-        "corrections": 0,          # 用户修正 AI 次数（质量信号）
+        "recurring_phrases": {},  # {phrase: count}  — 高频请求动作短语，触发 Skill 建议
+        "hourly_task_type": {},  # {"9": {"代码": 3, "分析": 1}} — 时段×任务交叉
+        "corrections": 0,  # 用户修正 AI 次数（质量信号）
     }
 
 
@@ -370,7 +382,9 @@ class ShadowWatcher:
                 self._extract_open_tasks(user_msg, session_id, now)
 
                 # 任务完成/失败追踪（返回刚完成的任务文本）
-                _completed_task_text = self._check_task_followup(user_msg, ai_msg, session_id, now)
+                _completed_task_text = self._check_task_followup(
+                    user_msg, ai_msg, session_id, now
+                )
                 self._detect_failed_request(user_msg, ai_msg, session_id, now)
 
                 # 检测是否新增了重要事件（新失败请求 / 新开放任务），用于立即唤醒 ProactiveAgent
@@ -408,13 +422,18 @@ class ShadowWatcher:
 
     def _trigger_proactive_tick(self):
         """在后台线程中立即触发 ProactiveAgent（绕过定时 interval）。"""
+
         def _run():
             try:
                 from app.core.agent.proactive_agent import get_proactive_agent
+
                 get_proactive_agent().tick_immediate()
             except Exception as e:
                 logger.debug("[ShadowWatcher] 立即触发 ProactiveAgent 失败: %s", e)
-        threading.Thread(target=_run, daemon=True, name="sw_proactive_immediate").start()
+
+        threading.Thread(
+            target=_run, daemon=True, name="sw_proactive_immediate"
+        ).start()
 
     def _inc_session_exchanges(self, session_id: str) -> int:
         """为指定会话累加轮次计数（内存，重启清零）。"""
@@ -428,13 +447,16 @@ class ShadowWatcher:
         """每次对话完成后在后台线程调用 tick_after_exchange，实现真正的「随时主动」行为。"""
         _session_ex = session_exchanges
         _completed = completed_task_text
+
         def _run():
             try:
                 from app.core.agent.proactive_agent import get_proactive_agent
+
                 obs = self.get_observations()
                 get_proactive_agent().tick_after_exchange(_session_ex, _completed, obs)
             except Exception as e:
                 logger.debug("[ShadowWatcher] tick_after_exchange 失败: %s", e)
+
         threading.Thread(target=_run, daemon=True, name="sw_after_exchange").start()
 
     def _update_streak(self, today: date):
@@ -492,13 +514,16 @@ class ShadowWatcher:
                 ):
                     continue
                 import uuid as _uuid
-                tasks.append({
-                    "id": str(_uuid.uuid4())[:8],
-                    "text": task_text[:120],
-                    "mentioned_at": now.isoformat(timespec="seconds"),
-                    "session": session_id,
-                    "done": False,
-                })
+
+                tasks.append(
+                    {
+                        "id": str(_uuid.uuid4())[:8],
+                        "text": task_text[:120],
+                        "mentioned_at": now.isoformat(timespec="seconds"),
+                        "session": session_id,
+                        "done": False,
+                    }
+                )
 
     def _check_task_followup(
         self, user_msg: str, ai_msg: str, session_id: str, now: datetime
@@ -596,15 +621,18 @@ class ShadowWatcher:
         if sum(1 for f in failed if not f.get("resolved")) >= 50:
             return
         import uuid as _uuid
-        failed.append({
-            "id": str(_uuid.uuid4())[:8],
-            "text": user_msg[:150],
-            "full_text": user_msg[:2000],  # 保留完整文本供重试
-            "asked_at": now.isoformat(timespec="seconds"),
-            "session": session_id,
-            "retried": False,
-            "resolved": False,
-        })
+
+        failed.append(
+            {
+                "id": str(_uuid.uuid4())[:8],
+                "text": user_msg[:150],
+                "full_text": user_msg[:2000],  # 保留完整文本供重试
+                "asked_at": now.isoformat(timespec="seconds"),
+                "session": session_id,
+                "retried": False,
+                "resolved": False,
+            }
+        )
 
     # ── 持久化 ────────────────────────────────────────────────────────────────
 

@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # Tier 2 Helpers: 纯 stdlib 语义匹配
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _build_tokens(text: str) -> frozenset:
     """
     混合分词器：提取中文单字 + 英文词（含下划线分割）+ 字符 bigram。
@@ -51,21 +52,21 @@ def _build_tokens(text: str) -> frozenset:
     text_lower = text.lower()
 
     # 英文词 + 下划线碎片（工具名如 analyze_excel_data → analyze, excel, data）
-    for w in re.findall(r'[a-z_]+', text_lower):
+    for w in re.findall(r"[a-z_]+", text_lower):
         tokens.add(w)
-        for part in w.split('_'):
+        for part in w.split("_"):
             if len(part) > 1:
                 tokens.add(part)
 
     # 中文单字
     for ch in text:
-        if '\u4e00' <= ch <= '\u9fff':
+        if "\u4e00" <= ch <= "\u9fff":
             tokens.add(ch)
 
     # 字符 bigram（捕获「分析」「搜索」「查询」等2字中文词，以及英文2-gram）
-    clean = re.sub(r'\s+', '', text_lower)
+    clean = re.sub(r"\s+", "", text_lower)
     for i in range(len(clean) - 1):
-        bg = clean[i:i + 2]
+        bg = clean[i : i + 2]
         if bg.strip():
             tokens.add(bg)
 
@@ -80,6 +81,7 @@ def _overlap_score(query_toks: frozenset, desc_toks: frozenset) -> float:
     if not query_toks:
         return 0.0
     return len(query_toks & desc_toks) / len(query_toks)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 工具分类表：category → 工具名称集合
@@ -305,7 +307,8 @@ class ToolRouter:
             user_message, all_definitions, topk=self._semantic_topk
         )
         semantic_defs = [
-            d for d in all_definitions
+            d
+            for d in all_definitions
             if d.get("name") in set(semantic_ranked) and d.get("name") not in seen_names
         ]
         rank_order = {name: i for i, name in enumerate(semantic_ranked)}
@@ -319,7 +322,11 @@ class ToolRouter:
             core_defs = [d for d in all_definitions if d.get("name") in _CORE_TOOLS]
             merged = core_defs[: self.max_tools]
 
-        label = "+".join(sorted(matched_categories)) if matched_categories else "semantic-only"
+        label = (
+            "+".join(sorted(matched_categories))
+            if matched_categories
+            else "semantic-only"
+        )
         logger.debug(
             f"[ToolRouter] intent={label!r} "
             f"keyword={len(keyword_defs)} semantic={len(semantic_defs)} "
@@ -357,7 +364,8 @@ class ToolRouter:
                     + " "
                     + d.get("name", "").replace("_", " ")
                 )
-                for d in definitions if d.get("name")
+                for d in definitions
+                if d.get("name")
             }
             self._index_cache_key = cache_key
             logger.debug(f"[ToolRouter] 语义索引重建: {len(self._desc_index)} 个工具")

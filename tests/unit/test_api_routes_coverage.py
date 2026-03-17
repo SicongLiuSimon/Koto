@@ -36,6 +36,7 @@ def _json(resp):
 # 1. Agent Routes  (/api/agent/…)
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestAgentRoutes:
     """Tests for app.api.agent_routes endpoints."""
@@ -47,9 +48,9 @@ class TestAgentRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_chat_valid_payload(self, full_client):
-        resp = full_client.post("/api/agent/chat", json={
-            "message": "hello", "session_id": "test-session"
-        })
+        resp = full_client.post(
+            "/api/agent/chat", json={"message": "hello", "session_id": "test-session"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /tools --------------------------------------------------------------
@@ -65,9 +66,9 @@ class TestAgentRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_process_valid(self, full_client):
-        resp = full_client.post("/api/agent/process", json={
-            "request": "summarize", "session_id": "s1"
-        })
+        resp = full_client.post(
+            "/api/agent/process", json={"request": "summarize", "session_id": "s1"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /confirm ------------------------------------------------------------
@@ -77,9 +78,9 @@ class TestAgentRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_confirm_valid(self, full_client):
-        resp = full_client.post("/api/agent/confirm", json={
-            "session": "s1", "confirmed": True
-        })
+        resp = full_client.post(
+            "/api/agent/confirm", json={"session": "s1", "confirmed": True}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /choice -------------------------------------------------------------
@@ -89,9 +90,9 @@ class TestAgentRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_choice_valid(self, full_client):
-        resp = full_client.post("/api/agent/choice", json={
-            "session": "s1", "selected": "option_a"
-        })
+        resp = full_client.post(
+            "/api/agent/choice", json={"session": "s1", "selected": "option_a"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /plan ---------------------------------------------------------------
@@ -101,17 +102,17 @@ class TestAgentRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_plan_valid(self, full_client):
-        resp = full_client.post("/api/agent/plan", json={
-            "request": "build a plan", "session": "s1"
-        })
+        resp = full_client.post(
+            "/api/agent/plan", json={"request": "build a plan", "session": "s1"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /optimize -----------------------------------------------------------
 
     def test_optimize_valid(self, full_client):
-        resp = full_client.post("/api/agent/optimize", json={
-            "request": "optimize this", "session_id": "s1"
-        })
+        resp = full_client.post(
+            "/api/agent/optimize", json={"request": "optimize this", "session_id": "s1"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /monitor/* ----------------------------------------------------------
@@ -121,9 +122,7 @@ class TestAgentRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_monitor_start(self, full_client):
-        resp = full_client.post("/api/agent/monitor/start", json={
-            "check_interval": 60
-        })
+        resp = full_client.post("/api/agent/monitor/start", json={"check_interval": 60})
         assert resp.status_code in _ANY_VALID
 
     def test_monitor_stop(self, full_client):
@@ -149,9 +148,10 @@ class TestAgentRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_generate_script_valid(self, full_client):
-        resp = full_client.post("/api/agent/generate-script", json={
-            "issue_type": "high_cpu", "process_name": "python"
-        })
+        resp = full_client.post(
+            "/api/agent/generate-script",
+            json={"issue_type": "high_cpu", "process_name": "python"},
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_list_available_scripts(self, full_client):
@@ -159,19 +159,23 @@ class TestAgentRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_save_generated_script(self, full_client):
-        resp = full_client.post("/api/agent/generate-script/save", json={
-            "script_content": "echo hello", "filename": "test.sh"
-        })
+        resp = full_client.post(
+            "/api/agent/generate-script/save",
+            json={"script_content": "echo hello", "filename": "test.sh"},
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /feedback/* ---------------------------------------------------------
 
     def test_submit_feedback(self, full_client):
-        resp = full_client.post("/api/agent/feedback", json={
-            "feedback_type": "thumbs_up",
-            "session_id": "s1",
-            "message_id": "m1",
-        })
+        resp = full_client.post(
+            "/api/agent/feedback",
+            json={
+                "feedback_type": "thumbs_up",
+                "session_id": "s1",
+                "message_id": "m1",
+            },
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_feedback_stats(self, full_client):
@@ -179,9 +183,10 @@ class TestAgentRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_feedback_settings(self, full_client):
-        resp = full_client.post("/api/agent/feedback/settings", json={
-            "recording_enabled": True, "threshold": 0.5
-        })
+        resp = full_client.post(
+            "/api/agent/feedback/settings",
+            json={"recording_enabled": True, "threshold": 0.5},
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /stats/cost ---------------------------------------------------------
@@ -226,6 +231,7 @@ class TestAgentRoutes:
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. Skill Marketplace Routes  (/api/skillmarket/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestSkillMarketplaceRoutes:
@@ -274,17 +280,19 @@ class TestSkillMarketplaceRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_auto_build_valid(self, full_client):
-        resp = full_client.post("/api/skillmarket/auto-build", json={
-            "description": "A skill that translates text"
-        })
+        resp = full_client.post(
+            "/api/skillmarket/auto-build",
+            json={"description": "A skill that translates text"},
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /preview-prompt -----------------------------------------------------
 
     def test_preview_prompt(self, full_client):
-        resp = full_client.post("/api/skillmarket/preview-prompt", json={
-            "description": "summarizer", "task_type": "text"
-        })
+        resp = full_client.post(
+            "/api/skillmarket/preview-prompt",
+            json={"description": "summarizer", "task_type": "text"},
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /from-session -------------------------------------------------------
@@ -294,9 +302,9 @@ class TestSkillMarketplaceRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_from_session_valid(self, full_client):
-        resp = full_client.post("/api/skillmarket/from-session", json={
-            "session_id": "fake-session"
-        })
+        resp = full_client.post(
+            "/api/skillmarket/from-session", json={"session_id": "fake-session"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /install ------------------------------------------------------------
@@ -306,14 +314,17 @@ class TestSkillMarketplaceRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_install_skill_json(self, full_client):
-        resp = full_client.post("/api/skillmarket/install", json={
-            "skill_json": {
-                "id": "test_install_skill",
-                "name": "Test Install Skill",
-                "description": "For testing",
-                "system_prompt": "You are a test skill.",
-            }
-        })
+        resp = full_client.post(
+            "/api/skillmarket/install",
+            json={
+                "skill_json": {
+                    "id": "test_install_skill",
+                    "name": "Test Install Skill",
+                    "description": "For testing",
+                    "system_prompt": "You are a test skill.",
+                }
+            },
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /uninstall/<skill_id> -----------------------------------------------
@@ -325,15 +336,17 @@ class TestSkillMarketplaceRoutes:
     # -- /toggle/<skill_id> --------------------------------------------------
 
     def test_toggle_nonexistent(self, full_client):
-        resp = full_client.post("/api/skillmarket/toggle/nonexistent-skill",
-                                json={"enabled": True})
+        resp = full_client.post(
+            "/api/skillmarket/toggle/nonexistent-skill", json={"enabled": True}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /duplicate/<skill_id> -----------------------------------------------
 
     def test_duplicate_nonexistent(self, full_client):
-        resp = full_client.post("/api/skillmarket/duplicate/nonexistent-skill",
-                                json={"new_name": "copy"})
+        resp = full_client.post(
+            "/api/skillmarket/duplicate/nonexistent-skill", json={"new_name": "copy"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /export/<skill_id> --------------------------------------------------
@@ -351,8 +364,10 @@ class TestSkillMarketplaceRoutes:
     # -- /rate/<skill_id> ----------------------------------------------------
 
     def test_rate_nonexistent(self, full_client):
-        resp = full_client.post("/api/skillmarket/rate/nonexistent-skill",
-                                json={"rating": 5, "comment": "great"})
+        resp = full_client.post(
+            "/api/skillmarket/rate/nonexistent-skill",
+            json={"rating": 5, "comment": "great"},
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /stats --------------------------------------------------------------
@@ -376,9 +391,10 @@ class TestSkillMarketplaceRoutes:
     # -- /validate-response --------------------------------------------------
 
     def test_validate_response(self, full_client):
-        resp = full_client.post("/api/skillmarket/validate-response", json={
-            "response_text": "hello", "skill_id": "test"
-        })
+        resp = full_client.post(
+            "/api/skillmarket/validate-response",
+            json={"response_text": "hello", "skill_id": "test"},
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /status -------------------------------------------------------------
@@ -390,15 +406,16 @@ class TestSkillMarketplaceRoutes:
     # -- /check-updates ------------------------------------------------------
 
     def test_check_updates(self, full_client):
-        resp = full_client.post("/api/skillmarket/check-updates", json={
-            "skill_ids": ["a", "b"]
-        })
+        resp = full_client.post(
+            "/api/skillmarket/check-updates", json={"skill_ids": ["a", "b"]}
+        )
         assert resp.status_code in _ANY_VALID
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. File Hub Routes  (/api/files/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestFileHubRoutes:
@@ -421,11 +438,14 @@ class TestFileHubRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_register_valid(self, full_client):
-        resp = full_client.post("/api/files/register", json={
-            "file_path": "/tmp/test_file.txt",
-            "category": "document",
-            "tags": ["test"],
-        })
+        resp = full_client.post(
+            "/api/files/register",
+            json={
+                "file_path": "/tmp/test_file.txt",
+                "category": "document",
+                "tags": ["test"],
+            },
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /stats --------------------------------------------------------------
@@ -457,9 +477,7 @@ class TestFileHubRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_scan_dir_valid(self, full_client):
-        resp = full_client.post("/api/files/scan-dir", json={
-            "directory_path": "/tmp"
-        })
+        resp = full_client.post("/api/files/scan-dir", json={"directory_path": "/tmp"})
         assert resp.status_code in _ANY_VALID
 
     # -- /<file_id> (GET / DELETE) -------------------------------------------
@@ -479,21 +497,21 @@ class TestFileHubRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_rename_valid(self, full_client):
-        resp = full_client.post("/api/files/rename", json={
-            "file_id": "fake-id", "new_name": "renamed.txt"
-        })
+        resp = full_client.post(
+            "/api/files/rename", json={"file_id": "fake-id", "new_name": "renamed.txt"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_move_file(self, full_client):
-        resp = full_client.post("/api/files/move", json={
-            "file_id": "fake-id", "target_path": "/tmp/dest"
-        })
+        resp = full_client.post(
+            "/api/files/move", json={"file_id": "fake-id", "target_path": "/tmp/dest"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_copy_file(self, full_client):
-        resp = full_client.post("/api/files/copy", json={
-            "file_id": "fake-id", "target_path": "/tmp/dest"
-        })
+        resp = full_client.post(
+            "/api/files/copy", json={"file_id": "fake-id", "target_path": "/tmp/dest"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /list-dir, /browse, /tree, /disk-usage ------------------------------
@@ -541,9 +559,7 @@ class TestFileHubRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_add_favorite(self, full_client):
-        resp = full_client.post("/api/files/favorites", json={
-            "file_id": "fake-id"
-        })
+        resp = full_client.post("/api/files/favorites", json={"file_id": "fake-id"})
         assert resp.status_code in _ANY_VALID
 
     # -- /op-log, /undo ------------------------------------------------------
@@ -559,43 +575,45 @@ class TestFileHubRoutes:
     # -- /compress, /extract -------------------------------------------------
 
     def test_compress_files(self, full_client):
-        resp = full_client.post("/api/files/compress", json={
-            "file_ids": ["a", "b"], "output_name": "archive"
-        })
+        resp = full_client.post(
+            "/api/files/compress",
+            json={"file_ids": ["a", "b"], "output_name": "archive"},
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_extract_archive(self, full_client):
-        resp = full_client.post("/api/files/extract", json={
-            "file_id": "fake-id", "target_path": "/tmp/extracted"
-        })
+        resp = full_client.post(
+            "/api/files/extract",
+            json={"file_id": "fake-id", "target_path": "/tmp/extracted"},
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /summarize ----------------------------------------------------------
 
     def test_summarize_file(self, full_client):
-        resp = full_client.post("/api/files/summarize", json={
-            "file_id": "fake-id"
-        })
+        resp = full_client.post("/api/files/summarize", json={"file_id": "fake-id"})
         assert resp.status_code in _ANY_VALID
 
     # -- /batch-rename, /batch-move, /cleanup-dups ---------------------------
 
     def test_batch_rename(self, full_client):
-        resp = full_client.post("/api/files/batch-rename", json={
-            "file_ids": ["a"], "pattern": "old", "replacements": "new"
-        })
+        resp = full_client.post(
+            "/api/files/batch-rename",
+            json={"file_ids": ["a"], "pattern": "old", "replacements": "new"},
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_batch_move(self, full_client):
-        resp = full_client.post("/api/files/batch-move", json={
-            "file_ids": ["a"], "target_path": "/tmp/dest"
-        })
+        resp = full_client.post(
+            "/api/files/batch-move",
+            json={"file_ids": ["a"], "target_path": "/tmp/dest"},
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_cleanup_duplicates(self, full_client):
-        resp = full_client.post("/api/files/cleanup-dups", json={
-            "keep_strategy": "newest"
-        })
+        resp = full_client.post(
+            "/api/files/cleanup-dups", json={"keep_strategy": "newest"}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /open, /disk (DELETE) -----------------------------------------------
@@ -605,15 +623,16 @@ class TestFileHubRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_delete_file_disk(self, full_client):
-        resp = full_client.delete("/api/files/disk", json={
-            "file_id": "fake", "permanent": False
-        })
+        resp = full_client.delete(
+            "/api/files/disk", json={"file_id": "fake", "permanent": False}
+        )
         assert resp.status_code in _ANY_VALID
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 4. Skill Routes  (/api/skills/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestSkillRoutes:
@@ -628,12 +647,15 @@ class TestSkillRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_create_skill(self, full_client):
-        resp = full_client.post("/api/skills/", json={
-            "id": "test_cov_skill",
-            "name": "Coverage Test Skill",
-            "description": "Skill for coverage",
-            "system_prompt": "You are helpful.",
-        })
+        resp = full_client.post(
+            "/api/skills/",
+            json={
+                "id": "test_cov_skill",
+                "name": "Coverage Test Skill",
+                "description": "Skill for coverage",
+                "system_prompt": "You are helpful.",
+            },
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_create_skill_missing_fields(self, full_client):
@@ -645,9 +667,9 @@ class TestSkillRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_update_skill_nonexistent(self, full_client):
-        resp = full_client.put("/api/skills/nonexistent-skill-id", json={
-            "name": "Updated Name"
-        })
+        resp = full_client.put(
+            "/api/skills/nonexistent-skill-id", json={"name": "Updated Name"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_delete_skill_nonexistent(self, full_client):
@@ -655,15 +677,15 @@ class TestSkillRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_toggle_skill_enable(self, full_client):
-        resp = full_client.post("/api/skills/nonexistent/enable", json={
-            "enabled": True
-        })
+        resp = full_client.post(
+            "/api/skills/nonexistent/enable", json={"enabled": True}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_toggle_skill_v2(self, full_client):
-        resp = full_client.post("/api/skills/nonexistent/toggle", json={
-            "enabled": False
-        })
+        resp = full_client.post(
+            "/api/skills/nonexistent/toggle", json={"enabled": False}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_skill_stats(self, full_client):
@@ -679,9 +701,7 @@ class TestSkillRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_bootstrap_bindings(self, full_client):
-        resp = full_client.post("/api/skills/bindings/bootstrap", json={
-            "force": False
-        })
+        resp = full_client.post("/api/skills/bindings/bootstrap", json={"force": False})
         assert resp.status_code in _ANY_VALID
 
     def test_bind_skill_intent(self, full_client):
@@ -710,9 +730,9 @@ class TestSkillRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_save_skill_prompt(self, full_client):
-        resp = full_client.post("/api/skills/nonexistent/prompt", json={
-            "prompt": "New system prompt"
-        })
+        resp = full_client.post(
+            "/api/skills/nonexistent/prompt", json={"prompt": "New system prompt"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_reset_skill_prompt(self, full_client):
@@ -723,6 +743,7 @@ class TestSkillRoutes:
 # ═══════════════════════════════════════════════════════════════════════════
 # 5. Job Routes  (/api/jobs/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestJobRoutes:
@@ -741,11 +762,14 @@ class TestJobRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_create_job_valid(self, full_client):
-        resp = full_client.post("/api/jobs/", json={
-            "job_type": "chat",
-            "payload": {"message": "test"},
-            "session_id": "s1",
-        })
+        resp = full_client.post(
+            "/api/jobs/",
+            json={
+                "job_type": "chat",
+                "payload": {"message": "test"},
+                "session_id": "s1",
+            },
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_get_job_nonexistent(self, full_client):
@@ -773,24 +797,25 @@ class TestJobRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_bootstrap_triggers(self, full_client):
-        resp = full_client.post("/api/jobs/triggers/bootstrap", json={
-            "force": False
-        })
+        resp = full_client.post("/api/jobs/triggers/bootstrap", json={"force": False})
         assert resp.status_code in _ANY_VALID
 
     def test_create_trigger(self, full_client):
-        resp = full_client.post("/api/jobs/triggers", json={
-            "name": "test_trigger",
-            "trigger_type": "cron",
-            "job_type": "chat",
-            "job_payload": {"message": "ping"},
-        })
+        resp = full_client.post(
+            "/api/jobs/triggers",
+            json={
+                "name": "test_trigger",
+                "trigger_type": "cron",
+                "job_type": "chat",
+                "job_payload": {"message": "ping"},
+            },
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_update_trigger_nonexistent(self, full_client):
-        resp = full_client.patch("/api/jobs/triggers/fake-trigger-id", json={
-            "enabled": False
-        })
+        resp = full_client.patch(
+            "/api/jobs/triggers/fake-trigger-id", json={"enabled": False}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_delete_trigger_nonexistent(self, full_client):
@@ -805,6 +830,7 @@ class TestJobRoutes:
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. Goal Routes  (/api/goals/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestGoalRoutes:
@@ -823,11 +849,14 @@ class TestGoalRoutes:
         assert resp.status_code in (*_CLIENT_ERR, 500)
 
     def test_create_goal_valid(self, full_client):
-        resp = full_client.post("/api/goals/", json={
-            "title": "Test Goal",
-            "user_goal": "Improve test coverage",
-            "category": "development",
-        })
+        resp = full_client.post(
+            "/api/goals/",
+            json={
+                "title": "Test Goal",
+                "user_goal": "Improve test coverage",
+                "category": "development",
+            },
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_goal_stats(self, full_client):
@@ -839,9 +868,9 @@ class TestGoalRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_update_goal_nonexistent(self, full_client):
-        resp = full_client.patch("/api/goals/nonexistent-goal-id", json={
-            "title": "Updated Title"
-        })
+        resp = full_client.patch(
+            "/api/goals/nonexistent-goal-id", json={"title": "Updated Title"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_activate_goal_nonexistent(self, full_client):
@@ -857,13 +886,15 @@ class TestGoalRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_complete_goal_nonexistent(self, full_client):
-        resp = full_client.post("/api/goals/nonexistent-goal-id/complete",
-                                json={"summary": "done"})
+        resp = full_client.post(
+            "/api/goals/nonexistent-goal-id/complete", json={"summary": "done"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_confirm_goal_nonexistent(self, full_client):
-        resp = full_client.post("/api/goals/nonexistent-goal-id/confirm",
-                                json={"user_reply": "yes"})
+        resp = full_client.post(
+            "/api/goals/nonexistent-goal-id/confirm", json={"user_reply": "yes"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_delete_goal_nonexistent(self, full_client):
@@ -878,6 +909,7 @@ class TestGoalRoutes:
 # ═══════════════════════════════════════════════════════════════════════════
 # 7. Task Routes  (/api/tasks/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestTaskRoutes:
@@ -912,13 +944,15 @@ class TestTaskRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_interrupt_task_nonexistent(self, full_client):
-        resp = full_client.post("/api/tasks/nonexistent-task-id/interrupt",
-                                json={"reason": "testing"})
+        resp = full_client.post(
+            "/api/tasks/nonexistent-task-id/interrupt", json={"reason": "testing"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_resume_task_nonexistent(self, full_client):
-        resp = full_client.post("/api/tasks/nonexistent-task-id/resume",
-                                json={"approved": True})
+        resp = full_client.post(
+            "/api/tasks/nonexistent-task-id/resume", json={"approved": True}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_delete_task_nonexistent(self, full_client):
@@ -933,6 +967,7 @@ class TestTaskRoutes:
 # ═══════════════════════════════════════════════════════════════════════════
 # 8. Ops Routes  (/api/ops/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestOpsRoutes:
@@ -967,8 +1002,9 @@ class TestOpsRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_toggle_remediation(self, full_client):
-        resp = full_client.post("/api/ops/remediation/auto_restart/toggle",
-                                json={"enabled": True})
+        resp = full_client.post(
+            "/api/ops/remediation/auto_restart/toggle", json={"enabled": True}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_manual_gc(self, full_client):
@@ -979,6 +1015,7 @@ class TestOpsRoutes:
 # ═══════════════════════════════════════════════════════════════════════════
 # 9. Macro Routes  (/api/macro/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestMacroRoutes:
@@ -993,8 +1030,9 @@ class TestMacroRoutes:
         assert resp.status_code in _ANY_VALID
 
     def test_confirm_nonexistent(self, full_client):
-        resp = full_client.post("/api/macro/confirm/fake-suggestion-id",
-                                json={"name": "my_macro"})
+        resp = full_client.post(
+            "/api/macro/confirm/fake-suggestion-id", json={"name": "my_macro"}
+        )
         assert resp.status_code in _ANY_VALID
 
     def test_dismiss_nonexistent(self, full_client):
@@ -1005,6 +1043,7 @@ class TestMacroRoutes:
 # ═══════════════════════════════════════════════════════════════════════════
 # 10. Shadow Routes  (/api/shadow/…)
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestShadowRoutes:

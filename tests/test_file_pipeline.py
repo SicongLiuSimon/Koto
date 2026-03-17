@@ -31,15 +31,26 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 # ─────────── 颜色输出 ───────────
-GREEN  = "\033[92m"
-RED    = "\033[91m"
+GREEN = "\033[92m"
+RED = "\033[91m"
 YELLOW = "\033[93m"
-RESET  = "\033[0m"
+RESET = "\033[0m"
 
-def ok(msg):   print(f"{GREEN}  ✅ {msg}{RESET}")
-def fail(msg): print(f"{RED}  ❌ {msg}{RESET}")
-def warn(msg): print(f"{YELLOW}  ⚠️  {msg}{RESET}")
-def section(title): print(f"\n{'─'*55}\n  {title}\n{'─'*55}")
+
+def ok(msg):
+    print(f"{GREEN}  ✅ {msg}{RESET}")
+
+
+def fail(msg):
+    print(f"{RED}  ❌ {msg}{RESET}")
+
+
+def warn(msg):
+    print(f"{YELLOW}  ⚠️  {msg}{RESET}")
+
+
+def section(title):
+    print(f"\n{'─'*55}\n  {title}\n{'─'*55}")
 
 
 # ─────────── 临时目录 ───────────
@@ -51,6 +62,7 @@ def cleanup():
 
 
 # ─────────── 生成各类测试文件 ───────────
+
 
 def make_txt(path: str) -> str:
     p = os.path.join(path, "sample.txt")
@@ -86,6 +98,7 @@ def make_docx(path: str) -> str:
     p = os.path.join(path, "sample.docx")
     try:
         from docx import Document
+
         doc = Document()
         doc.add_heading("测试文档标题", 0)
         doc.add_paragraph("这是第一段正文内容，用于验证 .docx 解析通路。")
@@ -99,9 +112,12 @@ def make_docx(path: str) -> str:
     except ImportError:
         # 创建一个最小 docx 结构（zip包）用于检测库缺失的错误路径
         import zipfile
+
         with zipfile.ZipFile(p, "w") as zf:
-            zf.writestr("[Content_Types].xml",
-                '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>')
+            zf.writestr(
+                "[Content_Types].xml",
+                '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+            )
     return p
 
 
@@ -110,6 +126,7 @@ def make_pptx(path: str) -> str:
     try:
         from pptx import Presentation
         from pptx.util import Inches, Pt
+
         prs = Presentation()
         slide_layout = prs.slide_layouts[1]
         slide = prs.slides.add_slide(slide_layout)
@@ -121,9 +138,12 @@ def make_pptx(path: str) -> str:
         prs.save(p)
     except ImportError:
         import zipfile
+
         with zipfile.ZipFile(p, "w") as zf:
-            zf.writestr("[Content_Types].xml",
-                '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>')
+            zf.writestr(
+                "[Content_Types].xml",
+                '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+            )
     return p
 
 
@@ -131,6 +151,7 @@ def make_xlsx(path: str) -> str:
     p = os.path.join(path, "sample.xlsx")
     try:
         import openpyxl
+
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Sheet1"
@@ -143,9 +164,12 @@ def make_xlsx(path: str) -> str:
         wb.save(p)
     except ImportError:
         import zipfile
+
         with zipfile.ZipFile(p, "w") as zf:
-            zf.writestr("[Content_Types].xml",
-                '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>')
+            zf.writestr(
+                "[Content_Types].xml",
+                '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>',
+            )
     return p
 
 
@@ -176,11 +200,13 @@ def make_image_png(path: str) -> str:
     p = os.path.join(path, "sample.png")
     try:
         from PIL import Image
+
         img = Image.new("RGB", (100, 100), color=(73, 109, 137))
         img.save(p, "PNG")
     except ImportError:
         # 最小合法 1x1 红点 PNG（无需 PIL）
         import base64
+
         tiny_png = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
             "z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
@@ -194,11 +220,13 @@ def make_image_jpg(path: str) -> str:
     p = os.path.join(path, "sample.jpg")
     try:
         from PIL import Image
+
         img = Image.new("RGB", (100, 100), color=(200, 100, 50))
         img.save(p, "JPEG")
     except ImportError:
         # 最小合法 1x1 JPEG（无 PIL）
         import base64
+
         tiny_jpg = base64.b64decode(
             "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBk"
             "SEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBD"
@@ -215,21 +243,22 @@ def make_image_jpg(path: str) -> str:
 
 # ─────────── 测试 FileProcessor ───────────
 
+
 def test_file_processor():
     section("FileProcessor 测试（上传解析通路）")
     from web.file_processor import FileProcessor
 
     test_cases = [
-        ("TXT",       make_txt(TMP_DIR),        "text_content",  10),
-        ("MD",        make_md(TMP_DIR),          "text_content",  10),
-        ("CSV (文本)", make_csv(TMP_DIR),         "text_content",  5),
-        ("JSON(文本)", make_json(TMP_DIR),        "text_content",  5),
-        ("DOCX",      make_docx(TMP_DIR),        "text_content",  5),
-        ("PPTX",      make_pptx(TMP_DIR),        "text_content",  0),   # pptx 可以空文本仍成功
-        ("XLSX",      make_xlsx(TMP_DIR),        "text_content",  5),
-        ("PDF",       make_pdf(TMP_DIR),         None,            0),    # pdf 以二进制传，text_content 可空
-        ("PNG",       make_image_png(TMP_DIR),   None,            0),    # 图片只检查 success
-        ("JPG",       make_image_jpg(TMP_DIR),   None,            0),
+        ("TXT", make_txt(TMP_DIR), "text_content", 10),
+        ("MD", make_md(TMP_DIR), "text_content", 10),
+        ("CSV (文本)", make_csv(TMP_DIR), "text_content", 5),
+        ("JSON(文本)", make_json(TMP_DIR), "text_content", 5),
+        ("DOCX", make_docx(TMP_DIR), "text_content", 5),
+        ("PPTX", make_pptx(TMP_DIR), "text_content", 0),  # pptx 可以空文本仍成功
+        ("XLSX", make_xlsx(TMP_DIR), "text_content", 5),
+        ("PDF", make_pdf(TMP_DIR), None, 0),  # pdf 以二进制传，text_content 可空
+        ("PNG", make_image_png(TMP_DIR), None, 0),  # 图片只检查 success
+        ("JPG", make_image_jpg(TMP_DIR), None, 0),
     ]
 
     passed = 0
@@ -247,7 +276,9 @@ def test_file_processor():
             if content_key:
                 content = result.get(content_key, "")
                 if len(content) < min_chars:
-                    warn(f"{label:<12} WARN — {content_key} 太短 ({len(content)} 字符，期望 ≥{min_chars})")
+                    warn(
+                        f"{label:<12} WARN — {content_key} 太短 ({len(content)} 字符，期望 ≥{min_chars})"
+                    )
                 else:
                     ok(f"{label:<12} OK   — {content_key}: {len(content)} 字符")
             else:
@@ -266,22 +297,25 @@ def test_file_processor():
             fail(f"{label:<12} EXCEPTION — {e}")
             failed_names.append(label)
 
-    print(f"\n  结果: {passed}/{len(test_cases)} 通过" +
-          (f"，失败: {', '.join(failed_names)}" if failed_names else ""))
+    print(
+        f"\n  结果: {passed}/{len(test_cases)} 通过"
+        + (f"，失败: {', '.join(failed_names)}" if failed_names else "")
+    )
     return len(failed_names) == 0
 
 
 # ─────────── 测试 FileParser ───────────
+
 
 def test_file_parser():
     section("FileParser 测试（PPT 素材解析通路）")
     from web.file_parser import FileParser
 
     test_cases = [
-        ("PDF",      make_pdf(TMP_DIR)),
-        ("DOCX",     make_docx(TMP_DIR)),
-        ("TXT",      make_txt(TMP_DIR)),
-        ("MD",       make_md(TMP_DIR)),
+        ("PDF", make_pdf(TMP_DIR)),
+        ("DOCX", make_docx(TMP_DIR)),
+        ("TXT", make_txt(TMP_DIR)),
+        ("MD", make_md(TMP_DIR)),
     ]
 
     passed = 0
@@ -308,12 +342,15 @@ def test_file_parser():
     else:
         warn(f"{'不支持格式':<12} WARN — 预期拒绝 .xyz，实际: {res}")
 
-    print(f"\n  结果: {passed}/{len(test_cases)} 通过" +
-          (f"，失败: {', '.join(failed_names)}" if failed_names else ""))
+    print(
+        f"\n  结果: {passed}/{len(test_cases)} 通过"
+        + (f"，失败: {', '.join(failed_names)}" if failed_names else "")
+    )
     return len(failed_names) == 0
 
 
 # ─────────── 测试 format_result_for_chat ───────────
+
 
 def test_format_result_for_chat():
     section("FileProcessor.format_result_for_chat 格式化通路测试")
@@ -343,6 +380,7 @@ def test_format_result_for_chat():
 
 # ─────────── 测试 FileParser.batch_parse ───────────
 
+
 def test_batch_parse():
     section("FileParser.batch_parse 批量解析通路测试")
     from web.file_parser import FileParser
@@ -362,17 +400,18 @@ def test_batch_parse():
 
 # ─────────── 检查依赖库 ───────────
 
+
 def check_dependencies():
     section("依赖库检查")
     deps = {
-        "python-docx":  ("docx", "Document"),
-        "python-pptx":  ("pptx", "Presentation"),
-        "openpyxl":     ("openpyxl", "Workbook"),
-        "PyPDF2":       ("PyPDF2", "PdfReader"),
-        "pypdf":        ("pypdf", "PdfReader"),
-        "pdfplumber":   ("pdfplumber", "open"),
-        "Pillow":       ("PIL", "Image"),
-        "pandas":       ("pandas", "read_excel"),
+        "python-docx": ("docx", "Document"),
+        "python-pptx": ("pptx", "Presentation"),
+        "openpyxl": ("openpyxl", "Workbook"),
+        "PyPDF2": ("PyPDF2", "PdfReader"),
+        "pypdf": ("pypdf", "PdfReader"),
+        "pdfplumber": ("pdfplumber", "open"),
+        "Pillow": ("PIL", "Image"),
+        "pandas": ("pandas", "read_excel"),
     }
     missing = []
     for pkg, (mod, attr) in deps.items():
@@ -389,6 +428,7 @@ def check_dependencies():
 
 
 # ─────────── 主入口 ───────────
+
 
 def main():
     print("=" * 55)

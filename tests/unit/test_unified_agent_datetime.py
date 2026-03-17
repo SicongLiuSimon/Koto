@@ -113,9 +113,7 @@ class TestDatetimeInjection:
             if isinstance(turn, dict) and turn.get("role") == "user":
                 user_content = turn.get("content", "")
                 break
-        assert (
-            custom_input in user_content
-        ), "Original user input was lost in prompt."
+        assert custom_input in user_content, "Original user input was lost in prompt."
 
     def test_weekday_label_is_correct(self):
         """The injected weekday label must match the frozen datetime's weekday."""

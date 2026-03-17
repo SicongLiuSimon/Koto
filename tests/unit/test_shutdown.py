@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers – import the functions under test without triggering module-level
 # side-effects (signal registration, atexit, Flask app import, etc.)
@@ -170,8 +169,7 @@ class TestSignalHandlersRegistered:
     def test_signal_handlers_registered(self):
         mock_signal = MagicMock()
 
-        with patch("signal.signal", mock_signal), \
-             patch("atexit.register"):
+        with patch("signal.signal", mock_signal), patch("atexit.register"):
             import importlib
             import src.server as server_mod
 
@@ -185,8 +183,7 @@ class TestSignalHandlersRegistered:
     def test_atexit_registered(self):
         mock_atexit = MagicMock()
 
-        with patch("signal.signal"), \
-             patch("atexit.register", mock_atexit):
+        with patch("signal.signal"), patch("atexit.register", mock_atexit):
             import importlib
             import src.server as server_mod
 

@@ -10,6 +10,7 @@ Unit tests for web modules batch 4:
 Covers constructors, public methods, utility functions, and error paths.
 All external dependencies (filesystem, DB, APIs) are mocked.
 """
+
 from __future__ import annotations
 
 import json
@@ -24,17 +25,18 @@ from unittest.mock import MagicMock, Mock, patch, mock_open, PropertyMock
 
 import pytest
 
-
 # ── Pre-import patching ──────────────────────────────────────────────────────
 # PersonalityMatrix is referenced in enhanced_memory_manager but not imported
 # at module level (likely loaded via exec/plugin at runtime). Inject a stub
 # into the module namespace so the class can be instantiated in tests.
+
 
 def _ensure_personality_matrix():
     """Inject a stub PersonalityMatrix into the enhanced_memory_manager module."""
     import web.enhanced_memory_manager as _emm
 
     if not hasattr(_emm, "PersonalityMatrix"):
+
         class _StubPersonalityMatrix:
             def __init__(self, path=None):
                 self.data = {}
@@ -47,6 +49,7 @@ def _ensure_personality_matrix():
                 pass
 
         _emm.PersonalityMatrix = _StubPersonalityMatrix
+
 
 _ensure_personality_matrix()
 
@@ -71,6 +74,7 @@ class TestUserProfile:
     def tmp_profile(self, tmp_path):
         profile_file = tmp_path / "profile.json"
         from web.enhanced_memory_manager import UserProfile
+
         return UserProfile(str(profile_file))
 
     def test_creates_default_profile_when_no_file(self, tmp_profile):
@@ -82,6 +86,7 @@ class TestUserProfile:
     def test_save_and_reload(self, tmp_path):
         profile_file = tmp_path / "profile.json"
         from web.enhanced_memory_manager import UserProfile
+
         up = UserProfile(str(profile_file))
         up.profile["communication_style"]["formality"] = "formal"
         up.save()
@@ -97,8 +102,13 @@ class TestUserProfile:
 
     def test_update_from_extraction_adds_languages(self, tmp_profile):
         tmp_profile.update_from_extraction({"programming_languages": ["Python", "Go"]})
-        assert "Python" in tmp_profile.profile["technical_background"]["programming_languages"]
-        assert "Go" in tmp_profile.profile["technical_background"]["programming_languages"]
+        assert (
+            "Python"
+            in tmp_profile.profile["technical_background"]["programming_languages"]
+        )
+        assert (
+            "Go" in tmp_profile.profile["technical_background"]["programming_languages"]
+        )
 
     def test_update_from_extraction_adds_tools_and_domains(self, tmp_profile):
         tmp_profile.update_from_extraction({"tools": ["VSCode"], "domains": ["AI"]})
@@ -106,7 +116,9 @@ class TestUserProfile:
         assert "AI" in tmp_profile.profile["technical_background"]["domains"]
 
     def test_update_from_extraction_likes_dislikes(self, tmp_profile):
-        tmp_profile.update_from_extraction({"likes": ["dark mode"], "dislikes": ["verbose logs"]})
+        tmp_profile.update_from_extraction(
+            {"likes": ["dark mode"], "dislikes": ["verbose logs"]}
+        )
         assert "dark mode" in tmp_profile.profile["preferences"]["likes"]
         assert "verbose logs" in tmp_profile.profile["preferences"]["dislikes"]
 
@@ -116,13 +128,17 @@ class TestUserProfile:
         assert tmp_profile.profile["work_patterns"]["frequent_topics"]["Python"] == 2
 
     def test_to_context_string_returns_nonempty(self, tmp_profile):
-        tmp_profile.profile["technical_background"]["programming_languages"] = ["Python"]
+        tmp_profile.profile["technical_background"]["programming_languages"] = [
+            "Python"
+        ]
         ctx = tmp_profile.to_context_string()
         assert "Python" in ctx
         assert "[用户画像]" in ctx
 
     def test_get_brief_summary(self, tmp_profile):
-        tmp_profile.profile["technical_background"]["programming_languages"] = ["Python"]
+        tmp_profile.profile["technical_background"]["programming_languages"] = [
+            "Python"
+        ]
         tmp_profile.profile["technical_background"]["experience_level"] = "senior"
         s = tmp_profile.get_brief_summary()
         assert "senior" in s
@@ -132,6 +148,7 @@ class TestUserProfile:
         profile_file = tmp_path / "bad.json"
         profile_file.write_text("NOT JSON", encoding="utf-8")
         from web.enhanced_memory_manager import UserProfile
+
         up = UserProfile(str(profile_file))
         assert "communication_style" in up.profile
 
@@ -147,6 +164,7 @@ class TestEnhancedMemoryManager:
         sum_path = str(tmp_path / "summaries.json")
         vec_path = str(tmp_path / "vectors.json")
         from web.enhanced_memory_manager import EnhancedMemoryManager
+
         m = EnhancedMemoryManager(
             memory_path=mem_path,
             profile_path=prof_path,
@@ -210,10 +228,22 @@ class TestEnhancedMemoryManager:
     def test_gc_stale_removes_old_auto_memories(self, mgr):
         old_date = (datetime.now() - timedelta(days=120)).isoformat()
         mgr.memories = [
-            {"id": 1, "content": "old auto", "source": "extraction",
-             "use_count": 0, "created_at": old_date, "category": "general"},
-            {"id": 2, "content": "user added", "source": "user",
-             "use_count": 0, "created_at": old_date, "category": "general"},
+            {
+                "id": 1,
+                "content": "old auto",
+                "source": "extraction",
+                "use_count": 0,
+                "created_at": old_date,
+                "category": "general",
+            },
+            {
+                "id": 2,
+                "content": "user added",
+                "source": "user",
+                "use_count": 0,
+                "created_at": old_date,
+                "category": "general",
+            },
         ]
         removed = mgr._gc_stale()
         assert removed >= 1
@@ -249,6 +279,7 @@ class TestKnowledgeBase:
         with patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
             with patch("web.knowledge_base.genai", None):
                 from web.knowledge_base import KnowledgeBase
+
                 return KnowledgeBase(workspace_dir=str(tmp_path))
 
     def test_init_creates_kb_dir(self, kb, tmp_path):
@@ -283,7 +314,9 @@ class TestKnowledgeBase:
 
     def test_add_content_success(self, kb):
         text = "Hello world this is a test document with some content."
-        result = kb.add_content(text, {"file_path": "/test.txt", "file_name": "test.txt"})
+        result = kb.add_content(
+            text, {"file_path": "/test.txt", "file_name": "test.txt"}
+        )
         assert result["success"] is True
         assert "doc_id" in result
 
@@ -333,13 +366,17 @@ class TestKnowledgeGraph:
     def kg(self, tmp_path):
         db_file = str(tmp_path / "kg.db")
         from web.knowledge_graph import KnowledgeGraph
+
         return KnowledgeGraph(db_path=db_file)
 
     def test_init_creates_tables(self, kg):
         conn = sqlite3.connect(kg.db_path)
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()}
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
         conn.close()
         assert "nodes" in tables
         assert "edges" in tables
@@ -439,6 +476,7 @@ class TestDocumentEditor:
     @pytest.fixture()
     def editor(self):
         from web.document_editor import DocumentEditor
+
         return DocumentEditor()
 
     def test_constructor(self, editor):
@@ -446,12 +484,14 @@ class TestDocumentEditor:
 
     def test_edit_ppt_import_error(self):
         from web.document_editor import DocumentEditor
+
         with patch.dict("sys.modules", {"pptx": None, "pptx.util": None}):
             result = DocumentEditor.edit_ppt("nonexistent.pptx", [])
             assert result["success"] is False
 
     def test_edit_ppt_file_not_found(self):
         from web.document_editor import DocumentEditor
+
         mock_pptx = MagicMock()
         mock_pptx.Presentation.side_effect = FileNotFoundError("no file")
         with patch.dict("sys.modules", {"pptx": mock_pptx, "pptx.util": MagicMock()}):
@@ -460,12 +500,14 @@ class TestDocumentEditor:
 
     def test_edit_excel_import_error(self):
         from web.document_editor import DocumentEditor
+
         with patch.dict("sys.modules", {"openpyxl": None}):
             result = DocumentEditor.edit_excel("fake.xlsx", [])
             assert result["success"] is False
 
     def test_parse_ai_suggestions_valid_json_block(self):
         from web.document_editor import DocumentEditor
+
         ai_text = '```json\n{"modifications": [{"action": "update_title"}]}\n```'
         mods = DocumentEditor.parse_ai_suggestions(ai_text)
         assert len(mods) == 1
@@ -473,35 +515,43 @@ class TestDocumentEditor:
 
     def test_parse_ai_suggestions_bare_json(self):
         from web.document_editor import DocumentEditor
+
         ai_text = '{"modifications": [{"action": "add_content"}]}'
         mods = DocumentEditor.parse_ai_suggestions(ai_text)
         assert len(mods) == 1
 
     def test_parse_ai_suggestions_list_response(self):
         from web.document_editor import DocumentEditor
+
         ai_text = '[{"action": "delete"}]'
         mods = DocumentEditor.parse_ai_suggestions(ai_text)
         assert len(mods) == 1
 
     def test_parse_ai_suggestions_invalid_input(self):
         from web.document_editor import DocumentEditor
+
         mods = DocumentEditor.parse_ai_suggestions("not json at all")
         assert mods == []
 
     def test_parse_ai_suggestions_empty_modifications(self):
         from web.document_editor import DocumentEditor
+
         ai_text = '{"modifications": []}'
         mods = DocumentEditor.parse_ai_suggestions(ai_text)
         assert mods == []
 
     def test_edit_word_import_error(self):
         from web.document_editor import DocumentEditor
-        with patch.dict("sys.modules", {"docx": None, "docx.oxml": None, "docx.oxml.ns": None}):
+
+        with patch.dict(
+            "sys.modules", {"docx": None, "docx.oxml": None, "docx.oxml.ns": None}
+        ):
             result = DocumentEditor.edit_word("fake.docx", [])
             assert result["success"] is False
 
     def test_edit_ppt_with_mock_presentation(self):
         from web.document_editor import DocumentEditor
+
         mock_prs = MagicMock()
         mock_slide = MagicMock()
         mock_slide.shapes.title.text = "Old Title"
@@ -511,7 +561,14 @@ class TestDocumentEditor:
         mock_pptx = MagicMock()
         mock_pptx.Presentation.return_value = mock_prs
 
-        mods = [{"slide_index": 0, "action": "update_title", "target": "title", "content": "New Title"}]
+        mods = [
+            {
+                "slide_index": 0,
+                "action": "update_title",
+                "target": "title",
+                "content": "New Title",
+            }
+        ]
         with patch.dict("sys.modules", {"pptx": mock_pptx, "pptx.util": MagicMock()}):
             result = DocumentEditor.edit_ppt("test.pptx", mods)
         assert result["success"] is True
@@ -529,12 +586,14 @@ class TestQualityEvaluator:
 
     def test_ppt_evaluator_init(self):
         from web.quality_evaluator import PPTEvaluator
+
         ev = PPTEvaluator()
         assert ev.issues == []
         assert ev.suggestions == []
 
     def test_ppt_evaluator_missing_pptx_module(self):
         from web.quality_evaluator import PPTEvaluator
+
         ev = PPTEvaluator()
         with patch.dict("sys.modules", {"pptx": None}):
             result = ev.evaluate_pptx_file("fake.pptx")
@@ -543,35 +602,45 @@ class TestQualityEvaluator:
 
     def test_score_slide_count_optimal(self):
         from web.quality_evaluator import PPTEvaluator
+
         ev = PPTEvaluator()
         assert ev._score_slide_count(10) == 100.0
 
     def test_score_slide_count_too_few(self):
         from web.quality_evaluator import PPTEvaluator
+
         ev = PPTEvaluator()
         assert ev._score_slide_count(2) == 20.0
 
     def test_score_slide_count_too_many(self):
         from web.quality_evaluator import PPTEvaluator
+
         ev = PPTEvaluator()
         score = ev._score_slide_count(35)
         assert score == 60.0
 
     def test_prioritize_improvements(self):
         from web.quality_evaluator import PPTEvaluator
+
         ev = PPTEvaluator()
-        scores = {"content_distribution": 50, "image_distribution": 60, "layout_consistency": 90}
+        scores = {
+            "content_distribution": 50,
+            "image_distribution": 60,
+            "layout_consistency": 90,
+        }
         priorities = ev._prioritize_improvements(scores)
         assert len(priorities) <= 3
         assert any("内容" in p for p in priorities)
 
     def test_document_evaluator_init(self):
         from web.quality_evaluator import DocumentEvaluator
+
         ev = DocumentEvaluator()
         assert ev.issues == []
 
     def test_document_evaluator_good_document(self):
         from web.quality_evaluator import DocumentEvaluator
+
         ev = DocumentEvaluator()
         doc = (
             "# 标题\n\n"
@@ -585,6 +654,7 @@ class TestQualityEvaluator:
 
     def test_document_evaluator_short_document(self):
         from web.quality_evaluator import DocumentEvaluator
+
         ev = DocumentEvaluator()
         result = ev.evaluate_document("short")
         assert result.needs_improvement is True
@@ -592,12 +662,14 @@ class TestQualityEvaluator:
 
     def test_evaluate_structure_no_headings(self):
         from web.quality_evaluator import DocumentEvaluator
+
         ev = DocumentEvaluator()
         score = ev._evaluate_structure("no headings here at all")
         assert score == 40.0
 
     def test_evaluate_length_ranges(self):
         from web.quality_evaluator import DocumentEvaluator
+
         ev = DocumentEvaluator()
         assert ev._evaluate_length("A" * 2000) == 100.0
         assert ev._evaluate_length("A" * 800) == 75.0
@@ -605,18 +677,23 @@ class TestQualityEvaluator:
 
     def test_evaluate_quality_function_docx(self):
         from web.quality_evaluator import evaluate_quality
-        result = evaluate_quality("docx", "# Title\n\n## Section\n\n" + "Content " * 200)
+
+        result = evaluate_quality(
+            "docx", "# Title\n\n## Section\n\n" + "Content " * 200
+        )
         assert "overall_score" in result
         assert isinstance(result["overall_score"], float)
 
     def test_evaluate_quality_function_ppt(self):
         from web.quality_evaluator import evaluate_quality
+
         with patch.dict("sys.modules", {"pptx": None}):
             result = evaluate_quality("pptx", "fake_path.pptx")
         assert result["overall_score"] == 0
 
     def test_evaluate_format_consistent(self):
         from web.quality_evaluator import DocumentEvaluator
+
         ev = DocumentEvaluator()
         content = "# Title\n\n- item1\n- item2\n\n```python\nprint('hi')\n```"
         score = ev._evaluate_format(content)
@@ -624,6 +701,7 @@ class TestQualityEvaluator:
 
     def test_evaluate_completeness(self):
         from web.quality_evaluator import DocumentEvaluator
+
         ev = DocumentEvaluator()
         content = "# Intro\n\n## Section\n\n详细内容\n\n## 结论\n\n总结"
         score = ev._evaluate_completeness(content)
@@ -643,6 +721,7 @@ class TestFileIndexer:
     def indexer(self, tmp_path):
         db_path = tmp_path / "_index" / "file_index.db"
         from web.file_indexer import FileIndexer
+
         return FileIndexer(workspace_dir=str(tmp_path), db_path=str(db_path))
 
     def test_init_creates_db(self, indexer):
@@ -650,9 +729,12 @@ class TestFileIndexer:
 
     def test_init_creates_tables(self, indexer):
         conn = sqlite3.connect(indexer.db_path)
-        tables = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()}
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
         conn.close()
         assert "file_index" in tables
 

@@ -111,17 +111,13 @@ class TestOpenFile:
         assert resp.status_code == 400
 
     def test_nonexistent_file_returns_404(self, client):
-        resp = client.post(
-            "/api/open-file", json={"filepath": "nonexistent_xyz.txt"}
-        )
+        resp = client.post("/api/open-file", json={"filepath": "nonexistent_xyz.txt"})
         assert resp.status_code == 404
         data = resp.get_json()
         assert data["success"] is False
 
     def test_path_traversal_returns_403(self, client):
-        resp = client.post(
-            "/api/open-file", json={"filepath": "../../etc/passwd"}
-        )
+        resp = client.post("/api/open-file", json={"filepath": "../../etc/passwd"})
         assert resp.status_code in (403, 404)
 
     def test_method_not_allowed_get(self, client):

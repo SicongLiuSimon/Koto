@@ -1,4 +1,5 @@
 """Test that Swagger docs are accessible."""
+
 import pytest
 import sys
 import os

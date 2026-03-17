@@ -17,10 +17,10 @@ from unittest.mock import MagicMock, Mock, patch, PropertyMock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _run_async(coro):
     """Run an async coroutine synchronously."""
@@ -42,14 +42,17 @@ def tmp_dir():
 # 1. PPTGenerator
 # ===========================================================================
 
+
 @pytest.mark.unit
 class TestPptGenerator:
     """Tests for web.ppt_generator.PPTGenerator"""
 
     def _make_gen(self, theme="business"):
-        with patch("web.ppt_generator.get_theme", return_value=None), \
-             patch("web.ppt_generator.ImageGenerator", create=True):
+        with patch("web.ppt_generator.get_theme", return_value=None), patch(
+            "web.ppt_generator.ImageGenerator", create=True
+        ):
             from web.ppt_generator import PPTGenerator
+
             return PPTGenerator(theme=theme)
 
     # -- init / theme -------------------------------------------------
@@ -72,47 +75,57 @@ class TestPptGenerator:
 
     def test_clean_markdown_removes_heading_marks(self):
         from web.ppt_generator import PPTGenerator
+
         assert PPTGenerator._clean_markdown("### Title text") == "Title text"
 
     def test_clean_markdown_strips_bold_when_requested(self):
         from web.ppt_generator import PPTGenerator
+
         result = PPTGenerator._clean_markdown("**bold text**", strip_bold=True)
         assert "**" not in result
         assert "bold text" in result
 
     def test_clean_markdown_preserves_bold_when_not_requested(self):
         from web.ppt_generator import PPTGenerator
+
         result = PPTGenerator._clean_markdown("**bold text**", strip_bold=False)
         assert "**bold text**" in result
 
     def test_clean_markdown_removes_bullet_markers(self):
         from web.ppt_generator import PPTGenerator
+
         assert PPTGenerator._clean_markdown("- list item").strip() == "list item"
 
     def test_clean_markdown_removes_inline_code(self):
         from web.ppt_generator import PPTGenerator
+
         assert PPTGenerator._clean_markdown("`code`") == "code"
 
     def test_clean_markdown_strips_links(self):
         from web.ppt_generator import PPTGenerator
+
         result = PPTGenerator._clean_markdown("[click](http://example.com)")
         assert "click" in result
         assert "http" not in result
 
     def test_clean_markdown_removes_strikethrough(self):
         from web.ppt_generator import PPTGenerator
+
         assert PPTGenerator._clean_markdown("~~old~~") == "old"
 
     def test_clean_markdown_handles_empty_string(self):
         from web.ppt_generator import PPTGenerator
+
         assert PPTGenerator._clean_markdown("") == ""
 
     def test_clean_markdown_handles_none(self):
         from web.ppt_generator import PPTGenerator
+
         assert PPTGenerator._clean_markdown(None) is None
 
     def test_clean_markdown_removes_ai_patterns(self):
         from web.ppt_generator import PPTGenerator
+
         result = PPTGenerator._clean_markdown("Sure! Here is something: real content")
         assert "real content" in result
 
@@ -140,7 +153,9 @@ class TestPptGenerator:
             {"title": "Section 1", "type": "divider", "description": "Intro"},
             {"title": "Content", "type": "detail", "points": ["A"]},
         ]
-        result = gen.generate_from_outline("Deck", outline, output, enable_ai_images=False)
+        result = gen.generate_from_outline(
+            "Deck", outline, output, enable_ai_images=False
+        )
         assert result["slide_count"] >= 3
 
     def test_generate_from_outline_comparison(self, tmp_dir):
@@ -154,7 +169,9 @@ class TestPptGenerator:
                 "right": {"title": "B", "points": ["b1"]},
             },
         ]
-        result = gen.generate_from_outline("Deck", outline, output, enable_ai_images=False)
+        result = gen.generate_from_outline(
+            "Deck", outline, output, enable_ai_images=False
+        )
         assert result["slide_count"] >= 2
 
     def test_generate_from_outline_overview(self, tmp_dir):
@@ -170,7 +187,9 @@ class TestPptGenerator:
                 ],
             },
         ]
-        result = gen.generate_from_outline("Deck", outline, output, enable_ai_images=False)
+        result = gen.generate_from_outline(
+            "Deck", outline, output, enable_ai_images=False
+        )
         assert result["slide_count"] >= 2
 
     def test_generate_from_outline_highlight(self, tmp_dir):
@@ -179,13 +198,16 @@ class TestPptGenerator:
         outline = [
             {"title": "Key Fact", "type": "highlight", "points": ["Fact 1"]},
         ]
-        result = gen.generate_from_outline("Deck", outline, output, enable_ai_images=False)
+        result = gen.generate_from_outline(
+            "Deck", outline, output, enable_ai_images=False
+        )
         assert result["slide_count"] >= 2
 
 
 # ===========================================================================
 # 2. DocumentGenerator (save_docx, helper functions)
 # ===========================================================================
+
 
 @pytest.mark.unit
 class TestDocumentGenerator:
@@ -195,37 +217,45 @@ class TestDocumentGenerator:
 
     def test_split_lines(self):
         from web.document_generator import _split_lines
+
         lines = _split_lines("line1\nline2  \nline3")
         assert lines == ["line1", "line2", "line3"]
 
     def test_is_cjk_char_true(self):
         from web.document_generator import _is_cjk_char
+
         assert _is_cjk_char("中") is True
 
     def test_is_cjk_char_false(self):
         from web.document_generator import _is_cjk_char
+
         assert _is_cjk_char("A") is False
 
     def test_join_text_lines_cjk_no_space(self):
         from web.document_generator import _join_text_lines
+
         result = _join_text_lines("中文", "内容")
         assert result == "中文内容"
 
     def test_join_text_lines_latin_has_space(self):
         from web.document_generator import _join_text_lines
+
         result = _join_text_lines("hello", "world")
         assert result == "hello world"
 
     def test_join_text_lines_empty_prev(self):
         from web.document_generator import _join_text_lines
+
         assert _join_text_lines("", "text") == "text"
 
     def test_join_text_lines_empty_curr(self):
         from web.document_generator import _join_text_lines
+
         assert _join_text_lines("text", "") == "text"
 
     def test_normalize_markdown_lines_code_block(self):
         from web.document_generator import _normalize_markdown_lines
+
         text = "before\n```\ncode here\n```\nafter"
         lines = _normalize_markdown_lines(text)
         assert "```" in lines
@@ -233,12 +263,14 @@ class TestDocumentGenerator:
 
     def test_normalize_markdown_lines_heading(self):
         from web.document_generator import _normalize_markdown_lines
+
         text = "# Heading\nparagraph text"
         lines = _normalize_markdown_lines(text)
         assert any("# Heading" in l for l in lines)
 
     def test_normalize_markdown_collapses_blank_lines(self):
         from web.document_generator import _normalize_markdown_lines
+
         text = "line1\n\n\n\nline2"
         lines = _normalize_markdown_lines(text)
         # Should have at most one consecutive blank between content
@@ -254,18 +286,22 @@ class TestDocumentGenerator:
 
     def test_extract_title_from_content_h1(self):
         from web.document_generator import _extract_title_from_content
+
         assert _extract_title_from_content("# My Title\ncontent") == "My Title"
 
     def test_extract_title_from_content_h2(self):
         from web.document_generator import _extract_title_from_content
+
         assert _extract_title_from_content("## Sub Title\ncontent") == "Sub Title"
 
     def test_extract_title_returns_none_for_plain(self):
         from web.document_generator import _extract_title_from_content
+
         assert _extract_title_from_content("just plain text") is None
 
     def test_sanitize_filename(self):
         from web.document_generator import _sanitize_filename
+
         result = _sanitize_filename('My Doc: "Test" / Report')
         assert ":" not in result
         assert '"' not in result
@@ -273,6 +309,7 @@ class TestDocumentGenerator:
 
     def test_sanitize_filename_length_limit(self):
         from web.document_generator import _sanitize_filename
+
         long_name = "a" * 100
         assert len(_sanitize_filename(long_name)) <= 50
 
@@ -280,49 +317,61 @@ class TestDocumentGenerator:
 
     def test_save_docx_creates_file(self, tmp_dir):
         from web.document_generator import save_docx
-        path = save_docx("# Test\nHello world", title="TestDoc",
-                         output_dir=tmp_dir, filename="test_output")
+
+        path = save_docx(
+            "# Test\nHello world",
+            title="TestDoc",
+            output_dir=tmp_dir,
+            filename="test_output",
+        )
         assert os.path.exists(path)
         assert path.endswith(".docx")
 
     def test_save_docx_with_bullet_list(self, tmp_dir):
         from web.document_generator import save_docx
+
         md = "# Title\n- Item 1\n- Item 2\n- Item 3"
         path = save_docx(md, title="Bullets", output_dir=tmp_dir, filename="bullets")
         assert os.path.exists(path)
 
     def test_save_docx_with_code_block(self, tmp_dir):
         from web.document_generator import save_docx
+
         md = "# Code\n```python\nprint('hi')\n```\nEnd."
         path = save_docx(md, title="Code", output_dir=tmp_dir, filename="code")
         assert os.path.exists(path)
 
     def test_save_docx_auto_title_extraction(self, tmp_dir):
         from web.document_generator import save_docx
+
         md = "# Auto Title\nSome body"
         path = save_docx(md, title=None, output_dir=tmp_dir, filename="auto_title")
         assert os.path.exists(path)
 
     def test_save_docx_with_bold_italic(self, tmp_dir):
         from web.document_generator import save_docx
+
         md = "Normal **bold** and *italic* text"
         path = save_docx(md, title="Fmt", output_dir=tmp_dir, filename="fmt")
         assert os.path.exists(path)
 
     def test_save_docx_with_numbered_list(self, tmp_dir):
         from web.document_generator import save_docx
+
         md = "# Lists\n1. First\n2. Second"
         path = save_docx(md, title="Nums", output_dir=tmp_dir, filename="nums")
         assert os.path.exists(path)
 
     def test_save_docx_with_blockquote(self, tmp_dir):
         from web.document_generator import save_docx
+
         md = "> This is a quote\nNormal text"
         path = save_docx(md, title="Quote", output_dir=tmp_dir, filename="quote")
         assert os.path.exists(path)
 
     def test_save_docx_with_separator(self, tmp_dir):
         from web.document_generator import save_docx
+
         md = "Before\n---\nAfter"
         path = save_docx(md, title="Sep", output_dir=tmp_dir, filename="sep")
         assert os.path.exists(path)
@@ -332,18 +381,23 @@ class TestDocumentGenerator:
 # 3. DocumentWorkflowExecutor
 # ===========================================================================
 
+
 @pytest.mark.unit
 class TestDocumentWorkflowExecutor:
     """Tests for web.document_workflow_executor module."""
 
     def _make_executor(self, client=None):
         from web.document_workflow_executor import DocumentWorkflowExecutor
-        return DocumentWorkflowExecutor(client=client or MagicMock(), workspace_dir="workspace")
+
+        return DocumentWorkflowExecutor(
+            client=client or MagicMock(), workspace_dir="workspace"
+        )
 
     # -- WorkflowStep --------------------------------------------------
 
     def test_workflow_step_defaults(self):
         from web.document_workflow_executor import WorkflowStep
+
         step = WorkflowStep(step_id=1, description="Do thing", step_type="CODE")
         assert step.status == "pending"
         assert step.result is None
@@ -351,6 +405,7 @@ class TestDocumentWorkflowExecutor:
 
     def test_workflow_step_to_dict(self):
         from web.document_workflow_executor import WorkflowStep
+
         step = WorkflowStep(step_id=2, description="Search", step_type="WEB_SEARCH")
         d = step.to_dict()
         assert d["step_id"] == 2
@@ -360,6 +415,7 @@ class TestDocumentWorkflowExecutor:
 
     def test_workflow_step_duration(self):
         from web.document_workflow_executor import WorkflowStep
+
         step = WorkflowStep(step_id=1, description="t", step_type="CODE")
         step.start_time = datetime(2025, 1, 1, 0, 0, 0)
         step.end_time = datetime(2025, 1, 1, 0, 0, 10)
@@ -367,6 +423,7 @@ class TestDocumentWorkflowExecutor:
 
     def test_workflow_step_duration_none_when_no_times(self):
         from web.document_workflow_executor import WorkflowStep
+
         step = WorkflowStep(step_id=1, description="t", step_type="CODE")
         assert step._duration() is None
 
@@ -379,6 +436,7 @@ class TestDocumentWorkflowExecutor:
 
     def test_keyword_to_task_mapping(self):
         from web.document_workflow_executor import DocumentWorkflowExecutor
+
         assert "识别" in DocumentWorkflowExecutor.KEYWORD_TO_TASK
         assert DocumentWorkflowExecutor.KEYWORD_TO_TASK["搜索"] == "WEB_SEARCH"
         assert DocumentWorkflowExecutor.KEYWORD_TO_TASK["python"] == "CODE"
@@ -391,9 +449,14 @@ class TestDocumentWorkflowExecutor:
             "name": "Test Workflow",
             "context": "Testing",
             "steps": [
-                {"description": "Step 1", "type": "CODE", "input": "x", "expected_output": "y"},
+                {
+                    "description": "Step 1",
+                    "type": "CODE",
+                    "input": "x",
+                    "expected_output": "y",
+                },
                 {"description": "Step 2", "type": "WEB_SEARCH"},
-            ]
+            ],
         }
         json_path = os.path.join(tmp_dir, "workflow.json")
         with open(json_path, "w", encoding="utf-8") as f:
@@ -423,6 +486,7 @@ class TestDocumentWorkflowExecutor:
     def test_execute_step_standalone_vlm(self):
         exe = self._make_executor()
         from web.document_workflow_executor import WorkflowStep
+
         step = WorkflowStep(1, "Analyze image", "VLM")
         result = _run_async(exe._execute_step_standalone(step))
         assert "VLM" in result["output"]
@@ -430,6 +494,7 @@ class TestDocumentWorkflowExecutor:
     def test_execute_step_standalone_search(self):
         exe = self._make_executor()
         from web.document_workflow_executor import WorkflowStep
+
         step = WorkflowStep(1, "Find info", "WEB_SEARCH")
         result = _run_async(exe._execute_step_standalone(step))
         assert "搜索" in result["output"]
@@ -437,6 +502,7 @@ class TestDocumentWorkflowExecutor:
     def test_execute_step_standalone_general(self):
         exe = self._make_executor()
         from web.document_workflow_executor import WorkflowStep
+
         step = WorkflowStep(1, "Generic", "OTHER")
         result = _run_async(exe._execute_step_standalone(step))
         assert "OTHER" in result["output"]
@@ -455,9 +521,19 @@ class TestDocumentWorkflowExecutor:
             "workflow_name": "Test",
             "overall_status": "completed",
             "steps": [
-                {"step_id": 1, "description": "Step 1", "status": "completed", "error": None},
-                {"step_id": 2, "description": "Step 2", "status": "failed", "error": "boom"},
-            ]
+                {
+                    "step_id": 1,
+                    "description": "Step 1",
+                    "status": "completed",
+                    "error": None,
+                },
+                {
+                    "step_id": 2,
+                    "description": "Step 2",
+                    "status": "failed",
+                    "error": "boom",
+                },
+            ],
         }
         summary = exe._generate_summary(results)
         assert "50.0%" in summary
@@ -468,6 +544,7 @@ class TestDocumentWorkflowExecutor:
     def test_execute_workflow_standalone(self):
         exe = self._make_executor()
         from web.document_workflow_executor import WorkflowStep
+
         exe.workflow_name = "Quick test"
         exe.workflow_context = "ctx"
         exe.steps = [
@@ -500,21 +577,30 @@ class TestDocumentWorkflowExecutor:
 # 4. SpeechTranscriber
 # ===========================================================================
 
+
 @pytest.mark.unit
 class TestSpeechTranscriber:
     """Tests for web.speech_transcriber.SpeechTranscriber"""
 
     def _make_transcriber(self, tmp_dir):
-        with patch("web.speech_transcriber.SpeechTranscriber._init_recognizer", return_value=None):
+        with patch(
+            "web.speech_transcriber.SpeechTranscriber._init_recognizer",
+            return_value=None,
+        ):
             from web.speech_transcriber import SpeechTranscriber
+
             return SpeechTranscriber(output_dir=tmp_dir)
 
     # -- init ----------------------------------------------------------
 
     def test_init_creates_output_dir(self, tmp_dir):
         out = os.path.join(tmp_dir, "transcripts")
-        with patch("web.speech_transcriber.SpeechTranscriber._init_recognizer", return_value=None):
+        with patch(
+            "web.speech_transcriber.SpeechTranscriber._init_recognizer",
+            return_value=None,
+        ):
             from web.speech_transcriber import SpeechTranscriber
+
             t = SpeechTranscriber(output_dir=out)
         assert os.path.isdir(out)
 
@@ -549,7 +635,9 @@ class TestSpeechTranscriber:
 
     def test_extract_keywords_simple_returns_keywords(self, tmp_dir):
         t = self._make_transcriber(tmp_dir)
-        result = t._extract_keywords_simple("Python编程语言是非常流行的编程语言", max_keywords=5)
+        result = t._extract_keywords_simple(
+            "Python编程语言是非常流行的编程语言", max_keywords=5
+        )
         assert result["success"] is True
         assert isinstance(result["keywords"], list)
         assert result["method"] == "simple"
@@ -565,7 +653,9 @@ class TestSpeechTranscriber:
 
     def test_extract_keywords_simple_summary(self, tmp_dir):
         t = self._make_transcriber(tmp_dir)
-        result = t._extract_keywords_simple("第一句话。第二句话。第三句话。", max_summary_lines=2)
+        result = t._extract_keywords_simple(
+            "第一句话。第二句话。第三句话。", max_summary_lines=2
+        )
         assert len(result["summary"]) <= 2
 
     # -- _extract_action_items_simple ---------------------------------
@@ -652,12 +742,14 @@ class TestSpeechTranscriber:
 # 5. FileService
 # ===========================================================================
 
+
 @pytest.mark.unit
 class TestFileService:
     """Tests for app.core.services.file_service.FileService"""
 
     def _make_svc(self, tmp_dir):
         from app.core.services.file_service import FileService
+
         return FileService(workspace_dir=tmp_dir, backup_enabled=True)
 
     # -- is_safe_path --------------------------------------------------
@@ -863,14 +955,17 @@ class TestFileService:
 
     def test_human_size_bytes(self, tmp_dir):
         from app.core.services.file_service import FileService
+
         assert "B" in FileService._human_size(500)
 
     def test_human_size_kb(self, tmp_dir):
         from app.core.services.file_service import FileService
+
         assert "KB" in FileService._human_size(2048)
 
     def test_human_size_mb(self, tmp_dir):
         from app.core.services.file_service import FileService
+
         assert "MB" in FileService._human_size(2 * 1024 * 1024)
 
     # -- patch_file ----------------------------------------------------
@@ -879,10 +974,13 @@ class TestFileService:
         svc = self._make_svc(tmp_dir)
         fp = os.path.join(tmp_dir, "patch.txt")
         Path(fp).write_text("alpha beta gamma", encoding="utf-8")
-        result = svc.patch_file(fp, [
-            {"old": "alpha", "new": "ALPHA"},
-            {"old": "gamma", "new": "GAMMA"},
-        ])
+        result = svc.patch_file(
+            fp,
+            [
+                {"old": "alpha", "new": "ALPHA"},
+                {"old": "gamma", "new": "GAMMA"},
+            ],
+        )
         assert result["success"] is True
         assert result["total_replacements"] == 2
         content = Path(fp).read_text(encoding="utf-8")

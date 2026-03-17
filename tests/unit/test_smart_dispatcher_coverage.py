@@ -222,19 +222,31 @@ class TestShouldUseAnnotationSystem:
         self.SD = _fresh_dispatcher()
 
     def test_with_annotation_keyword_and_file(self):
-        assert self.SD._should_use_annotation_system("帮我润色这篇文章", has_file=True) is True
+        assert (
+            self.SD._should_use_annotation_system("帮我润色这篇文章", has_file=True)
+            is True
+        )
 
     def test_with_quality_and_target_words(self):
-        assert self.SD._should_use_annotation_system("这段翻译用词生硬", has_file=True) is True
+        assert (
+            self.SD._should_use_annotation_system("这段翻译用词生硬", has_file=True)
+            is True
+        )
 
     def test_without_file_returns_false(self):
-        assert self.SD._should_use_annotation_system("帮我标注", has_file=False) is False
+        assert (
+            self.SD._should_use_annotation_system("帮我标注", has_file=False) is False
+        )
 
     def test_no_keywords_returns_false(self):
-        assert self.SD._should_use_annotation_system("今天吃什么", has_file=True) is False
+        assert (
+            self.SD._should_use_annotation_system("今天吃什么", has_file=True) is False
+        )
 
     def test_annotation_keyword_modify(self):
-        assert self.SD._should_use_annotation_system("修改这份文档", has_file=True) is True
+        assert (
+            self.SD._should_use_annotation_system("修改这份文档", has_file=True) is True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +476,9 @@ class TestAnalyze:
         for p in patches:
             p.start()
         try:
-            task, confidence, ctx = self.SD.analyze("用matplotlib画一个折线图展示销售数据")
+            task, confidence, ctx = self.SD.analyze(
+                "用matplotlib画一个折线图展示销售数据"
+            )
             assert task == "CODER"
         finally:
             for p in patches:
@@ -477,7 +491,9 @@ class TestAnalyze:
             p.start()
         try:
             file_ctx = {"has_file": True, "file_type": ".docx"}
-            task, confidence, ctx = self.SD.analyze("帮我润色一下", file_context=file_ctx)
+            task, confidence, ctx = self.SD.analyze(
+                "帮我润色一下", file_context=file_ctx
+            )
             assert task == "DOC_ANNOTATE"
         finally:
             for p in patches:
@@ -490,7 +506,9 @@ class TestAnalyze:
             p.start()
         try:
             file_ctx = {"has_file": True, "file_type": ".md"}
-            task, confidence, ctx = self.SD.analyze("修改这个文件", file_context=file_ctx)
+            task, confidence, ctx = self.SD.analyze(
+                "修改这个文件", file_context=file_ctx
+            )
             assert task == "MULTI_STEP"
         finally:
             for p in patches:

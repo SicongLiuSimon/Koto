@@ -38,12 +38,14 @@ def _make_entry(**overrides):
 @pytest.fixture()
 def plugin():
     from app.core.file.file_tools import FileToolsPlugin
+
     return FileToolsPlugin()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1–2  Properties & get_tools
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestPluginMeta:
@@ -68,13 +70,28 @@ class TestPluginMeta:
     def test_get_tools_names(self, plugin):
         names = [t["name"] for t in plugin.get_tools()]
         expected = [
-            "find_file", "read_file_snippet", "list_recent_files",
-            "organize_file", "rename_file", "move_file", "copy_file",
-            "delete_file", "list_directory", "directory_tree",
-            "get_disk_usage", "find_large_files", "find_old_files",
-            "batch_rename", "batch_move", "cleanup_duplicates",
-            "compress_files", "extract_archive", "manage_tag",
-            "manage_favorite", "summarize_file", "undo_last_op",
+            "find_file",
+            "read_file_snippet",
+            "list_recent_files",
+            "organize_file",
+            "rename_file",
+            "move_file",
+            "copy_file",
+            "delete_file",
+            "list_directory",
+            "directory_tree",
+            "get_disk_usage",
+            "find_large_files",
+            "find_old_files",
+            "batch_rename",
+            "batch_move",
+            "cleanup_duplicates",
+            "compress_files",
+            "extract_archive",
+            "manage_tag",
+            "manage_favorite",
+            "summarize_file",
+            "undo_last_op",
         ]
         for name in expected:
             assert name in names, f"Missing tool: {name}"
@@ -84,13 +101,19 @@ class TestPluginMeta:
 # 3–4  find_file
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestFindFile:
-    @patch("app.core.file.file_tools.FileToolsPlugin._scanner_fallback", return_value=[])
+    @patch(
+        "app.core.file.file_tools.FileToolsPlugin._scanner_fallback", return_value=[]
+    )
     @patch("app.core.file.file_registry.get_file_registry")
     def test_find_file_with_results(self, mock_get_reg, mock_scanner, plugin):
         mock_reg = MagicMock()
-        mock_reg.search.return_value = [_make_entry(), _make_entry(name="notes.txt", path="/fake/notes.txt")]
+        mock_reg.search.return_value = [
+            _make_entry(),
+            _make_entry(name="notes.txt", path="/fake/notes.txt"),
+        ]
         mock_get_reg.return_value = mock_reg
 
         result = plugin.find_file("report")
@@ -98,7 +121,9 @@ class TestFindFile:
         assert "report.pdf" in result
         mock_reg.search.assert_called_once_with("report", category=None, limit=10)
 
-    @patch("app.core.file.file_tools.FileToolsPlugin._scanner_fallback", return_value=[])
+    @patch(
+        "app.core.file.file_tools.FileToolsPlugin._scanner_fallback", return_value=[]
+    )
     @patch("app.core.file.file_registry.get_file_registry")
     def test_find_file_no_results(self, mock_get_reg, mock_scanner, plugin):
         mock_reg = MagicMock()
@@ -115,7 +140,13 @@ class TestFindFile:
         mock_get_reg.return_value = mock_reg
 
         fallback_items = [
-            {"path": "/scan/file.txt", "name": "file.txt", "category": "文档", "size_kb": 5, "snippet": ""},
+            {
+                "path": "/scan/file.txt",
+                "name": "file.txt",
+                "category": "文档",
+                "size_kb": 5,
+                "snippet": "",
+            },
         ]
         with patch.object(plugin, "_scanner_fallback", return_value=fallback_items):
             result = plugin.find_file("file", limit=5)
@@ -127,11 +158,15 @@ class TestFindFile:
         mock_reg.search.return_value = []
         mock_get_reg.return_value = mock_reg
 
-        with patch.object(plugin, "_scanner_fallback", side_effect=RuntimeError("boom")):
+        with patch.object(
+            plugin, "_scanner_fallback", side_effect=RuntimeError("boom")
+        ):
             result = plugin.find_file("x")
         assert "未找到" in result
 
-    @patch("app.core.file.file_tools.FileToolsPlugin._scanner_fallback", return_value=[])
+    @patch(
+        "app.core.file.file_tools.FileToolsPlugin._scanner_fallback", return_value=[]
+    )
     @patch("app.core.file.file_registry.get_file_registry")
     def test_find_file_with_category(self, mock_get_reg, mock_scanner, plugin):
         mock_reg = MagicMock()
@@ -142,7 +177,9 @@ class TestFindFile:
         assert "图片" in result
         mock_reg.search.assert_called_once_with("photo", category="图片", limit=5)
 
-    @patch("app.core.file.file_tools.FileToolsPlugin._scanner_fallback", return_value=[])
+    @patch(
+        "app.core.file.file_tools.FileToolsPlugin._scanner_fallback", return_value=[]
+    )
     @patch("app.core.file.file_registry.get_file_registry")
     def test_find_file_limit_clamping(self, mock_get_reg, mock_scanner, plugin):
         mock_reg = MagicMock()
@@ -157,6 +194,7 @@ class TestFindFile:
 # 5–7  read_file_snippet
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestReadFileSnippet:
     def test_read_real_file(self, plugin, tmp_path):
@@ -167,7 +205,10 @@ class TestReadFileSnippet:
             mock_reg = MagicMock()
             mock_reg.get_by_path.return_value = None
             mock_get_reg.return_value = mock_reg
-            with patch("app.core.file.file_registry._extract_text_preview", return_value="Hello World!"):
+            with patch(
+                "app.core.file.file_registry._extract_text_preview",
+                return_value="Hello World!",
+            ):
                 result = plugin.read_file_snippet(str(f))
         assert "Hello World!" in result
 
@@ -197,18 +238,20 @@ class TestReadFileSnippet:
         f.write_bytes(b"\x00")
         real_stat = f.stat()
 
-        fake_stat = os.stat_result((
-            real_stat.st_mode,
-            real_stat.st_ino,
-            real_stat.st_dev,
-            real_stat.st_nlink,
-            real_stat.st_uid,
-            real_stat.st_gid,
-            60 * 1024 * 1024,  # st_size = 60 MB
-            real_stat.st_atime,
-            real_stat.st_mtime,
-            real_stat.st_ctime,
-        ))
+        fake_stat = os.stat_result(
+            (
+                real_stat.st_mode,
+                real_stat.st_ino,
+                real_stat.st_dev,
+                real_stat.st_nlink,
+                real_stat.st_uid,
+                real_stat.st_gid,
+                60 * 1024 * 1024,  # st_size = 60 MB
+                real_stat.st_atime,
+                real_stat.st_mtime,
+                real_stat.st_ctime,
+            )
+        )
         with patch("pathlib.Path.stat", return_value=fake_stat):
             result = plugin.read_file_snippet(str(f))
         assert "过大" in result
@@ -221,7 +264,10 @@ class TestReadFileSnippet:
             mock_reg = MagicMock()
             mock_reg.get_by_path.return_value = None
             mock_get_reg.return_value = mock_reg
-            with patch("app.core.file.file_registry._extract_text_preview", side_effect=Exception("parse error")):
+            with patch(
+                "app.core.file.file_registry._extract_text_preview",
+                side_effect=Exception("parse error"),
+            ):
                 result = plugin.read_file_snippet(str(f))
         assert "读取失败" in result
 
@@ -229,6 +275,7 @@ class TestReadFileSnippet:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 8  list_recent_files
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestListRecentFiles:
@@ -255,6 +302,7 @@ class TestListRecentFiles:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 9  organize_file
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestOrganizeFile:
@@ -298,6 +346,7 @@ class TestOrganizeFile:
 # 10–11  rename_file
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestRenameFile:
     def test_rename_success(self, plugin, tmp_path):
@@ -325,7 +374,7 @@ class TestRenameFile:
     def test_rename_illegal_chars(self, plugin, tmp_path):
         f = tmp_path / "ok.txt"
         f.write_text("data", encoding="utf-8")
-        result = plugin.rename_file(str(f), 'bad:name.txt')
+        result = plugin.rename_file(str(f), "bad:name.txt")
         assert "非法字符" in result
 
     def test_rename_target_exists(self, plugin, tmp_path):
@@ -346,6 +395,7 @@ class TestRenameFile:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 12  move_file
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestMoveFile:
@@ -387,6 +437,7 @@ class TestMoveFile:
 # 13  copy_file
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestCopyFile:
     def test_copy_success(self, plugin, tmp_path):
@@ -421,6 +472,7 @@ class TestCopyFile:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 14–15  delete_file
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestDeleteFile:
@@ -475,6 +527,7 @@ class TestDeleteFile:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 16–17  list_directory
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestListDirectory:
@@ -535,6 +588,7 @@ class TestListDirectory:
 # 18  directory_tree
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestDirectoryTree:
     def test_tree_structure(self, plugin, tmp_path):
@@ -566,6 +620,7 @@ class TestDirectoryTree:
 # 19  get_disk_usage
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestGetDiskUsage:
     def test_disk_usage(self, plugin, tmp_path):
@@ -586,6 +641,7 @@ class TestGetDiskUsage:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 20  find_large_files
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestFindLargeFiles:
@@ -621,6 +677,7 @@ class TestFindLargeFiles:
 # 21  find_old_files
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestFindOldFiles:
     @patch("app.core.file.file_registry.get_file_registry")
@@ -645,6 +702,7 @@ class TestFindOldFiles:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 22  batch_rename
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestBatchRename:
@@ -727,6 +785,7 @@ class TestBatchRename:
 # 23  batch_move
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestBatchMove:
     def test_batch_move_dry_run(self, plugin, tmp_path):
@@ -804,6 +863,7 @@ class TestBatchMove:
 # cleanup_duplicates
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestCleanupDuplicates:
     @patch("app.core.file.file_registry.get_file_registry")
@@ -844,6 +904,7 @@ class TestCleanupDuplicates:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 24  compress_files
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestCompressFiles:
@@ -894,6 +955,7 @@ class TestCompressFiles:
 # 25  extract_archive
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestExtractArchive:
     def test_extract_zip(self, plugin, tmp_path):
@@ -939,6 +1001,7 @@ class TestExtractArchive:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 26  manage_tag
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestManageTag:
@@ -1056,6 +1119,7 @@ class TestManageTag:
 # 27  manage_favorite
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestManageFavorite:
     @patch("app.core.file.file_registry.get_file_registry")
@@ -1116,6 +1180,7 @@ class TestManageFavorite:
 # 28  summarize_file
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestSummarizeFile:
     def test_summarize_nonexistent(self, plugin):
@@ -1130,7 +1195,9 @@ class TestSummarizeFile:
         f = tmp_path / "empty.txt"
         f.write_text("", encoding="utf-8")
 
-        with patch("app.core.file.file_registry._extract_text_preview", return_value=""):
+        with patch(
+            "app.core.file.file_registry._extract_text_preview", return_value=""
+        ):
             result = plugin.summarize_file(str(f))
         assert "无法提取文本内容" in result
 
@@ -1138,7 +1205,10 @@ class TestSummarizeFile:
         f = tmp_path / "bad.bin"
         f.write_bytes(b"\x00\x01\x02")
 
-        with patch("app.core.file.file_registry._extract_text_preview", side_effect=Exception("parse fail")):
+        with patch(
+            "app.core.file.file_registry._extract_text_preview",
+            side_effect=Exception("parse fail"),
+        ):
             result = plugin.summarize_file(str(f))
         assert "内容提取失败" in result
 
@@ -1146,22 +1216,38 @@ class TestSummarizeFile:
         f = tmp_path / "doc.txt"
         f.write_text("Important document content", encoding="utf-8")
 
-        with patch("app.core.file.file_registry._extract_text_preview", return_value="Important document content"):
+        with patch(
+            "app.core.file.file_registry._extract_text_preview",
+            return_value="Important document content",
+        ):
             with patch("app.core.llm.gemini.GeminiProvider") as MockLLM:
                 mock_llm = MagicMock()
-                mock_llm.generate_content.return_value = {"text": "This is a summary of the document."}
+                mock_llm.generate_content.return_value = {
+                    "text": "This is a summary of the document."
+                }
                 MockLLM.return_value = mock_llm
                 result = plugin.summarize_file(str(f))
 
         assert "doc.txt" in result
-        assert "summary" in result.lower() or "Summary" in result or "摘要" in result or "document" in result.lower()
+        assert (
+            "summary" in result.lower()
+            or "Summary" in result
+            or "摘要" in result
+            or "document" in result.lower()
+        )
 
     def test_summarize_llm_failure(self, plugin, tmp_path):
         f = tmp_path / "doc.txt"
         f.write_text("Some content here", encoding="utf-8")
 
-        with patch("app.core.file.file_registry._extract_text_preview", return_value="Some content here"):
-            with patch("app.core.llm.gemini.GeminiProvider", side_effect=Exception("API key missing")):
+        with patch(
+            "app.core.file.file_registry._extract_text_preview",
+            return_value="Some content here",
+        ):
+            with patch(
+                "app.core.llm.gemini.GeminiProvider",
+                side_effect=Exception("API key missing"),
+            ):
                 result = plugin.summarize_file(str(f))
 
         assert "LLM 摘要失败" in result
@@ -1171,7 +1257,10 @@ class TestSummarizeFile:
         f = tmp_path / "doc.txt"
         f.write_text("Data analysis report with charts.", encoding="utf-8")
 
-        with patch("app.core.file.file_registry._extract_text_preview", return_value="Data analysis report with charts."):
+        with patch(
+            "app.core.file.file_registry._extract_text_preview",
+            return_value="Data analysis report with charts.",
+        ):
             with patch("app.core.llm.gemini.GeminiProvider") as MockLLM:
                 mock_llm = MagicMock()
                 mock_llm.generate_content.return_value = {"text": "Focused summary."}
@@ -1184,6 +1273,7 @@ class TestSummarizeFile:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 29  undo_last_op
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestUndoLastOp:
@@ -1317,6 +1407,7 @@ class TestUndoLastOp:
 # 30  _scanner_fallback
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestScannerFallback:
     def test_scanner_returns_results(self):
@@ -1374,6 +1465,7 @@ class TestScannerFallback:
 # ═══════════════════════════════════════════════════════════════════════════════
 # register_file_tools convenience function
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestRegisterFileTools:

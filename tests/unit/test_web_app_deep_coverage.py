@@ -41,6 +41,7 @@ os.environ.setdefault("GEMINI_API_KEY", "test-key-for-unit-tests")
 def _import_app():
     """Import web.app lazily so env vars are already set."""
     import web.app as app_mod
+
     return app_mod
 
 
@@ -127,10 +128,12 @@ class TestExtractPromptText:
         item = Mock(spec=[])  # no .text attribute
         item.text = None
         item.parts = [part]
+
         # Need to make hasattr work correctly
         class ItemWithParts:
             text = None
             parts = [part]
+
         text, _ = app._extract_prompt_text([ItemWithParts()])
         assert "part_text" in text
 
@@ -161,10 +164,12 @@ class TestExtractPromptText:
 
     def test_list_with_fallback_str(self):
         app = _import_app()
+
         # Object without .text or .parts
         class Opaque:
             def __str__(self):
                 return "opaque_value"
+
         text, _ = app._extract_prompt_text([Opaque()])
         assert "opaque_value" in text
 
@@ -203,7 +208,9 @@ class TestTrackedModels:
         """After refactor, generate_content no longer pre-checks _is_interactions_only;
         it always delegates to the real SDK's generate_content."""
         tm, real, app = self._make()
-        real.generate_content.return_value = Mock(text="sdk_result", usage_metadata=None)
+        real.generate_content.return_value = Mock(
+            text="sdk_result", usage_metadata=None
+        )
         resp = tm.generate_content(model="gemini-3-flash-preview", contents="hi")
         assert resp.text == "sdk_result"
         real.generate_content.assert_called_once()
@@ -237,7 +244,9 @@ class TestTrackedModels:
         tm, real, app = self._make()
         chunk = Mock(text="stream_chunk", usage_metadata=None)
         real.generate_content_stream.return_value = iter([chunk])
-        chunks = list(tm.generate_content_stream(model="gemini-3-flash-preview", contents="hi"))
+        chunks = list(
+            tm.generate_content_stream(model="gemini-3-flash-preview", contents="hi")
+        )
         assert len(chunks) == 1
         assert chunks[0].text == "stream_chunk"
 
@@ -246,8 +255,9 @@ class TestTrackedModels:
         img_resp = Mock()
         img_resp.generated_images = [Mock(), Mock()]
         real.generate_images.return_value = img_resp
-        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), \
-             patch.object(app, "_record_token_usage") as mock_rec:
+        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), patch.object(
+            app, "_record_token_usage"
+        ) as mock_rec:
             resp = tm.generate_images(model="imagen-3.0", prompt="cat")
         assert resp == img_resp
         mock_rec.assert_called_once()
@@ -260,8 +270,9 @@ class TestTrackedModels:
         usage.prompt_token_count = 42
         embed_resp = Mock(usage_metadata=usage)
         real.embed_content.return_value = embed_resp
-        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), \
-             patch.object(app, "_record_token_usage") as mock_rec:
+        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), patch.object(
+            app, "_record_token_usage"
+        ) as mock_rec:
             resp = tm.embed_content(model="text-embedding-004", contents="text")
         assert resp == embed_resp
         mock_rec.assert_called_once()
@@ -271,9 +282,12 @@ class TestTrackedModels:
         tm, real, app = self._make()
         embed_resp = Mock(usage_metadata=None)
         real.embed_content.return_value = embed_resp
-        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), \
-             patch.object(app, "_record_token_usage") as mock_rec:
-            resp = tm.embed_content(model="text-embedding-004", contents="hello world test")
+        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), patch.object(
+            app, "_record_token_usage"
+        ) as mock_rec:
+            resp = tm.embed_content(
+                model="text-embedding-004", contents="hello world test"
+            )
         mock_rec.assert_called_once()
         # Estimation: len("hello world test") // 4 = 4
         assert mock_rec.call_args[1]["prompt_tokens"] >= 1
@@ -353,8 +367,10 @@ class TestRunWithTimeout:
 
     def test_exception_captured(self):
         app = _import_app()
+
         def boom():
             raise ValueError("fail")
+
         result, error, timed_out = app.run_with_timeout(boom, 5)
         assert result is None
         assert isinstance(error, ValueError)
@@ -362,8 +378,10 @@ class TestRunWithTimeout:
 
     def test_timeout(self):
         app = _import_app()
+
         def slow():
             time.sleep(10)
+
         result, error, timed_out = app.run_with_timeout(slow, 0.1)
         assert timed_out is True
         assert isinstance(error, TimeoutError)
@@ -389,8 +407,10 @@ class TestRunWithHeartbeat:
 
     def test_error(self):
         app = _import_app()
+
         def boom():
             raise RuntimeError("fail")
+
         result, error, timed_out = app.run_with_heartbeat(
             boom,
             start_time=time.time(),
@@ -403,8 +423,10 @@ class TestRunWithHeartbeat:
 
     def test_timeout(self):
         app = _import_app()
+
         def slow():
             time.sleep(10)
+
         result, error, timed_out = app.run_with_heartbeat(
             slow,
             start_time=time.time() - 100,  # Already elapsed
@@ -416,9 +438,11 @@ class TestRunWithHeartbeat:
     def test_heartbeat_called(self):
         app = _import_app()
         beats = []
+
         def slow():
             time.sleep(3)
             return "done"
+
         result, error, timed_out = app.run_with_heartbeat(
             slow,
             start_time=time.time(),
@@ -444,38 +468,48 @@ class TestStreamWithKeepalive:
 
     def test_timeout_waiting_for_first_token(self):
         app = _import_app()
+
         def slow_stream():
             time.sleep(10)
             yield Mock(text="late")
-        results = list(app.stream_with_keepalive(
-            slow_stream(),
-            start_time=time.time() - 100,  # Already past timeout
-            max_wait_first_token=1,
-        ))
+
+        results = list(
+            app.stream_with_keepalive(
+                slow_stream(),
+                start_time=time.time() - 100,  # Already past timeout
+                max_wait_first_token=1,
+            )
+        )
         types_ = [r[0] for r in results]
         assert "timeout" in types_
 
     def test_heartbeat_emitted(self):
         app = _import_app()
         import queue
+
         # Simulate a slow stream with delayed chunks
         def delayed_stream():
             time.sleep(2)
             yield Mock(text="delayed")
-        results = list(app.stream_with_keepalive(
-            delayed_stream(),
-            start_time=time.time(),
-            keepalive_interval=1,
-            max_wait_first_token=10,
-        ))
+
+        results = list(
+            app.stream_with_keepalive(
+                delayed_stream(),
+                start_time=time.time(),
+                keepalive_interval=1,
+                max_wait_first_token=10,
+            )
+        )
         types_ = [r[0] for r in results]
         assert "heartbeat" in types_ or "chunk" in types_
 
     def test_error_in_stream(self):
         app = _import_app()
+
         def error_stream():
             raise RuntimeError("stream error")
             yield  # pragma: no cover
+
         with pytest.raises(RuntimeError, match="stream error"):
             list(app.stream_with_keepalive(error_stream(), time.time()))
 
@@ -545,7 +579,9 @@ class TestErrorResponse:
         flask_app = app_mod.app
         with flask_app.test_request_context("/test"):
             flask_app.preprocess_request()
-            resp, status = app_mod._error_response("fail", 422, details={"field": "name"})
+            resp, status = app_mod._error_response(
+                "fail", 422, details={"field": "name"}
+            )
             data = resp.get_json()
         assert data["details"]["field"] == "name"
         assert status == 422
@@ -572,15 +608,19 @@ class TestAssignRequestId:
         with flask_app.test_request_context("/"):
             flask_app.preprocess_request()
             from flask import g
+
             assert hasattr(g, "request_id")
             assert len(g.request_id) > 0
 
     def test_reads_from_header(self):
         app_mod = _import_app()
         flask_app = app_mod.app
-        with flask_app.test_request_context("/", headers={"X-Request-ID": "custom-123"}):
+        with flask_app.test_request_context(
+            "/", headers={"X-Request-ID": "custom-123"}
+        ):
             flask_app.preprocess_request()
             from flask import g
+
             assert g.request_id == "custom-123"
 
 
@@ -592,10 +632,20 @@ class TestTaskOrchestratorMergeResults:
     def test_merge_with_completed_subtasks(self):
         app = _import_app()
         subtasks = [
-            {"task_type": "WEB_SEARCH", "status": "completed", "description": "search",
-             "result": {"output": "found"}, "error": None},
-            {"task_type": "FILE_GEN", "status": "completed", "description": "gen",
-             "result": {"output": "generated"}, "error": None},
+            {
+                "task_type": "WEB_SEARCH",
+                "status": "completed",
+                "description": "search",
+                "result": {"output": "found"},
+                "error": None,
+            },
+            {
+                "task_type": "FILE_GEN",
+                "status": "completed",
+                "description": "gen",
+                "result": {"output": "generated"},
+                "error": None,
+            },
         ]
         merged = app.TaskOrchestrator._merge_results(subtasks, {})
         assert len(merged["steps"]) == 2
@@ -604,8 +654,13 @@ class TestTaskOrchestratorMergeResults:
     def test_merge_with_failed_subtask(self):
         app = _import_app()
         subtasks = [
-            {"task_type": "WEB_SEARCH", "status": "failed", "description": "search",
-             "result": None, "error": "timeout"},
+            {
+                "task_type": "WEB_SEARCH",
+                "status": "failed",
+                "description": "search",
+                "result": None,
+                "error": "timeout",
+            },
         ]
         merged = app.TaskOrchestrator._merge_results(subtasks, {})
         assert merged["steps"][0]["error"] == "timeout"
@@ -688,9 +743,9 @@ class TestExecuteCompoundTask:
         ]
         mock_resp = Mock()
         mock_resp.text = "10"
-        with patch.object(app.TaskOrchestrator, "_execute_web_search",
-                          side_effect=Exception("boom")), \
-             patch.object(app, "client") as mc:
+        with patch.object(
+            app.TaskOrchestrator, "_execute_web_search", side_effect=Exception("boom")
+        ), patch.object(app, "client") as mc:
             mc.models.generate_content.return_value = mock_resp
             result = asyncio.get_event_loop().run_until_complete(
                 app.TaskOrchestrator.execute_compound_task("test", subtasks)
@@ -710,14 +765,17 @@ class TestLocalDispatcher:
 
     def test_is_ollama_running_connection_error(self):
         app = _import_app()
-        with patch.dict(os.environ, {"KOTO_DEPLOY_MODE": "local"}), \
-             patch.object(app, "requests") as mock_req:
+        with patch.dict(os.environ, {"KOTO_DEPLOY_MODE": "local"}), patch.object(
+            app, "requests"
+        ) as mock_req:
             mock_req.get.side_effect = Exception("no conn")
             assert app.LocalDispatcher.is_ollama_running() is False
 
     def test_analyze_delegates(self):
         app = _import_app()
-        with patch.object(app.SmartDispatcher, "analyze", return_value=("CHAT", "auto", {})):
+        with patch.object(
+            app.SmartDispatcher, "analyze", return_value=("CHAT", "auto", {})
+        ):
             result = app.LocalDispatcher.analyze("hello")
         assert result == ("CHAT", "auto", {})
 
@@ -796,7 +854,9 @@ class TestUtilsMethods:
 
     def test_is_failure_output_no_internet(self):
         app = _import_app()
-        assert app.Utils.is_failure_output("I don't have access to the internet") is True
+        assert (
+            app.Utils.is_failure_output("I don't have access to the internet") is True
+        )
 
     def test_is_failure_output_normal(self):
         app = _import_app()
@@ -839,8 +899,12 @@ class TestGetMemoryManager:
         try:
             app._memory_manager = None
             mock_mgr = MagicMock()
-            with patch("web.app.EnhancedMemoryManager", create=True, return_value=mock_mgr) as mock_cls, \
-                 patch.dict("sys.modules", {"enhanced_memory_manager": MagicMock(EnhancedMemoryManager=mock_cls)}):
+            with patch(
+                "web.app.EnhancedMemoryManager", create=True, return_value=mock_mgr
+            ) as mock_cls, patch.dict(
+                "sys.modules",
+                {"enhanced_memory_manager": MagicMock(EnhancedMemoryManager=mock_cls)},
+            ):
                 mgr = app.get_memory_manager()
                 assert mgr is not None
                 # Second call returns same instance
@@ -854,10 +918,13 @@ class TestGetMemoryManager:
         try:
             app._memory_manager = None
             mock_basic = MagicMock()
-            with patch.dict("sys.modules", {
-                "enhanced_memory_manager": None,
-                "web.enhanced_memory_manager": None,
-            }):
+            with patch.dict(
+                "sys.modules",
+                {
+                    "enhanced_memory_manager": None,
+                    "web.enhanced_memory_manager": None,
+                },
+            ):
                 # Will try to import MemoryManager as fallback
                 mgr = app.get_memory_manager()
                 assert mgr is not None
@@ -906,21 +973,29 @@ class TestKotoBrainChat:
         mock_resp = Mock()
         mock_resp.text = "manual response"
         mock_resp.usage_metadata = None
-        with patch.object(app, "client") as mock_client, \
-             patch.object(app, "_start_memory_extraction"):
+        with patch.object(app, "client") as mock_client, patch.object(
+            app, "_start_memory_extraction"
+        ):
             mock_client.models.generate_content.return_value = mock_resp
             result = brain.chat(
-                [], "hello", model="gemini-2.5-flash", auto_model=False, task_type="CHAT"
+                [],
+                "hello",
+                model="gemini-2.5-flash",
+                auto_model=False,
+                task_type="CHAT",
             )
         assert result["model"] == "gemini-2.5-flash"
 
     def test_image_file_edit_route(self):
         brain, app = self._make_brain()
         file_data = {"mime_type": "image/png", "data": b"fake_img"}
-        with patch.object(app, "SmartDispatcher") as mock_sd, \
-             patch.object(app, "client") as mock_client, \
-             patch.object(app, "settings_manager", Mock(images_dir="/tmp/images")), \
-             patch.object(app, "_start_memory_extraction"):
+        with patch.object(app, "SmartDispatcher") as mock_sd, patch.object(
+            app, "client"
+        ) as mock_client, patch.object(
+            app, "settings_manager", Mock(images_dir="/tmp/images")
+        ), patch.object(
+            app, "_start_memory_extraction"
+        ):
             mock_sd.get_model_for_task.return_value = "gemini-2.5-flash"
             mock_resp = Mock()
             mock_resp.text = "no code generated"
@@ -935,9 +1010,9 @@ class TestKotoBrainChat:
         mock_resp = Mock()
         mock_resp.text = "This is a cat photo"
         mock_resp.usage_metadata = None
-        with patch.object(app, "SmartDispatcher") as mock_sd, \
-             patch.object(app, "client") as mock_client, \
-             patch.object(app, "_start_memory_extraction"):
+        with patch.object(app, "SmartDispatcher") as mock_sd, patch.object(
+            app, "client"
+        ) as mock_client, patch.object(app, "_start_memory_extraction"):
             mock_sd.get_model_for_task.return_value = "gemini-2.5-flash"
             mock_client.models.generate_content.return_value = mock_resp
             result = brain.chat([], "describe this image", file_data=file_data)
@@ -949,8 +1024,9 @@ class TestKotoBrainChat:
         mock_resp = Mock()
         mock_resp.text = "PDF contents summary"
         mock_resp.usage_metadata = None
-        with patch.object(app, "client") as mock_client, \
-             patch.object(app, "_start_memory_extraction"):
+        with patch.object(app, "client") as mock_client, patch.object(
+            app, "_start_memory_extraction"
+        ):
             mock_client.models.generate_content.return_value = mock_resp
             result = brain.chat([], "summarize this PDF", file_data=file_data)
         assert result["task"] == "CHAT"
@@ -966,14 +1042,18 @@ class TestProcessCodeResponse:
 
     def test_extract_begin_file_pattern(self):
         import re
+
         text = "---BEGIN_FILE: edit.py---\nimport cv2\nprint('hi')\n---END_FILE---"
-        pattern = r"---BEGIN_FILE:\s*([a-zA-Z0-9_.-]+)\s*---\s*(.*?)---\s*END_FILE\s*---"
+        pattern = (
+            r"---BEGIN_FILE:\s*([a-zA-Z0-9_.-]+)\s*---\s*(.*?)---\s*END_FILE\s*---"
+        )
         matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
         assert len(matches) == 1
         assert matches[0][0] == "edit.py"
 
     def test_extract_python_code_block(self):
         import re
+
         text = "```python\nimport os\nprint('hello')\n```"
         pattern = r"```python\s*(.*?)```"
         matches = re.findall(pattern, text, re.DOTALL)
@@ -982,6 +1062,7 @@ class TestProcessCodeResponse:
 
     def test_no_code_found(self):
         import re
+
         text = "No code here, just a plain text response."
         patterns = [
             r"---BEGIN_FILE:\s*([a-zA-Z0-9_.-]+)\s*---\s*(.*?)---\s*END_FILE\s*---",
@@ -1005,6 +1086,7 @@ class TestCleanFilegenText:
 
     def _clean(self, text):
         import re
+
         if not text:
             return text
         cleaned = text
@@ -1062,6 +1144,7 @@ class TestCleanFilegenText:
 class TestExtractMarkdownTable:
     def _extract(self, md_text):
         import re
+
         lines = [line.strip() for line in md_text.splitlines() if "|" in line]
         for i in range(len(lines) - 1):
             header_line = lines[i]
@@ -1186,9 +1269,11 @@ class TestLazyModule:
     def test_lazy_module_defers_import(self):
         app = _import_app()
         calls = []
+
         def import_fn():
             calls.append(1)
             return Mock(attr="value")
+
         lm = app._LazyModule(import_fn)
         assert len(calls) == 0  # Not yet imported
         _ = lm.attr

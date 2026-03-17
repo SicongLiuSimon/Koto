@@ -61,7 +61,12 @@ class TestInheritance:
         assert issubclass(exc_cls, Exception)
 
     def test_llm_subtree(self):
-        for cls in (OllamaConnectionError, GeminiAPIError, ModelNotFoundError, ModelTimeoutError):
+        for cls in (
+            OllamaConnectionError,
+            GeminiAPIError,
+            ModelNotFoundError,
+            ModelTimeoutError,
+        ):
             assert issubclass(cls, LLMProviderError)
 
     def test_skill_subtree(self):

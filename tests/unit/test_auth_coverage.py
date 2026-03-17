@@ -13,20 +13,22 @@ import time
 import pytest
 from unittest.mock import patch, MagicMock
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_auth_module():
     """Import (or re-import) the auth module."""
     import web.auth as auth_mod
+
     return auth_mod
 
 
 def _make_flask_app(auth_enabled: bool = True):
     """Create a minimal Flask app with auth routes registered."""
     from flask import Flask
+
     auth_mod = _get_auth_module()
 
     app = Flask(__name__)
@@ -37,12 +39,14 @@ def _make_flask_app(auth_enabled: bool = True):
     @auth_mod.require_auth
     def protected():
         from flask import g, jsonify
+
         return jsonify({"user": g.user_id})
 
     @app.route("/optional")
     @auth_mod.optional_auth
     def optional():
         from flask import g, jsonify
+
         return jsonify({"user": g.user_id})
 
     return app
@@ -51,6 +55,7 @@ def _make_flask_app(auth_enabled: bool = True):
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. _validate_jwt_secret
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestValidateJwtSecret:
@@ -83,6 +88,7 @@ class TestValidateJwtSecret:
 # 2. _hash_password
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestHashPassword:
 
@@ -102,9 +108,7 @@ class TestHashPassword:
     def test_explicit_salt_is_deterministic(self):
         """PBKDF2-HMAC-SHA256 with the same inputs always yields the same hash."""
         auth_mod = _get_auth_module()
-        expected = hashlib.pbkdf2_hmac(
-            "sha256", b"hello", b"salt42", 100000
-        ).hex()
+        expected = hashlib.pbkdf2_hmac("sha256", b"hello", b"salt42", 100000).hex()
         h, _ = auth_mod._hash_password("hello", salt="salt42")
         assert h == expected
 
@@ -112,6 +116,7 @@ class TestHashPassword:
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. _load_users / _save_users
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestUserPersistence:
@@ -148,6 +153,7 @@ class TestUserPersistence:
 # 4. _generate_token / _verify_token
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestTokenLifecycle:
 
@@ -181,6 +187,7 @@ class TestTokenLifecycle:
 # ═══════════════════════════════════════════════════════════════════════════
 # 5. Rate limiting
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestRateLimiting:
@@ -221,6 +228,7 @@ class TestRateLimiting:
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. Flask decorator middleware
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestFlaskDecorators:

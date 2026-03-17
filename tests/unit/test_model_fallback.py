@@ -13,10 +13,10 @@ from app.core.llm.model_fallback import (
 )
 import app.core.llm.model_fallback as _mod
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_provider(side_effects: dict | None = None, default_return="ok"):
     """Return a mock provider whose generate_content dispatches by *model*."""
@@ -125,16 +125,20 @@ class TestCircuitBreakerOpens:
         with patch.object(exe, "_build_candidate_list", return_value=SHORT_CHAIN):
             with pytest.raises(Exception):
                 exe.generate_with_fallback(
-                    provider=provider, prompt="hi",
-                    preferred_model="model-a", task_type="TEST_CB",
+                    provider=provider,
+                    prompt="hi",
+                    preferred_model="model-a",
+                    task_type="TEST_CB",
                 )
 
         # Second call within backoff window → circuit breaker fires immediately
         with patch.object(exe, "_build_candidate_list", return_value=SHORT_CHAIN):
             with pytest.raises(RuntimeError, match="Circuit breaker open"):
                 exe.generate_with_fallback(
-                    provider=provider, prompt="hi",
-                    preferred_model="model-a", task_type="TEST_CB",
+                    provider=provider,
+                    prompt="hi",
+                    preferred_model="model-a",
+                    task_type="TEST_CB",
                 )
 
 
@@ -150,7 +154,7 @@ class TestBackoffTiming:
             (3, 20.0),
             (4, 40.0),
             (5, 80.0),
-            (6, 120.0),   # capped
+            (6, 120.0),  # capped
             (10, 120.0),  # still capped
         ],
     )
@@ -169,8 +173,10 @@ class TestBackoffTiming:
             mock_time.time.return_value = now  # elapsed = 0
             with pytest.raises(RuntimeError, match="Circuit breaker open") as exc_info:
                 exe.generate_with_fallback(
-                    provider=provider, prompt="hi",
-                    preferred_model="model-a", task_type=task,
+                    provider=provider,
+                    prompt="hi",
+                    preferred_model="model-a",
+                    task_type=task,
                 )
             assert f"backing off {expected_backoff:.0f}s" in str(exc_info.value)
 
@@ -188,8 +194,10 @@ class TestBackoffTiming:
             mock_time.time.return_value = now + 6.0  # past the 5s backoff
             with patch.object(exe, "_build_candidate_list", return_value=SHORT_CHAIN):
                 result = exe.generate_with_fallback(
-                    provider=provider, prompt="hi",
-                    preferred_model="model-a", task_type=task,
+                    provider=provider,
+                    prompt="hi",
+                    preferred_model="model-a",
+                    task_type=task,
                 )
         assert result == "success"
 
@@ -208,8 +216,10 @@ class TestCircuitBreakerResets:
 
         with patch.object(exe, "_build_candidate_list", return_value=SHORT_CHAIN):
             result = exe.generate_with_fallback(
-                provider=provider, prompt="hi",
-                preferred_model="model-a", task_type=task,
+                provider=provider,
+                prompt="hi",
+                preferred_model="model-a",
+                task_type=task,
             )
 
         assert result == "ok"
@@ -236,15 +246,19 @@ class TestIndependentTaskTypes:
             # "chat" blocked
             with pytest.raises(RuntimeError, match="Circuit breaker open"):
                 exe.generate_with_fallback(
-                    provider=provider, prompt="hi",
-                    preferred_model="model-a", task_type="chat",
+                    provider=provider,
+                    prompt="hi",
+                    preferred_model="model-a",
+                    task_type="chat",
                 )
 
             # "code_gen" unaffected
             with patch.object(exe, "_build_candidate_list", return_value=SHORT_CHAIN):
                 result = exe.generate_with_fallback(
-                    provider=provider, prompt="hi",
-                    preferred_model="model-a", task_type="code_gen",
+                    provider=provider,
+                    prompt="hi",
+                    preferred_model="model-a",
+                    task_type="code_gen",
                 )
             assert result == "ok"
 

@@ -138,9 +138,7 @@ class TestFileDownload:
 
     def test_valid_file_returns_200(self, client):
         """Downloading an existing file should succeed."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
             tmp.write("download test content")
             tmp_path = tmp.name
         try:
@@ -165,9 +163,7 @@ class TestFileEditorRead:
 
     def test_read_existing_file(self, client):
         """Reading an existing file should return content."""
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
             tmp.write("editor read test")
             tmp_path = tmp.name
         try:

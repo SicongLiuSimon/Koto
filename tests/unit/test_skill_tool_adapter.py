@@ -20,6 +20,7 @@ _SKILL_MGR = "app.core.skills.skill_manager.SkillManager"
 # Helper — lightweight mock SkillDefinition
 # ---------------------------------------------------------------------------
 
+
 def _make_skill(
     skill_id: str = "test_skill",
     name: str = "测试技能",
@@ -63,6 +64,7 @@ def _make_skill(
 # 1. Class-level attributes
 # ===================================================================
 
+
 class TestClassAttributes:
     def test_prefix_constant(self):
         assert SkillToolAdapter.PREFIX == "skill_"
@@ -77,6 +79,7 @@ class TestClassAttributes:
 # ===================================================================
 # 2. _build_tool — constructing the 4-tuple
 # ===================================================================
+
 
 class TestBuildTool:
 
@@ -120,13 +123,15 @@ class TestBuildTool:
     @patch(_CAP_REG)
     def test_parameters_from_mcp_tool(self, cap):
         cap.has_capability.return_value = False
-        sd = _make_skill(mcp_tool={
-            "inputSchema": {
-                "type": "object",
-                "properties": {"lang": {"type": "string"}},
-                "required": ["lang"],
+        sd = _make_skill(
+            mcp_tool={
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"lang": {"type": "string"}},
+                    "required": ["lang"],
+                }
             }
-        })
+        )
         _, _, _, params = SkillToolAdapter._build_tool(sd)
         assert "lang" in params["properties"]
         assert "user_input" in params["properties"]
@@ -135,9 +140,11 @@ class TestBuildTool:
     @patch(_CAP_REG)
     def test_user_input_added_when_missing(self, cap):
         cap.has_capability.return_value = False
-        sd = _make_skill(mcp_tool={
-            "inputSchema": {"type": "object", "properties": {}, "required": []}
-        })
+        sd = _make_skill(
+            mcp_tool={
+                "inputSchema": {"type": "object", "properties": {}, "required": []}
+            }
+        )
         _, _, _, params = SkillToolAdapter._build_tool(sd)
         assert "user_input" in params["properties"]
         assert params["properties"]["user_input"]["type"] == "string"
@@ -145,15 +152,17 @@ class TestBuildTool:
     @patch(_CAP_REG)
     def test_user_input_not_duplicated(self, cap):
         cap.has_capability.return_value = False
-        sd = _make_skill(mcp_tool={
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "user_input": {"type": "string", "description": "custom"},
-                },
-                "required": ["user_input"],
+        sd = _make_skill(
+            mcp_tool={
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "user_input": {"type": "string", "description": "custom"},
+                    },
+                    "required": ["user_input"],
+                }
             }
-        })
+        )
         _, _, _, params = SkillToolAdapter._build_tool(sd)
         assert params["properties"]["user_input"]["description"] == "custom"
 
@@ -169,9 +178,11 @@ class TestBuildTool:
     @patch(_CAP_REG)
     def test_no_required_key_when_empty(self, cap):
         cap.has_capability.return_value = False
-        sd = _make_skill(mcp_tool={
-            "inputSchema": {"type": "object", "properties": {}, "required": []}
-        })
+        sd = _make_skill(
+            mcp_tool={
+                "inputSchema": {"type": "object", "properties": {}, "required": []}
+            }
+        )
         _, _, _, params = SkillToolAdapter._build_tool(sd)
         assert "required" not in params
 
@@ -194,6 +205,7 @@ class TestBuildTool:
 # ===================================================================
 # 3. Tool invocation routing — dispatch vs prompt guidance
 # ===================================================================
+
 
 class TestToolInvocation:
 
@@ -263,7 +275,9 @@ class TestToolInvocation:
     def test_prompt_guidance_no_capability(self, cap):
         cap.has_capability.return_value = False
         sd = _make_skill(
-            skill_id="p", name="提示技能", icon="📝",
+            skill_id="p",
+            name="提示技能",
+            icon="📝",
             render_result="Follow these instructions…",
         )
         _, fn, _, _ = SkillToolAdapter._build_tool(sd)
@@ -302,6 +316,7 @@ class TestToolInvocation:
 # ===================================================================
 # 4. register_all — orchestration
 # ===================================================================
+
 
 class TestRegisterAll:
 
@@ -408,6 +423,7 @@ class TestRegisterAll:
 # ===================================================================
 # 5. Edge cases
 # ===================================================================
+
 
 class TestEdgeCases:
 

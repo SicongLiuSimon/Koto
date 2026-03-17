@@ -161,7 +161,14 @@ class TestAlertManagerHistoryTrimming:
         for i in range(10):
             mgr.process_event(self._make_event(i))
         assert len(mgr.alert_history) == 5
-        required_keys = {"id", "rule", "event_type", "severity", "timestamp", "channels"}
+        required_keys = {
+            "id",
+            "rule",
+            "event_type",
+            "severity",
+            "timestamp",
+            "channels",
+        }
         for entry in mgr.alert_history:
             assert required_keys.issubset(entry.keys())
             assert entry["rule"] == "test_cpu"

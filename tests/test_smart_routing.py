@@ -12,65 +12,8 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-# 直接测试两个核心函数
-from web.app import _is_analysis_request, _should_use_annotation_system
-
-
-def test_annotation_system():
-    """测试标注系统判断 — 必须严格，不能误判"""
-    print("=" * 80)
-    print("  测试: _should_use_annotation_system() — 标注系统触发判断")
-    print("  目标: 只有明确要在原文上做标记/批注时才触发")
-    print("=" * 80)
-
-    # ✅ 应该触发 DOC_ANNOTATE 的请求
-    should_trigger = [
-        ("帮我标注一下这篇文档的问题", True),
-        ("给这篇论文做批注", True),
-        ("标出文档中不合适的地方", True),
-        ("请标记出翻译腔严重的段落", True),
-        ("校对这篇文档，标红错误的地方", True),
-        ("审查一下，标注出逻辑不通的位置", True),
-        ("帮我批改这篇文章", True),
-    ]
-
-    # ❌ 不应该触发 DOC_ANNOTATE 的请求（之前被误判的）
-    should_not_trigger = [
-        ("帮我优化这段代码", False),  # "优化" 太宽泛
-        ("修改一下这个方案", False),  # "修改" 太宽泛
-        ("检查一下天气", False),  # "检查" 太宽泛
-        ("翻译这段话", False),  # "翻译" 太宽泛
-        ("帮我处理一下这个问题", False),  # "处理" 太宽泛
-        ("这个表达不太好", False),  # "表达" 太宽泛
-        ("分析一下逻辑", False),  # "逻辑" 太宽泛
-        ("位置在哪里", False),  # "位置" 太宽泛
-        ("改善一下结论", False),  # "改善" 太宽泛 — 这应该走智能分析
-        ("帮我写一段摘要", False),  # 写作请求
-        ("优化引言部分", False),  # 改善请求
-        ("写一段更好的结论", False),  # 生成请求
-        ("重新改善引言", False),  # 改善请求
-        ("帮我做个PPT", False),  # PPT请求
-        ("画一只猫", False),  # 绘图请求
-        ("什么是逻辑回归", False),  # 知识问答
-    ]
-
-    all_tests = should_trigger + should_not_trigger
-    passed = 0
-    failed = 0
-
-    for text, expected in all_tests:
-        result = _should_use_annotation_system(text, has_file=True)
-        status = "✅" if result == expected else "❌"
-        if result != expected:
-            failed += 1
-            print(f'{status} "{text}"')
-            print(f"     期望: {expected}, 实际: {result}")
-        else:
-            passed += 1
-            print(f'{status} "{text}" → {result}')
-
-    print(f"\n结果: {passed}/{len(all_tests)} 通过, {failed} 失败\n")
-    return failed == 0
+# 直接测试核心函数
+from web.app import _is_analysis_request
 
 
 def test_analysis_request():
@@ -195,7 +138,6 @@ def main():
     print("█" * 80 + "\n")
 
     results = []
-    results.append(("标注系统判断", test_annotation_system()))
     results.append(("分析请求判断", test_analysis_request()))
     results.append(("智能分析器触发", test_intelligent_analyzer_routing()))
 

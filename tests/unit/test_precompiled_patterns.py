@@ -10,10 +10,10 @@ import re
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # 1. ConsistencyChecker._compiled_patterns
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 class TestConsistencyCheckerPatterns:
@@ -22,14 +22,15 @@ class TestConsistencyCheckerPatterns:
     @pytest.fixture()
     def checker(self):
         from web.consistency_checker import ConsistencyChecker
+
         return ConsistencyChecker()
 
     def test_compiled_patterns_are_re_pattern(self, checker):
         for _term, variants in checker._compiled_patterns.items():
             for variant_str, pattern in variants:
-                assert isinstance(pattern, re.Pattern), (
-                    f"Expected re.Pattern for variant '{variant_str}', got {type(pattern)}"
-                )
+                assert isinstance(
+                    pattern, re.Pattern
+                ), f"Expected re.Pattern for variant '{variant_str}', got {type(pattern)}"
 
     @pytest.mark.parametrize(
         "term, variant_text",
@@ -76,14 +77,15 @@ class TestConsistencyCheckerPatterns:
     def test_patterns_are_case_insensitive(self, checker):
         for _term, variants in checker._compiled_patterns.items():
             for variant_str, pattern in variants:
-                assert pattern.flags & re.IGNORECASE, (
-                    f"Pattern for '{variant_str}' is not case-insensitive"
-                )
+                assert (
+                    pattern.flags & re.IGNORECASE
+                ), f"Pattern for '{variant_str}' is not case-insensitive"
 
 
 # ---------------------------------------------------------------------------
 # 2. file_converter.CN_FORMAT_PATTERNS
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 class TestCNFormatPatterns:
@@ -92,13 +94,14 @@ class TestCNFormatPatterns:
     @pytest.fixture()
     def patterns(self):
         from web.file_converter import CN_FORMAT_PATTERNS
+
         return CN_FORMAT_PATTERNS
 
     def test_all_values_are_re_pattern(self, patterns):
         for pat, ext in patterns:
-            assert isinstance(pat, re.Pattern), (
-                f"Expected re.Pattern for ext '{ext}', got {type(pat)}"
-            )
+            assert isinstance(
+                pat, re.Pattern
+            ), f"Expected re.Pattern for ext '{ext}', got {type(pat)}"
 
     @pytest.mark.parametrize(
         "text, expected_ext",
@@ -123,15 +126,17 @@ class TestCNFormatPatterns:
             ("webp", ".webp"),
         ],
     )
-    def test_pattern_matches_expected_chinese_format(self, patterns, text, expected_ext):
+    def test_pattern_matches_expected_chinese_format(
+        self, patterns, text, expected_ext
+    ):
         matched_ext = None
         for pat, ext in patterns:
             if pat.search(text):
                 matched_ext = ext
                 break
-        assert matched_ext == expected_ext, (
-            f"Expected '{expected_ext}' for '{text}', got '{matched_ext}'"
-        )
+        assert (
+            matched_ext == expected_ext
+        ), f"Expected '{expected_ext}' for '{text}', got '{matched_ext}'"
 
     @pytest.mark.parametrize(
         "text",
@@ -144,14 +149,15 @@ class TestCNFormatPatterns:
     )
     def test_patterns_reject_non_matching_strings(self, patterns, text):
         for pat, ext in patterns:
-            assert not pat.search(text), (
-                f"Pattern for '{ext}' should NOT match '{text}'"
-            )
+            assert not pat.search(
+                text
+            ), f"Pattern for '{ext}' should NOT match '{text}'"
 
 
 # ---------------------------------------------------------------------------
 # 3. LocalModelRouter installed_map dict lookup
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 class TestLocalModelRouterInstalledMap:
@@ -178,7 +184,9 @@ class TestLocalModelRouterInstalledMap:
         return installed_map
 
     @staticmethod
-    def _select_model(installed_map: dict[str, str], ollama_models: list[str]) -> str | None:
+    def _select_model(
+        installed_map: dict[str, str], ollama_models: list[str]
+    ) -> str | None:
         """Replicate the priority-based selection from LocalModelRouter."""
         for m in ollama_models:
             base_name = m.split(":")[0]

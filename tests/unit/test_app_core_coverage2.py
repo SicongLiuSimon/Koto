@@ -29,7 +29,6 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. Routing __init__ (lazy imports)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41,64 +40,75 @@ class TestRoutingInit:
 
     def test_smart_dispatcher_direct_import(self):
         from app.core.routing import SmartDispatcher
+
         assert SmartDispatcher is not None
 
     @patch.dict("sys.modules", {"app.core.routing.local_model_router": MagicMock()})
     def test_local_model_router_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("LocalModelRouter")
         assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.local_model_router": MagicMock()})
     def test_router_decision_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("RouterDecision")
         assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.ai_router": MagicMock()})
     def test_ai_router_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("AIRouter")
         assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.task_decomposer": MagicMock()})
     def test_task_decomposer_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("TaskDecomposer")
         assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.local_planner": MagicMock()})
     def test_local_planner_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("LocalPlanner")
         assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.plan_executor": MagicMock()})
     def test_plan_executor_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("PlanExecutor")
         assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.plan_executor": MagicMock()})
     def test_build_handlers_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("build_handlers_from_orchestrator")
         assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.tool_router": MagicMock()})
     def test_tool_router_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("ToolRouter")
         assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.tool_router": MagicMock()})
     def test_get_tool_router_lazy_import(self):
         import app.core.routing as routing_mod
+
         result = routing_mod.__getattr__("get_tool_router")
         assert result is not None
 
     def test_unknown_attribute_raises(self):
         import app.core.routing as routing_mod
+
         with pytest.raises(AttributeError, match="has no attribute"):
             routing_mod.__getattr__("NonExistentClass")
 
@@ -114,12 +124,17 @@ class TestGoalJobHandler:
 
     def test_register_goal_handler(self):
         from app.core.goal.goal_job_handler import register_goal_handler
+
         runner = MagicMock()
         register_goal_handler(runner)
-        runner.register_handler.assert_called_once_with("goal_check", pytest.importorskip("app.core.goal.goal_job_handler")._handle_goal_check)
+        runner.register_handler.assert_called_once_with(
+            "goal_check",
+            pytest.importorskip("app.core.goal.goal_job_handler")._handle_goal_check,
+        )
 
     def test_handle_missing_goal_id(self):
         from app.core.goal.goal_job_handler import _handle_goal_check
+
         ctx = MagicMock()
         ctx.payload = {}
         result = _handle_goal_check(ctx)
@@ -128,6 +143,7 @@ class TestGoalJobHandler:
     @patch("app.core.goal.goal_manager.get_goal_manager")
     def test_handle_goal_not_found(self, mock_get_gm):
         from app.core.goal.goal_job_handler import _handle_goal_check
+
         mock_gm = MagicMock()
         mock_gm.get.return_value = None
         mock_get_gm.return_value = mock_gm
@@ -183,8 +199,18 @@ class TestGoalJobHandler:
         ctx.is_cancelled.return_value = False
 
         # Patch the agent imports to raise an exception
-        with patch.dict("sys.modules", {"app.core.llm.gemini": MagicMock(get_gemini_client=MagicMock(side_effect=Exception("LLM error")))}):
-            with patch("app.core.agent.unified_agent.UnifiedAgent", side_effect=Exception("LLM error")):
+        with patch.dict(
+            "sys.modules",
+            {
+                "app.core.llm.gemini": MagicMock(
+                    get_gemini_client=MagicMock(side_effect=Exception("LLM error"))
+                )
+            },
+        ):
+            with patch(
+                "app.core.agent.unified_agent.UnifiedAgent",
+                side_effect=Exception("LLM error"),
+            ):
                 result = _handle_goal_check(ctx)
                 assert result is not None
                 mock_gm.finish_run.assert_called_once()
@@ -230,11 +256,14 @@ class TestGoalJobHandler:
         mock_agent_mod.UnifiedAgent.return_value = mock_agent
         mock_registry_mod = MagicMock()
 
-        with patch.dict("sys.modules", {
-            "app.core.llm.gemini": mock_gemini_mod,
-            "app.core.agent.unified_agent": mock_agent_mod,
-            "app.core.agent.tool_registry": mock_registry_mod,
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "app.core.llm.gemini": mock_gemini_mod,
+                "app.core.agent.unified_agent": mock_agent_mod,
+                "app.core.agent.tool_registry": mock_registry_mod,
+            },
+        ):
             result = _handle_goal_check(ctx)
             assert result is not None
             mock_gm.complete.assert_called_once()
@@ -253,6 +282,7 @@ class TestEventDatabase:
     def _setup_db(self, tmp_path):
         """Create an EventDatabase with a temp DB path."""
         from app.core.monitoring.event_database import EventDatabase
+
         db = EventDatabase.__new__(EventDatabase)
         db.DB_PATH = tmp_path / "test_events.db"
         db.lock = threading.Lock()
@@ -287,14 +317,20 @@ class TestEventDatabase:
 
     def test_get_events_filter_by_type(self):
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
-        self.db.save_event({"timestamp": now, "event_type": "cpu_high", "severity": "high"})
-        self.db.save_event({"timestamp": now, "event_type": "disk_full", "severity": "low"})
+        self.db.save_event(
+            {"timestamp": now, "event_type": "cpu_high", "severity": "high"}
+        )
+        self.db.save_event(
+            {"timestamp": now, "event_type": "disk_full", "severity": "low"}
+        )
         events = self.db.get_events(event_type="cpu_high", hours_back=1)
         assert all(e["event_type"] == "cpu_high" for e in events)
 
     def test_get_events_filter_by_severity(self):
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
-        self.db.save_event({"timestamp": now, "event_type": "cpu_high", "severity": "high"})
+        self.db.save_event(
+            {"timestamp": now, "event_type": "cpu_high", "severity": "high"}
+        )
         self.db.save_event({"timestamp": now, "event_type": "mem", "severity": "low"})
         events = self.db.get_events(severity="high", hours_back=1)
         assert all(e["severity"] == "high" for e in events)
@@ -305,27 +341,41 @@ class TestEventDatabase:
 
     def test_save_and_get_stats(self):
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
-        self.db.save_event({"timestamp": now, "event_type": "cpu_high", "severity": "high"})
-        self.db.save_event({"timestamp": now, "event_type": "mem", "severity": "medium"})
+        self.db.save_event(
+            {"timestamp": now, "event_type": "cpu_high", "severity": "high"}
+        )
+        self.db.save_event(
+            {"timestamp": now, "event_type": "mem", "severity": "medium"}
+        )
         stats = self.db.get_stats(days_back=1)
         assert stats["total_events"] == 2
 
     def test_save_remediation_action(self):
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
-        eid = self.db.save_event({"timestamp": now, "event_type": "test", "severity": "low"})
-        aid = self.db.save_remediation_action(eid, "restart_service", result={"ok": True})
+        eid = self.db.save_event(
+            {"timestamp": now, "event_type": "test", "severity": "low"}
+        )
+        aid = self.db.save_remediation_action(
+            eid, "restart_service", result={"ok": True}
+        )
         assert aid > 0
 
     def test_update_remediation_status(self):
         now = time.strftime("%Y-%m-%dT%H:%M:%S")
-        eid = self.db.save_event({"timestamp": now, "event_type": "test", "severity": "low"})
+        eid = self.db.save_event(
+            {"timestamp": now, "event_type": "test", "severity": "low"}
+        )
         aid = self.db.save_remediation_action(eid, "restart_service")
-        result = self.db.update_remediation_status(aid, "completed", result={"success": True})
+        result = self.db.update_remediation_status(
+            aid, "completed", result={"success": True}
+        )
         assert result is True
 
     def test_clear_old_events(self):
         old_ts = "2020-01-01T00:00:00"
-        self.db.save_event({"timestamp": old_ts, "event_type": "old", "severity": "low"})
+        self.db.save_event(
+            {"timestamp": old_ts, "event_type": "old", "severity": "low"}
+        )
         deleted = self.db.clear_old_events(days_old=1)
         assert deleted >= 1
 
@@ -341,6 +391,7 @@ class TestLoRAPipeline:
 
     def test_training_config_defaults(self):
         from app.core.learning.lora_pipeline import TrainingConfig
+
         cfg = TrainingConfig()
         assert cfg.base_model == "Qwen/Qwen3-8B"
         assert cfg.lora_r == 16
@@ -348,6 +399,7 @@ class TestLoRAPipeline:
 
     def test_training_config_to_dict(self):
         from app.core.learning.lora_pipeline import TrainingConfig
+
         cfg = TrainingConfig()
         d = cfg.to_dict()
         assert isinstance(d, dict)
@@ -355,6 +407,7 @@ class TestLoRAPipeline:
 
     def test_for_hardware_high_vram(self):
         from app.core.learning.lora_pipeline import TrainingConfig
+
         cfg = TrainingConfig.for_hardware(vram_gb=24, ram_gb=64)
         assert "8B" in cfg.base_model
         assert cfg.fp16 is True
@@ -362,28 +415,33 @@ class TestLoRAPipeline:
 
     def test_for_hardware_mid_vram(self):
         from app.core.learning.lora_pipeline import TrainingConfig
+
         cfg = TrainingConfig.for_hardware(vram_gb=12, ram_gb=32)
         assert "4B" in cfg.base_model
 
     def test_for_hardware_low_vram(self):
         from app.core.learning.lora_pipeline import TrainingConfig
+
         cfg = TrainingConfig.for_hardware(vram_gb=6, ram_gb=16)
         assert "1.7B" in cfg.base_model
 
     def test_for_hardware_very_low_vram(self):
         from app.core.learning.lora_pipeline import TrainingConfig
+
         cfg = TrainingConfig.for_hardware(vram_gb=4, ram_gb=8)
         assert "0.6B" in cfg.base_model
         assert cfg.use_4bit is True
 
     def test_for_hardware_cpu_only(self):
         from app.core.learning.lora_pipeline import TrainingConfig
+
         cfg = TrainingConfig.for_hardware(vram_gb=0, ram_gb=8)
         assert "0.6B" in cfg.base_model
         assert cfg.gradient_accumulation_steps == 8
 
     def test_adapter_meta_roundtrip(self):
         from app.core.learning.lora_pipeline import AdapterMeta
+
         meta = AdapterMeta(
             skill_id="test",
             adapter_path="/tmp/adapter",
@@ -399,12 +457,14 @@ class TestLoRAPipeline:
 
     def test_pipeline_init(self):
         from app.core.learning.lora_pipeline import LoRAPipeline, TrainingConfig
+
         cfg = TrainingConfig()
         pipeline = LoRAPipeline(config=cfg)
         assert pipeline.config.base_model == "Qwen/Qwen3-8B"
 
     def test_check_prerequisites_missing_packages(self):
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         pipeline = LoRAPipeline()
         ok, missing = pipeline.check_prerequisites()
         # Some deps may be missing in test env; just check return types
@@ -413,6 +473,7 @@ class TestLoRAPipeline:
 
     def test_prepare_dataset_no_trace_file(self, tmp_path):
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         pipeline = LoRAPipeline()
         with patch("app.core.learning.lora_pipeline._SHADOW_DIR", str(tmp_path)):
             result = pipeline.prepare_dataset("nonexistent_skill")
@@ -420,6 +481,7 @@ class TestLoRAPipeline:
 
     def test_prepare_dataset_too_few_samples(self, tmp_path):
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         trace_file = tmp_path / "test_skill.jsonl"
         trace_file.write_text('{"user_input": "hi", "ai_response": "hello"}\n')
         pipeline = LoRAPipeline()
@@ -429,6 +491,7 @@ class TestLoRAPipeline:
 
     def test_prepare_dataset_qwen3_format(self, tmp_path):
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         trace_file = tmp_path / "test_skill.jsonl"
         lines = [
             json.dumps({"user_input": f"question {i}", "ai_response": f"answer {i}"})
@@ -449,6 +512,7 @@ class TestLoRAPipeline:
 
     def test_prepare_dataset_alpaca_format(self, tmp_path):
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         trace_file = tmp_path / "alpha_skill.jsonl"
         lines = [
             json.dumps({"user_input": f"q{i}", "ai_response": f"a{i}"})
@@ -460,7 +524,9 @@ class TestLoRAPipeline:
         ds_dir.mkdir()
         with patch("app.core.learning.lora_pipeline._SHADOW_DIR", str(tmp_path)):
             with patch("app.core.learning.lora_pipeline._DATASET_DIR", str(ds_dir)):
-                result = pipeline.prepare_dataset("alpha_skill", min_samples=3, output_format="alpaca")
+                result = pipeline.prepare_dataset(
+                    "alpha_skill", min_samples=3, output_format="alpaca"
+                )
                 assert result is not None
                 with open(result, encoding="utf-8") as f:
                     data = json.load(f)
@@ -468,6 +534,7 @@ class TestLoRAPipeline:
 
     def test_train_already_active(self):
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         pipeline = LoRAPipeline()
         pipeline._active_trainings["busy_skill"] = True
         result = pipeline.train("busy_skill")
@@ -476,9 +543,12 @@ class TestLoRAPipeline:
 
     def test_register_as_adapter(self, tmp_path):
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         pipeline = LoRAPipeline()
         with patch("app.core.learning.lora_pipeline._ADAPTER_DIR", str(tmp_path)):
-            path = pipeline.register_as_adapter("my_skill", "/tmp/adapter", num_samples=50)
+            path = pipeline.register_as_adapter(
+                "my_skill", "/tmp/adapter", num_samples=50
+            )
             assert path.endswith(".json")
             with open(path, encoding="utf-8") as f:
                 meta = json.load(f)
@@ -486,6 +556,7 @@ class TestLoRAPipeline:
 
     def test_list_adapters_empty(self, tmp_path):
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         pipeline = LoRAPipeline()
         with patch("app.core.learning.lora_pipeline._ADAPTER_DIR", str(tmp_path)):
             result = pipeline.list_adapters()
@@ -504,6 +575,7 @@ class TestTrendAnalyzer:
     @pytest.fixture
     def analyzer(self):
         from app.core.analytics.trend_analyzer import TrendAnalyzer
+
         return TrendAnalyzer()
 
     def test_analyze_empty_events(self, analyzer):
@@ -576,6 +648,7 @@ class TestScriptGenerator:
 
     def test_kill_process_ps_with_pid(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
         script = gen.generate_kill_process_script("notepad.exe", pid=1234)
         assert "1234" in script
@@ -583,12 +656,14 @@ class TestScriptGenerator:
 
     def test_kill_process_ps_no_pid(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
         script = gen.generate_kill_process_script("notepad.exe")
         assert "notepad" in script
 
     def test_kill_process_bash_with_pid(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.BASH)
         script = gen.generate_kill_process_script("python", pid=5678)
         assert "5678" in script
@@ -596,12 +671,14 @@ class TestScriptGenerator:
 
     def test_kill_process_bash_no_pid(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.BASH)
         script = gen.generate_kill_process_script("python")
         assert "pkill" in script
 
     def test_clear_disk_space_ps(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
         script = gen.generate_clear_disk_space_script(min_gb=10)
         assert "10" in script
@@ -609,36 +686,42 @@ class TestScriptGenerator:
 
     def test_clear_disk_space_bash(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.BASH)
         script = gen.generate_clear_disk_space_script()
         assert "apt-get" in script
 
     def test_restart_service_ps(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
         script = gen.generate_restart_service_script("wuauserv")
         assert "wuauserv" in script
 
     def test_restart_service_bash(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.BASH)
         script = gen.generate_restart_service_script("nginx")
         assert "systemctl restart nginx" in script
 
     def test_memory_cleanup_ps(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
         script = gen.generate_memory_cleanup_script()
         assert "GC" in script
 
     def test_memory_cleanup_bash(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.BASH)
         script = gen.generate_memory_cleanup_script()
         assert "drop_caches" in script
 
     def test_generate_fix_script_cpu_high(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
         result = gen.generate_fix_script("cpu_high", process_name="chrome.exe")
         assert result["status"] == "success"
@@ -647,24 +730,28 @@ class TestScriptGenerator:
 
     def test_generate_fix_script_unknown_type(self):
         from app.core.scripts.script_generator import ScriptGenerator
+
         gen = ScriptGenerator()
         result = gen.generate_fix_script("unknown_issue")
         assert result["status"] == "error"
 
     def test_requires_admin(self):
         from app.core.scripts.script_generator import ScriptGenerator
+
         gen = ScriptGenerator()
         assert gen._requires_admin("disk_full") is True
         assert gen._requires_admin("cpu_high") is False
 
     def test_disk_health_ps(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
         script = gen.generate_check_disk_health_script()
         assert "disk" in script.lower() or "Disk" in script
 
     def test_disk_health_bash(self):
         from app.core.scripts.script_generator import ScriptGenerator, ScriptType
+
         gen = ScriptGenerator(script_type=ScriptType.BASH)
         script = gen.generate_check_disk_health_script()
         assert "df -h" in script
@@ -681,6 +768,7 @@ class TestDistillManager:
 
     def test_training_job_to_dict(self):
         from app.core.learning.distill_manager import TrainingJob
+
         job = TrainingJob(job_id="j1", skill_id="test_skill")
         d = job.to_dict()
         assert d["job_id"] == "j1"
@@ -689,6 +777,7 @@ class TestDistillManager:
 
     def test_training_job_add_log(self):
         from app.core.learning.distill_manager import TrainingJob
+
         job = TrainingJob(job_id="j1", skill_id="test_skill")
         job.add_log("Starting training")
         assert len(job.logs) == 1
@@ -696,6 +785,7 @@ class TestDistillManager:
 
     def test_training_job_log_cap(self):
         from app.core.learning.distill_manager import TrainingJob
+
         job = TrainingJob(job_id="j1", skill_id="test_skill")
         for i in range(600):
             job.add_log(f"log {i}")
@@ -703,6 +793,7 @@ class TestDistillManager:
 
     def test_job_status_constants(self):
         from app.core.learning.distill_manager import JobStatus
+
         assert JobStatus.QUEUED == "queued"
         assert JobStatus.RUNNING == "running"
         assert JobStatus.DONE == "done"
@@ -712,6 +803,7 @@ class TestDistillManager:
     @patch("app.core.learning.distill_manager.DistillManager._start_worker")
     def test_submit_returns_job_id(self, mock_worker):
         from app.core.learning.distill_manager import DistillManager
+
         mgr = DistillManager.__new__(DistillManager)
         mgr._jobs = {}
         mgr._queues = {}
@@ -723,6 +815,7 @@ class TestDistillManager:
     @patch("app.core.learning.distill_manager.DistillManager._start_worker")
     def test_submit_duplicate_returns_existing(self, mock_worker):
         from app.core.learning.distill_manager import DistillManager
+
         mgr = DistillManager.__new__(DistillManager)
         mgr._jobs = {}
         mgr._queues = {}
@@ -734,6 +827,7 @@ class TestDistillManager:
     @patch("app.core.learning.distill_manager.DistillManager._start_worker")
     def test_get_job(self, mock_worker):
         from app.core.learning.distill_manager import DistillManager
+
         mgr = DistillManager.__new__(DistillManager)
         mgr._jobs = {}
         mgr._queues = {}
@@ -746,6 +840,7 @@ class TestDistillManager:
     @patch("app.core.learning.distill_manager.DistillManager._start_worker")
     def test_list_jobs(self, mock_worker):
         from app.core.learning.distill_manager import DistillManager
+
         mgr = DistillManager.__new__(DistillManager)
         mgr._jobs = {}
         mgr._queues = {}
@@ -758,6 +853,7 @@ class TestDistillManager:
     @patch("app.core.learning.distill_manager.DistillManager._start_worker")
     def test_list_jobs_filter_by_skill(self, mock_worker):
         from app.core.learning.distill_manager import DistillManager
+
         mgr = DistillManager.__new__(DistillManager)
         mgr._jobs = {}
         mgr._queues = {}
@@ -770,6 +866,7 @@ class TestDistillManager:
     @patch("app.core.learning.distill_manager.DistillManager._start_worker")
     def test_cancel_queued_job(self, mock_worker):
         from app.core.learning.distill_manager import DistillManager
+
         mgr = DistillManager.__new__(DistillManager)
         mgr._jobs = {}
         mgr._queues = {}
@@ -781,6 +878,7 @@ class TestDistillManager:
     @patch("app.core.learning.distill_manager.DistillManager._start_worker")
     def test_cancel_nonexistent_job(self, mock_worker):
         from app.core.learning.distill_manager import DistillManager
+
         mgr = DistillManager.__new__(DistillManager)
         mgr._jobs = {}
         mgr._queues = {}
@@ -790,6 +888,7 @@ class TestDistillManager:
     @patch("app.core.learning.distill_manager.DistillManager._start_worker")
     def test_push_event(self, mock_worker):
         from app.core.learning.distill_manager import DistillManager
+
         mgr = DistillManager.__new__(DistillManager)
         mgr._jobs = {}
         mgr._queues = {}
@@ -814,6 +913,7 @@ class TestRemediationPolicy:
     @pytest.fixture
     def policy(self):
         from app.core.ops.remediation_policy import RemediationPolicy
+
         return RemediationPolicy()
 
     def test_init_has_builtin_rules(self, policy):
@@ -824,17 +924,25 @@ class TestRemediationPolicy:
 
     def test_add_rule(self, policy):
         from app.core.ops.remediation_policy import RemediationRule
-        policy.add_rule(RemediationRule(
-            name="test_rule",
-            trigger_event="test_event",
-            action=lambda e, c: None,
-        ))
+
+        policy.add_rule(
+            RemediationRule(
+                name="test_rule",
+                trigger_event="test_event",
+                action=lambda e, c: None,
+            )
+        )
         names = [r["name"] for r in policy.list_rules()]
         assert "test_rule" in names
 
     def test_remove_rule(self, policy):
         from app.core.ops.remediation_policy import RemediationRule
-        policy.add_rule(RemediationRule(name="to_remove", trigger_event="x", action=lambda e, c: None))
+
+        policy.add_rule(
+            RemediationRule(
+                name="to_remove", trigger_event="x", action=lambda e, c: None
+            )
+        )
         policy.remove_rule("to_remove")
         names = [r["name"] for r in policy.list_rules()]
         assert "to_remove" not in names
@@ -849,6 +957,7 @@ class TestRemediationPolicy:
 
     def test_should_fire_respects_cooldown(self, policy):
         from app.core.ops.remediation_policy import RemediationRule
+
         rule = RemediationRule(
             name="test_cd",
             trigger_event="evt",
@@ -860,6 +969,7 @@ class TestRemediationPolicy:
 
     def test_should_fire_min_occurrences(self, policy):
         from app.core.ops.remediation_policy import RemediationRule
+
         rule = RemediationRule(
             name="test_min",
             trigger_event="evt",
@@ -872,13 +982,16 @@ class TestRemediationPolicy:
 
     def test_handle_fires_matching_rule(self, policy):
         from app.core.ops.remediation_policy import RemediationRule
+
         fired = []
-        policy.add_rule(RemediationRule(
-            name="test_fire",
-            trigger_event="my_event",
-            action=lambda e, c: fired.append(True),
-            cooldown_seconds=0,
-        ))
+        policy.add_rule(
+            RemediationRule(
+                name="test_fire",
+                trigger_event="my_event",
+                action=lambda e, c: fired.append(True),
+                cooldown_seconds=0,
+            )
+        )
         event = MagicMock()
         event.event_type = "my_event"
         policy.handle(event)
@@ -889,17 +1002,20 @@ class TestRemediationPolicy:
     @patch("app.core.ops.remediation_policy.gc.collect", return_value=10)
     def test_action_gc(self, mock_gc):
         from app.core.ops.remediation_policy import _action_gc
+
         _action_gc(MagicMock(), {})
         mock_gc.assert_called_once()
 
     def test_action_log_model_fallback(self):
         from app.core.ops.remediation_policy import _action_log_model_fallback
+
         event = MagicMock()
         event.detail = {"from": "gemini", "to": "local", "reason": "timeout"}
         _action_log_model_fallback(event, {})  # Should not raise
 
     def test_action_warn_queue_backlog(self):
         from app.core.ops.remediation_policy import _action_warn_queue_backlog
+
         _action_warn_queue_backlog(MagicMock(), {})  # Should not raise
 
 
@@ -916,17 +1032,20 @@ class TestSearchService:
         with patch.dict(os.environ, {}, clear=True):
             with patch("app.core.services.search_service.HAS_GENAI_V2", False):
                 from app.core.services.search_service import SearchService
+
                 svc = SearchService(api_key=None)
                 assert svc.client is None
 
     def test_search_no_genai(self):
         with patch("app.core.services.search_service.HAS_GENAI_V2", False):
             from app.core.services.search_service import SearchService
+
             svc = SearchService.__new__(SearchService)
             svc.api_key = None
             svc.client = None
             # Manually set the module-level flag for the duration of the call
             import app.core.services.search_service as ss_mod
+
             original = ss_mod.HAS_GENAI_V2
             ss_mod.HAS_GENAI_V2 = False
             try:
@@ -939,6 +1058,7 @@ class TestSearchService:
     def test_search_no_client(self):
         from app.core.services.search_service import SearchService
         import app.core.services.search_service as ss_mod
+
         original = ss_mod.HAS_GENAI_V2
         ss_mod.HAS_GENAI_V2 = True
         try:
@@ -954,6 +1074,7 @@ class TestSearchService:
     def test_search_success(self):
         from app.core.services.search_service import SearchService
         import app.core.services.search_service as ss_mod
+
         original = ss_mod.HAS_GENAI_V2
         ss_mod.HAS_GENAI_V2 = True
         try:
@@ -973,6 +1094,7 @@ class TestSearchService:
     def test_search_no_response_text(self):
         from app.core.services.search_service import SearchService
         import app.core.services.search_service as ss_mod
+
         original = ss_mod.HAS_GENAI_V2
         ss_mod.HAS_GENAI_V2 = True
         try:
@@ -990,6 +1112,7 @@ class TestSearchService:
     def test_search_exception(self):
         from app.core.services.search_service import SearchService
         import app.core.services.search_service as ss_mod
+
         original = ss_mod.HAS_GENAI_V2
         ss_mod.HAS_GENAI_V2 = True
         try:
@@ -1015,12 +1138,14 @@ class TestRAGService:
 
     def test_init_creates_dir(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         idx_dir = tmp_path / "rag_idx"
         svc = RAGService(index_dir=str(idx_dir), auto_load=False)
         assert idx_dir.exists()
 
     def test_stats_no_index(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         svc = RAGService(index_dir=str(tmp_path / "empty_rag"), auto_load=False)
         stats = svc.stats()
         assert stats["initialized"] is False
@@ -1028,28 +1153,33 @@ class TestRAGService:
 
     def test_clear_empty(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         svc = RAGService(index_dir=str(tmp_path / "rag"), auto_load=False)
         assert svc.clear() is True
         assert svc._doc_count == 0
 
     def test_retrieve_empty_index(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         svc = RAGService(index_dir=str(tmp_path / "rag"), auto_load=False)
         results = svc.retrieve("hello")
         assert results == []
 
     def test_save_no_vectorstore(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         svc = RAGService(index_dir=str(tmp_path / "rag"), auto_load=False)
         assert svc.save() is True
 
     def test_load_no_index_file(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         svc = RAGService(index_dir=str(tmp_path / "rag"), auto_load=False)
         assert svc.load() is False
 
     def test_split_text(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         svc = RAGService(index_dir=str(tmp_path / "rag"), auto_load=False)
         text = "Hello world. " * 200
         chunks = svc._split_text(text, source="test")
@@ -1058,17 +1188,20 @@ class TestRAGService:
 
     def test_hybrid_retrieve_empty(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         svc = RAGService(index_dir=str(tmp_path / "rag"), auto_load=False)
         results = svc.hybrid_retrieve("query")
         assert results == []
 
     def test_tokenize_function(self):
         from app.core.services.rag_service import _tokenize
+
         tokens = _tokenize("hello world test")
         assert len(tokens) > 0
 
     def test_rag_answer_no_chunks(self, tmp_path):
         from app.core.services.rag_service import RAGService
+
         svc = RAGService(index_dir=str(tmp_path / "rag"), auto_load=False)
         result = svc.rag_answer("what is koto?")
         assert result["context_used"] is False
@@ -1088,6 +1221,7 @@ class TestDistillRoutes:
     def app(self):
         from flask import Flask
         from app.api.distill_routes import distill_bp
+
         app = Flask(__name__)
         app.register_blueprint(distill_bp, url_prefix="/api/distill")
         app.config["TESTING"] = True

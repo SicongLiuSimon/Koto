@@ -73,7 +73,11 @@ class SkillCapabilityRegistry:
             fn: 符合 fn(user_input, context) 签名的可调用对象。
         """
         cls._registry[skill_id] = fn
-        logger.debug("[SkillCapabilityRegistry] register: %s → %s", skill_id, getattr(fn, "__name__", fn))
+        logger.debug(
+            "[SkillCapabilityRegistry] register: %s → %s",
+            skill_id,
+            getattr(fn, "__name__", fn),
+        )
 
     @classmethod
     def unregister(cls, skill_id: str) -> bool:
@@ -96,6 +100,7 @@ class SkillCapabilityRegistry:
             return True
         try:
             from app.core.skills.skill_manager import SkillManager
+
             skill = SkillManager.get_definition(skill_id)
             return bool(skill and skill.entry_point)
         except Exception:
@@ -109,11 +114,14 @@ class SkillCapabilityRegistry:
         """
         try:
             from app.core.skills.skill_manager import SkillManager
+
             skill = SkillManager.get_definition(skill_id)
             if skill and skill.plan_template:
                 return skill.plan_template
         except Exception as e:
-            logger.debug("[SkillCapabilityRegistry] get_plan_template(%s) error: %s", skill_id, e)
+            logger.debug(
+                "[SkillCapabilityRegistry] get_plan_template(%s) error: %s", skill_id, e
+            )
         return None
 
     @classmethod
@@ -124,11 +132,16 @@ class SkillCapabilityRegistry:
         """
         try:
             from app.core.skills.skill_manager import SkillManager
+
             skill = SkillManager.get_definition(skill_id)
             if skill and skill.executor_tools:
                 return skill.executor_tools
         except Exception as e:
-            logger.debug("[SkillCapabilityRegistry] get_executor_tools(%s) error: %s", skill_id, e)
+            logger.debug(
+                "[SkillCapabilityRegistry] get_executor_tools(%s) error: %s",
+                skill_id,
+                e,
+            )
         return None
 
     # ── 调用 API ──────────────────────────────────────────────────────────────
@@ -165,12 +178,15 @@ class SkillCapabilityRegistry:
 
         # 1. 代码注册表
         if skill_id in cls._registry:
-            logger.debug("[SkillCapabilityRegistry] dispatch via registry: %s", skill_id)
+            logger.debug(
+                "[SkillCapabilityRegistry] dispatch via registry: %s", skill_id
+            )
             return cls._registry[skill_id](user_input=user_input, context=ctx)
 
         # 2. entry_point 延迟加载
         try:
             from app.core.skills.skill_manager import SkillManager
+
             skill = SkillManager.get_definition(skill_id)
         except Exception as e:
             raise RuntimeError(f"无法加载 Skill '{skill_id}' 的定义: {e}") from e
@@ -183,7 +199,8 @@ class SkillCapabilityRegistry:
         fn = cls._load_entry_point(skill.entry_point)
         logger.debug(
             "[SkillCapabilityRegistry] dispatch via entry_point: %s → %s",
-            skill_id, skill.entry_point,
+            skill_id,
+            skill.entry_point,
         )
         return fn(user_input=user_input, context=ctx)
 
@@ -207,16 +224,12 @@ class SkillCapabilityRegistry:
 
         _ALLOWED_MODULE_PREFIXES = ("app.", "web.", "src.")
         if not any(module_path.startswith(p) for p in _ALLOWED_MODULE_PREFIXES):
-            raise ImportError(
-                f"模块 '{module_path}' 不在允许的模块前缀列表中"
-            )
+            raise ImportError(f"模块 '{module_path}' 不在允许的模块前缀列表中")
 
         try:
             mod = importlib.import_module(module_path)
         except ImportError as e:
-            raise ImportError(
-                f"无法导入 entry_point 模块 '{module_path}': {e}"
-            ) from e
+            raise ImportError(f"无法导入 entry_point 模块 '{module_path}': {e}") from e
 
         obj = mod
         for attr in attr_path.split("."):
@@ -228,7 +241,9 @@ class SkillCapabilityRegistry:
                 ) from e
 
         if not callable(obj):
-            raise TypeError(f"entry_point '{entry_point}' 解析到的对象不可调用: {type(obj)}")
+            raise TypeError(
+                f"entry_point '{entry_point}' 解析到的对象不可调用: {type(obj)}"
+            )
 
         return obj
 

@@ -91,11 +91,19 @@ def metrics():
             "failed": ledger.count(status=TaskStatus.FAILED),
             "cancelled": ledger.count(status=TaskStatus.CANCELLED),
             "running_list": [
-                {"id": t.task_id[:8], "type": t.task_type or "agent", "input": (t.user_input or "")[:40]}
+                {
+                    "id": t.task_id[:8],
+                    "type": t.task_type or "agent",
+                    "input": (t.user_input or "")[:40],
+                }
                 for t in running_tasks
             ],
             "pending_list": [
-                {"id": t.task_id[:8], "type": t.task_type or "agent", "input": (t.user_input or "")[:40]}
+                {
+                    "id": t.task_id[:8],
+                    "type": t.task_type or "agent",
+                    "input": (t.user_input or "")[:40],
+                }
                 for t in pending_tasks
             ],
         }

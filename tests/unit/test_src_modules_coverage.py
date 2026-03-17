@@ -24,10 +24,20 @@ import pytest
 # Pre-mock heavy GUI / optional modules before any src imports
 # ---------------------------------------------------------------------------
 _GUI_MOCKS = [
-    "tkinter", "tkinter.ttk", "tkinter.font", "tkinter.messagebox",
-    "tkinter.scrolledtext", "ttkbootstrap", "webview", "pystray",
-    "pystray.Icon", "pystray.Menu", "pystray.MenuItem",
-    "PIL", "PIL.Image", "PIL.ImageDraw",
+    "tkinter",
+    "tkinter.ttk",
+    "tkinter.font",
+    "tkinter.messagebox",
+    "tkinter.scrolledtext",
+    "ttkbootstrap",
+    "webview",
+    "pystray",
+    "pystray.Icon",
+    "pystray.Menu",
+    "pystray.MenuItem",
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageDraw",
 ]
 for _mod in _GUI_MOCKS:
     sys.modules.setdefault(_mod, MagicMock())
@@ -40,6 +50,7 @@ if "src" not in sys.path:
 # ═══════════════════════════════════════════════════════════════════════════
 #  TestKotoSetup
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestKotoSetup:
@@ -61,8 +72,12 @@ class TestKotoSetup:
         try:
             mod.APP_ROOT = tmp_path
             (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-            mod._write_gemini_config("AIzaTestKey12345678901234567890", "https://custom.api")
-            content = (tmp_path / "config" / "gemini_config.env").read_text(encoding="utf-8")
+            mod._write_gemini_config(
+                "AIzaTestKey12345678901234567890", "https://custom.api"
+            )
+            content = (tmp_path / "config" / "gemini_config.env").read_text(
+                encoding="utf-8"
+            )
             assert "GEMINI_API_KEY=AIzaTestKey12345678901234567890" in content
             assert "GEMINI_API_BASE=https://custom.api" in content
             assert "FORCE_PROXY=auto" in content
@@ -76,7 +91,9 @@ class TestKotoSetup:
             mod.APP_ROOT = tmp_path
             (tmp_path / "config").mkdir(parents=True, exist_ok=True)
             mod._write_gemini_config("AIzaKey123456789012345678901234")
-            content = (tmp_path / "config" / "gemini_config.env").read_text(encoding="utf-8")
+            content = (tmp_path / "config" / "gemini_config.env").read_text(
+                encoding="utf-8"
+            )
             assert "GEMINI_API_BASE=\n" in content
         finally:
             mod.APP_ROOT = orig
@@ -90,7 +107,9 @@ class TestKotoSetup:
             mod.APP_ROOT = tmp_path
             cfg = tmp_path / "config" / "gemini_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
-            cfg.write_text("GEMINI_API_KEY=AIzaRealKeyValue1234567890\n", encoding="utf-8")
+            cfg.write_text(
+                "GEMINI_API_KEY=AIzaRealKeyValue1234567890\n", encoding="utf-8"
+            )
             assert mod._api_key_configured() is True
         finally:
             mod.APP_ROOT = orig
@@ -186,6 +205,7 @@ class TestKotoSetup:
     def test_validate_api_key_http_400(self):
         mod = self._import_module()
         import urllib.error
+
         err = urllib.error.HTTPError("url", 400, "Bad", {}, None)
         with patch("urllib.request.urlopen", side_effect=err):
             ok, msg = mod._validate_api_key("bad_key")
@@ -195,6 +215,7 @@ class TestKotoSetup:
     def test_validate_api_key_http_403(self):
         mod = self._import_module()
         import urllib.error
+
         err = urllib.error.HTTPError("url", 403, "Forbidden", {}, None)
         with patch("urllib.request.urlopen", side_effect=err):
             ok, msg = mod._validate_api_key("forbidden_key")
@@ -229,7 +250,9 @@ class TestKotoSetup:
             mod.APP_ROOT = tmp_path
             cfg = tmp_path / "config" / "gemini_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
-            cfg.write_text("GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8")
+            cfg.write_text(
+                "GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8"
+            )
             with patch.object(mod, "_validate_api_key", return_value=(True, "")):
                 mod._run_setup_if_needed()
         finally:
@@ -242,8 +265,12 @@ class TestKotoSetup:
             mod.APP_ROOT = tmp_path
             cfg = tmp_path / "config" / "gemini_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
-            cfg.write_text("GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8")
-            with patch.object(mod, "_validate_api_key", return_value=(False, "⚠️ timeout")):
+            cfg.write_text(
+                "GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8"
+            )
+            with patch.object(
+                mod, "_validate_api_key", return_value=(False, "⚠️ timeout")
+            ):
                 mod._run_setup_if_needed()
                 # Network error with ⚠️ prefix should not block startup
         finally:
@@ -256,15 +283,23 @@ class TestKotoSetup:
             mod.APP_ROOT = tmp_path
             cfg = tmp_path / "config" / "gemini_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
-            cfg.write_text("GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8")
+            cfg.write_text(
+                "GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8"
+            )
             wizard_result = {"key": None, "base": "", "cancelled": True}
-            with patch.object(mod, "_validate_api_key", return_value=(False, "❌ 密钥无效")):
-                with patch.object(mod, "_show_api_setup_wizard", return_value=wizard_result) as mock_wiz:
+            with patch.object(
+                mod, "_validate_api_key", return_value=(False, "❌ 密钥无效")
+            ):
+                with patch.object(
+                    mod, "_show_api_setup_wizard", return_value=wizard_result
+                ) as mock_wiz:
                     mod._run_setup_if_needed()
                     mock_wiz.assert_called_once()
                     # Verify status message passed to wizard
                     call_args = mock_wiz.call_args
-                    assert "密钥无效" in call_args[1].get("initial_status", call_args[0][0] if call_args[0] else "")
+                    assert "密钥无效" in call_args[1].get(
+                        "initial_status", call_args[0][0] if call_args[0] else ""
+                    )
         finally:
             mod.APP_ROOT = orig
 
@@ -272,6 +307,7 @@ class TestKotoSetup:
 # ═══════════════════════════════════════════════════════════════════════════
 #  TestModelDownloader
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestModelDownloader:
@@ -350,10 +386,12 @@ class TestModelDownloader:
     def test_start_ollama_server_starts_and_succeeds(self):
         mod = self._import_module()
         call_count = 0
+
         def running_after_2():
             nonlocal call_count
             call_count += 1
             return call_count >= 2
+
         with patch.object(mod, "is_ollama_running", side_effect=running_after_2):
             with patch("subprocess.Popen"):
                 with patch("time.sleep"):
@@ -378,7 +416,12 @@ class TestModelDownloader:
         with patch("subprocess.Popen", return_value=mock_proc):
             prog_cb = Mock()
             log_cb = Mock()
-            assert mod.pull_model("gemma3:1b", progress_callback=prog_cb, log_callback=log_cb) is True
+            assert (
+                mod.pull_model(
+                    "gemma3:1b", progress_callback=prog_cb, log_callback=log_cb
+                )
+                is True
+            )
             prog_cb.assert_called()
 
     def test_pull_model_not_found(self):
@@ -440,6 +483,7 @@ class TestModelDownloader:
 # ═══════════════════════════════════════════════════════════════════════════
 #  TestLocalModelInstaller
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestLocalModelInstaller:
@@ -569,20 +613,25 @@ class TestLocalModelInstaller:
     def test_pull_model_success_parses_progress(self):
         mod = self._import_module()
         mock_proc = MagicMock()
-        mock_proc.stdout = iter(["pulling manifest\n", "\x1b[32m50%\x1b[0m done\n", "100% complete\n"])
+        mock_proc.stdout = iter(
+            ["pulling manifest\n", "\x1b[32m50%\x1b[0m done\n", "100% complete\n"]
+        )
         mock_proc.returncode = 0
         mock_proc.wait = Mock()
         with patch.object(mod, "_find_ollama_exe", return_value="ollama"):
             with patch("subprocess.Popen", return_value=mock_proc):
                 prog_cb = Mock()
                 log_cb = Mock()
-                assert mod.pull_model("gemma3:1b", prog_cb=prog_cb, log_cb=log_cb) is True
+                assert (
+                    mod.pull_model("gemma3:1b", prog_cb=prog_cb, log_cb=log_cb) is True
+                )
                 prog_cb.assert_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  TestKotoApp
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestKotoApp:
@@ -600,9 +649,9 @@ class TestKotoApp:
         # Mock faulthandler
         sys.modules.setdefault("faulthandler", MagicMock())
 
-        with patch("pathlib.Path.mkdir"), \
-             patch("builtins.open", mock_open()), \
-             patch("os.chdir"):
+        with patch("pathlib.Path.mkdir"), patch("builtins.open", mock_open()), patch(
+            "os.chdir"
+        ):
             import koto_app
         return koto_app
 
@@ -650,6 +699,7 @@ class TestKotoApp:
         api = mod.WindowAPI(window, "http://127.0.0.1:5000")
         with patch.dict("sys.modules", {"ctypes": MagicMock()}):
             import ctypes
+
             mock_user32 = MagicMock()
             mock_user32.GetSystemMetrics.return_value = 1920
             with patch("ctypes.windll", create=True) as mock_windll:
@@ -737,9 +787,11 @@ class TestKotoApp:
     def test_wait_for_port_timeout(self):
         mod = self._import_module()
         call_count = [0]
+
         def advancing_time():
             call_count[0] += 1
             return call_count[0] * 2
+
         with patch("socket.socket") as mock_cls:
             sock = MagicMock()
             sock.connect_ex.return_value = 1  # not connected

@@ -49,13 +49,19 @@ class TestPing:
 
 class TestHealthHappyPath:
     @patch("web.routes.health._check_ollama", return_value={"status": "ok"})
-    @patch("web.routes.health._check_disk", return_value={"status": "ok", "free_mb": 5000.0})
+    @patch(
+        "web.routes.health._check_disk",
+        return_value={"status": "ok", "free_mb": 5000.0},
+    )
     def test_returns_200(self, _disk, _ollama, client):
         resp = client.get("/api/health")
         assert resp.status_code == 200
 
     @patch("web.routes.health._check_ollama", return_value={"status": "ok"})
-    @patch("web.routes.health._check_disk", return_value={"status": "ok", "free_mb": 5000.0})
+    @patch(
+        "web.routes.health._check_disk",
+        return_value={"status": "ok", "free_mb": 5000.0},
+    )
     def test_has_expected_fields(self, _disk, _ollama, client):
         data = client.get("/api/health").get_json()
         assert data["status"] == "healthy"
@@ -67,7 +73,10 @@ class TestHealthHappyPath:
         assert "disk" in data["checks"]
 
     @patch("web.routes.health._check_ollama", return_value={"status": "ok"})
-    @patch("web.routes.health._check_disk", return_value={"status": "ok", "free_mb": 5000.0})
+    @patch(
+        "web.routes.health._check_disk",
+        return_value={"status": "ok", "free_mb": 5000.0},
+    )
     def test_version_read(self, _disk, _ollama, client):
         data = client.get("/api/health").get_json()
         # VERSION file exists in the repo; should not be "unknown"
@@ -85,7 +94,10 @@ class TestHealthDegraded:
         "web.routes.health._check_ollama",
         return_value={"status": "error", "detail": "connection refused"},
     )
-    @patch("web.routes.health._check_disk", return_value={"status": "ok", "free_mb": 5000.0})
+    @patch(
+        "web.routes.health._check_disk",
+        return_value={"status": "ok", "free_mb": 5000.0},
+    )
     def test_degraded_when_ollama_down(self, _disk, _ollama, client):
         data = client.get("/api/health").get_json()
         assert data["status"] == "degraded"
@@ -95,7 +107,10 @@ class TestHealthDegraded:
         "web.routes.health._check_ollama",
         return_value={"status": "error", "detail": "connection refused"},
     )
-    @patch("web.routes.health._check_disk", return_value={"status": "ok", "free_mb": 5000.0})
+    @patch(
+        "web.routes.health._check_disk",
+        return_value={"status": "ok", "free_mb": 5000.0},
+    )
     def test_degraded_still_returns_200(self, _disk, _ollama, client):
         resp = client.get("/api/health")
         assert resp.status_code == 200

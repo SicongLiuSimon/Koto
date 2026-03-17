@@ -2,6 +2,7 @@
 Batch 9 – unit tests for 10 web/app modules at 0 % coverage.
 Each class contains 5-8 focused tests covering __init__, key public methods, and error paths.
 """
+
 import json
 import os
 import sqlite3
@@ -22,6 +23,7 @@ class TestVoiceCommandProcessor:
 
     def _make(self):
         from web.voice_interaction import VoiceCommandProcessor
+
         return VoiceCommandProcessor()
 
     def test_init_registers_builtin_commands(self):
@@ -64,10 +66,14 @@ class TestVoiceCommandProcessor:
 
     def test_execute_command_action_raises(self):
         proc = self._make()
-        proc.register_command("bad", ["坏的"], lambda: (_ for _ in ()).throw(RuntimeError("boom")), "bad")
+        proc.register_command(
+            "bad", ["坏的"], lambda: (_ for _ in ()).throw(RuntimeError("boom")), "bad"
+        )
+
         # The lambda trick above won't raise on call; use a proper function
         def _raise():
             raise RuntimeError("boom")
+
         proc.register_command("bad2", ["坏命令"], _raise, "bad cmd")
         result = proc.execute_command("坏命令")
         assert result["success"] is False
@@ -87,12 +93,14 @@ class TestVoiceInteractionManager:
     @patch("web.voice_interaction.os.path.exists", return_value=False)
     def test_init_default_config(self, _mock_exists):
         from web.voice_interaction import VoiceInteractionManager
+
         mgr = VoiceInteractionManager()
         assert mgr.config["hotkey"] == "ctrl+shift+v"
 
     @patch("web.voice_interaction.os.path.exists", return_value=False)
     def test_get_config(self, _):
         from web.voice_interaction import VoiceInteractionManager
+
         mgr = VoiceInteractionManager()
         cfg = mgr.get_config()
         assert "language" in cfg
@@ -100,6 +108,7 @@ class TestVoiceInteractionManager:
     @patch("web.voice_interaction.os.path.exists", return_value=False)
     def test_register_state_callback(self, _):
         from web.voice_interaction import VoiceInteractionManager
+
         mgr = VoiceInteractionManager()
         cb = Mock()
         mgr.register_state_callback(cb)
@@ -108,6 +117,7 @@ class TestVoiceInteractionManager:
     @patch("web.voice_interaction.os.path.exists", return_value=False)
     def test_on_hotkey_pressed_fires_callbacks(self, _):
         from web.voice_interaction import VoiceInteractionManager
+
         mgr = VoiceInteractionManager()
         cb = Mock()
         mgr.register_state_callback(cb)
@@ -117,12 +127,14 @@ class TestVoiceInteractionManager:
     @patch("web.voice_interaction.os.path.exists", return_value=False)
     def test_cleanup_without_listener(self, _):
         from web.voice_interaction import VoiceInteractionManager
+
         mgr = VoiceInteractionManager()
         mgr.cleanup()  # should not raise
 
     @patch("web.voice_interaction.os.path.exists", return_value=False)
     def test_set_config_calls_save(self, _):
         from web.voice_interaction import VoiceInteractionManager
+
         mgr = VoiceInteractionManager()
         with patch.object(mgr, "save_config") as mock_save:
             mgr.set_config("timeout", 30)
@@ -138,8 +150,12 @@ class TestEnhancedVoiceRecognizer:
     """Tests for web.voice_recognition_enhanced"""
 
     def _make(self, **kw):
-        with patch("web.voice_recognition_enhanced.EnhancedVoiceRecognizer._init_speech_recognition", return_value=None):
+        with patch(
+            "web.voice_recognition_enhanced.EnhancedVoiceRecognizer._init_speech_recognition",
+            return_value=None,
+        ):
             from web.voice_recognition_enhanced import EnhancedVoiceRecognizer
+
             return EnhancedVoiceRecognizer(**kw)
 
     def test_init_defaults(self):
@@ -147,6 +163,7 @@ class TestEnhancedVoiceRecognizer:
         assert rec.max_retries == 3
         assert rec.cache_enabled is True
         from web.voice_recognition_enhanced import RecognitionStatus
+
         assert rec.status == RecognitionStatus.IDLE
 
     def test_recognize_microphone_no_engine(self):
@@ -171,6 +188,7 @@ class TestEnhancedVoiceRecognizer:
     def test_save_and_retrieve_cache(self):
         rec = self._make()
         from web.voice_recognition_enhanced import RecognitionResult
+
         fake_result = RecognitionResult(success=True, text="hello")
         audio = b"some_audio_data"
         rec._save_to_cache(audio, fake_result)
@@ -190,6 +208,7 @@ class TestEnhancedVoiceRecognizer:
 
     def test_recognition_result_to_dict(self):
         from web.voice_recognition_enhanced import RecognitionResult
+
         r = RecognitionResult(success=True, text="ok", confidence=0.9)
         d = r.to_dict()
         assert d["text"] == "ok"
@@ -208,6 +227,7 @@ class TestAutoExecutionEngine:
         ws = str(tmp_path / "workspace")
         os.makedirs(ws, exist_ok=True)
         from web.auto_execution import AutoExecutionEngine
+
         return AutoExecutionEngine(db_path=db, workspace_root=ws)
 
     def test_init_creates_db(self, tmp_path):
@@ -221,7 +241,9 @@ class TestAutoExecutionEngine:
 
     def test_register_custom_task(self, tmp_path):
         engine = self._make(tmp_path)
-        engine.register_task("custom", "Custom Task", "desc", "safe", lambda p: {"ok": True})
+        engine.register_task(
+            "custom", "Custom Task", "desc", "safe", lambda p: {"ok": True}
+        )
         assert "custom" in engine.task_handlers
 
     def test_authorize_and_can_execute(self, tmp_path):
@@ -272,6 +294,7 @@ class TestAutoCatalogScheduler:
         settings = tmp_path / "settings.json"
         settings.write_text("{}", encoding="utf-8")
         from web.auto_catalog_scheduler import AutoCatalogScheduler
+
         return AutoCatalogScheduler(settings_file=str(settings))
 
     def test_init_loads_empty_config(self, tmp_path):
@@ -327,6 +350,7 @@ class TestBehaviorMonitor:
     def _make(self, tmp_path):
         db = str(tmp_path / "behavior.db")
         from web.behavior_monitor import BehaviorMonitor
+
         return BehaviorMonitor(db_path=db)
 
     def test_init_creates_tables(self, tmp_path):
@@ -394,19 +418,28 @@ class TestAuditLogger:
     def _make(self, tmp_path):
         db = str(tmp_path / "audit.db")
         from web.audit_logger import AuditLogger
+
         return AuditLogger(db_path=db)
 
     def test_init_creates_tables(self, tmp_path):
         al = self._make(tmp_path)
         conn = sqlite3.connect(al.db_path)
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        tables = {
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
         conn.close()
         assert "audit_logs" in tables
 
     def test_log_action_returns_id(self, tmp_path):
         al = self._make(tmp_path)
         from web.audit_logger import AuditActionType
-        lid = al.log_action("org1", "user1", AuditActionType.USER_LOGIN, "user", "user1", "john")
+
+        lid = al.log_action(
+            "org1", "user1", AuditActionType.USER_LOGIN, "user", "user1", "john"
+        )
         assert isinstance(lid, str) and len(lid) > 0
 
     def test_log_user_login(self, tmp_path):
@@ -456,19 +489,24 @@ class TestAuthManager:
 
     def test_role_manager_default_roles(self):
         from web.auth_manager import RoleManager
+
         rm = RoleManager()
         assert "admin" in rm.roles
         assert "guest" in rm.roles
 
     def test_role_manager_create_custom_role(self):
         from web.auth_manager import RoleManager, Permission
+
         rm = RoleManager()
-        role = rm.create_role("editor", "Editor", {Permission.DATA_READ, Permission.DATA_WRITE})
+        role = rm.create_role(
+            "editor", "Editor", {Permission.DATA_READ, Permission.DATA_WRITE}
+        )
         assert role.role_id == "editor"
         assert Permission.DATA_WRITE in role.permissions
 
     def test_user_manager_create_and_get(self):
         from web.auth_manager import UserManager, UserRole
+
         um = UserManager()
         user = um.create_user("u1", "alice", "alice@test.com", "hash123")
         assert um.get_user("u1").username == "alice"
@@ -476,6 +514,7 @@ class TestAuthManager:
 
     def test_user_manager_has_permission(self):
         from web.auth_manager import UserManager, UserRole, Permission
+
         um = UserManager()
         um.create_user("u1", "alice", "a@b.com", "h", [UserRole.USER])
         assert um.has_permission("u1", Permission.DATA_READ) is True
@@ -483,6 +522,7 @@ class TestAuthManager:
 
     def test_user_manager_deactivate(self):
         from web.auth_manager import UserManager
+
         um = UserManager()
         um.create_user("u1", "bob", "b@b.com", "h")
         assert um.deactivate_user("u1") is True
@@ -490,12 +530,14 @@ class TestAuthManager:
 
     def test_session_manager_create_and_validate(self):
         from web.auth_manager import SessionManager
+
         sm = SessionManager()
         sess = sm.create_session("s1", "u1", "127.0.0.1")
         assert sm.validate_session("s1") is True
 
     def test_session_manager_terminate(self):
         from web.auth_manager import SessionManager
+
         sm = SessionManager()
         sm.create_session("s1", "u1", "127.0.0.1")
         assert sm.terminate_session("s1") is True
@@ -503,6 +545,7 @@ class TestAuthManager:
 
     def test_authentication_manager_status(self):
         from web.auth_manager import AuthenticationManager
+
         am = AuthenticationManager()
         status = am.get_auth_status()
         assert "users" in status
@@ -519,6 +562,7 @@ class TestBrowserAutomation:
     def _make(self):
         with patch("web.browser_automation.BrowserAutomation._init_driver"):
             from web.browser_automation import BrowserAutomation
+
             ba = BrowserAutomation(headless=True)
             ba.driver = None  # start with no driver
             return ba
@@ -569,6 +613,7 @@ class TestImageManager:
 
     def _make(self, tmp_path):
         from web.image_manager import ImageManager
+
         return ImageManager(client=None, workspace_dir=str(tmp_path))
 
     def test_init_creates_images_dir(self, tmp_path):
@@ -624,6 +669,7 @@ class TestCalendarManager:
                 # Redirect project_root to tmp_path so file I/O stays in temp
                 mock_dir.side_effect = lambda p: str(tmp_path)
                 from web.calendar_manager import CalendarManager
+
                 mgr = CalendarManager()
         return mgr
 
@@ -635,7 +681,9 @@ class TestCalendarManager:
         mgr = self._make(tmp_path)
         with patch("web.calendar_manager.get_reminder_manager") as mock_rm:
             mock_rm.return_value = MagicMock()
-            eid = mgr.add_event("Meeting", "Team sync", datetime.now() + timedelta(hours=1))
+            eid = mgr.add_event(
+                "Meeting", "Team sync", datetime.now() + timedelta(hours=1)
+            )
         assert eid.startswith("event_")
         assert len(mgr.events) >= 1
 

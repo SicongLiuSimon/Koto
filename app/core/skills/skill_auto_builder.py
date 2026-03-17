@@ -763,7 +763,9 @@ class SkillAutoBuilder:
             profile = StyleAnalyzer.analyze_text(effective_description)
             if context:
                 profile = cls._apply_profile_bias(profile, context)
-            _, intent_desc = PromptSynthesizer.synthesize(profile, name, effective_description)
+            _, intent_desc = PromptSynthesizer.synthesize(
+                profile, name, effective_description
+            )
 
             return SkillDefinition(
                 id=skill_id,
@@ -779,7 +781,9 @@ class SkillAutoBuilder:
                         name="input", description="用户输入的内容", required=True
                     )
                 ],
-                output_spec=OutputSpec(format="any", description=f"以「{name}」风格回答"),
+                output_spec=OutputSpec(
+                    format="any", description=f"以「{name}」风格回答"
+                ),
                 task_types=["CHAT"],
                 enabled=enabled,
                 version="1.0.0",
@@ -803,7 +807,9 @@ class SkillAutoBuilder:
             )
 
     @classmethod
-    def _generate_prompt_with_ai(cls, name: str, description: str, model: str) -> Optional[str]:
+    def _generate_prompt_with_ai(
+        cls, name: str, description: str, model: str
+    ) -> Optional[str]:
         """
         调用 Gemini API 生成 system_prompt_template。
         成功返回 prompt 字符串，失败返回 None。

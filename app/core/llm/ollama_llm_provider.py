@@ -246,11 +246,13 @@ class OllamaLLMProvider(LLMProvider):
         now = time.time()
         if (
             OllamaLLMProvider._auto_model
-            and (now - OllamaLLMProvider._auto_model_ts) < OllamaLLMProvider._AUTO_MODEL_TTL
+            and (now - OllamaLLMProvider._auto_model_ts)
+            < OllamaLLMProvider._AUTO_MODEL_TTL
         ):
             return OllamaLLMProvider._auto_model
         try:
             from app.core.routing.local_model_router import LocalModelRouter
+
             best = LocalModelRouter.pick_best_chat_model()
             if best:
                 OllamaLLMProvider._auto_model = best
@@ -260,6 +262,7 @@ class OllamaLLMProvider(LLMProvider):
         except Exception:
             pass
         return "qwen3:8b"  # 绝对保底，实际运行时 Ollama 应已安装
+
     def generate_content(
         self,
         prompt: Union[str, List[Dict[str, Any]]],

@@ -14,8 +14,14 @@ _LOGGER = "src.config_validator"
 
 def _clear_env(monkeypatch):
     """Remove all env vars that validate_startup_config reads."""
-    for key in ("KOTO_PORT", "PORT", "GEMINI_API_KEY", "API_KEY",
-                "KOTO_WORKSPACE", "OLLAMA_BASE_URL"):
+    for key in (
+        "KOTO_PORT",
+        "PORT",
+        "GEMINI_API_KEY",
+        "API_KEY",
+        "KOTO_WORKSPACE",
+        "OLLAMA_BASE_URL",
+    ):
         monkeypatch.delenv(key, raising=False)
 
 
@@ -119,8 +125,9 @@ class TestConfigDirWritability:
         monkeypatch.setenv("GEMINI_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
 
-        with patch("src.config_validator.Path") as MockPath, \
-             patch("src.config_validator.os.access", return_value=False):
+        with patch("src.config_validator.Path") as MockPath, patch(
+            "src.config_validator.os.access", return_value=False
+        ):
             config_sentinel = MockPath.return_value
             config_sentinel.exists.return_value = True
 
@@ -132,10 +139,14 @@ class TestConfigDirWritability:
 
             def path_side_effect(arg):
                 if arg == "config":
-                    mock_obj = type("FakePath", (), {
-                        "exists": lambda self: True,
-                        "__str__": lambda self: "config",
-                    })()
+                    mock_obj = type(
+                        "FakePath",
+                        (),
+                        {
+                            "exists": lambda self: True,
+                            "__str__": lambda self: "config",
+                        },
+                    )()
                     return mock_obj
                 return real_path_cls(arg)
 

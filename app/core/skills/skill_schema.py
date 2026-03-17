@@ -378,7 +378,6 @@ class SkillDefinition:
 
     # ── 方法 ─────────────────────────────────────────────────────────────────
 
-
     def render_prompt(self, variables: Optional[Dict[str, Any]] = None) -> str:
         """
         将 system_prompt_template 中的 {variable} 占位符替换为实际值。
@@ -396,7 +395,11 @@ class SkillDefinition:
         try:
             return template.format(**variables)
         except KeyError as e:
-            logger.warning("[SkillDefinition] render_prompt() missing variable %s for skill=%s", e, self.id)
+            logger.warning(
+                "[SkillDefinition] render_prompt() missing variable %s for skill=%s",
+                e,
+                self.id,
+            )
             return template
 
     def to_mcp_tool(self) -> Dict[str, Any]:

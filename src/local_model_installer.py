@@ -58,12 +58,14 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "极低资源，适合 4 GB 以下内存，速度最快",
     },
     {
-        "tag":     "llama3.2:3b",
-        "name":    "LLaMA 3.2 3B",
-        "badge":   "轻量",
-        "vram":    2.5, "ram": 6,  "size_gb": 2.0,
-        "tier":    "light",
-        "desc":    "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
+        "tag": "llama3.2:3b",
+        "name": "LLaMA 3.2 3B",
+        "badge": "轻量",
+        "vram": 2.5,
+        "ram": 6,
+        "size_gb": 2.0,
+        "tier": "light",
+        "desc": "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
     },
     {
         "tag": "gemma3:4b",
@@ -76,20 +78,24 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "8 GB+ 内存，效果优秀，推荐大多数用户",
     },
     {
-        "tag":     "qwen2.5:7b",
-        "name":    "Qwen 2.5 7B",
-        "badge":   "中文强化",
-        "vram":    6.0, "ram": 12, "size_gb": 4.7,
-        "tier":    "powerful",
-        "desc":    "12 GB+ 内存，中文理解出色，复杂任务首选",
+        "tag": "qwen2.5:7b",
+        "name": "Qwen 2.5 7B",
+        "badge": "中文强化",
+        "vram": 6.0,
+        "ram": 12,
+        "size_gb": 4.7,
+        "tier": "powerful",
+        "desc": "12 GB+ 内存，中文理解出色，复杂任务首选",
     },
     {
-        "tag":     "llama3.1:8b",
-        "name":    "LLaMA 3.1 8B",
-        "badge":   "高性能",
-        "vram":    7.0, "ram": 16, "size_gb": 5.0,
-        "tier":    "highend",
-        "desc":    "16 GB 内存 / NVIDIA 8 GB 显卡，综合能力强",
+        "tag": "llama3.1:8b",
+        "name": "LLaMA 3.1 8B",
+        "badge": "高性能",
+        "vram": 7.0,
+        "ram": 16,
+        "size_gb": 5.0,
+        "tier": "highend",
+        "desc": "16 GB 内存 / NVIDIA 8 GB 显卡，综合能力强",
     },
     {
         "tag": "qwen2.5:14b",
@@ -274,10 +280,10 @@ def get_system_info() -> Dict:
 
 
 def recommend_models(info: Dict) -> List[Dict]:
-    ram   = info["ram_gb"]
-    vram  = info["gpu_vram_gb"]
-    eff   = max(ram, vram * 1.5)
-    out   = [m for m in MODEL_CATALOG if eff >= m["ram"] or vram >= m["vram"]]
+    ram = info["ram_gb"]
+    vram = info["gpu_vram_gb"]
+    eff = max(ram, vram * 1.5)
+    out = [m for m in MODEL_CATALOG if eff >= m["ram"] or vram >= m["vram"]]
     return out or [MODEL_CATALOG[0]]
 
 
@@ -368,10 +374,14 @@ def _download_with_retry(
         for attempt in range(1, max_attempts_per_url + 1):
             try:
                 if log_cb:
-                    log_cb(f"🌐 下载源: {url}（第 {attempt}/{max_attempts_per_url} 次）")
+                    log_cb(
+                        f"🌐 下载源: {url}（第 {attempt}/{max_attempts_per_url} 次）"
+                    )
 
                 req = urllib.request.Request(url, headers={"User-Agent": user_agent})
-                with urllib.request.urlopen(req, timeout=45) as resp, open(dest_path, "wb") as fp:
+                with urllib.request.urlopen(req, timeout=45) as resp, open(
+                    dest_path, "wb"
+                ) as fp:
                     total = int(resp.headers.get("Content-Length", "0") or "0")
                     downloaded = 0
                     while True:
@@ -413,8 +423,11 @@ def pull_model(tag: str, prog_cb=None, log_cb=None, max_attempts: int = 2) -> bo
                 log_cb(f"🔁 重试下载模型（第 {attempt}/{max_attempts} 次）...")
             proc = subprocess.Popen(
                 [exe, "pull", tag],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             for line in proc.stdout:
@@ -724,7 +737,7 @@ def run_gui():
 
         for m in ordered:
             is_installed = m["tag"] in installed_tags
-            is_rec = m == ordered[0]   # 最高规格推荐
+            is_rec = m == ordered[0]  # 最高规格推荐
             color = TIER_COLOR.get(m["tier"], MUTED)
 
             card = tk.Frame(scroll_frame, bg=PANEL, pady=0)
@@ -1157,6 +1170,7 @@ def run_gui():
             log(f"📥 下载 Ollama: {OLLAMA_WIN_URL}")
             setup_path = APP_DIR / "OllamaSetup_tmp.exe"
             try:
+
                 def _progress_cb(p):
                     if _cancel.is_set():
                         return
@@ -1172,7 +1186,8 @@ def run_gui():
                 )
                 if not ok_download:
                     raise RuntimeError("所有下载源均失败")
-                if cancelled(): return
+                if cancelled():
+                    return
                 log("✅ Ollama 下载完成，正在静默安装...")
                 set_prog(28, "安装 Ollama...")
                 install_ret = subprocess.run(

@@ -6,6 +6,7 @@ Tests for large web modules at 0% coverage:
   - organize_cleanup.py (340 stmts)
   - file_analyzer.py (335 stmts)
 """
+
 import pytest
 import os
 import re
@@ -25,10 +26,11 @@ class TestDocumentFeedback:
     """Tests for web.document_feedback.DocumentFeedbackSystem"""
 
     def _make(self, **kw):
-        with patch("web.document_reader.DocumentReader"), \
-             patch("web.document_editor.DocumentEditor"), \
-             patch("web.document_annotator.DocumentAnnotator"):
+        with patch("web.document_reader.DocumentReader"), patch(
+            "web.document_editor.DocumentEditor"
+        ), patch("web.document_annotator.DocumentAnnotator"):
             from web.document_feedback import DocumentFeedbackSystem
+
             client = kw.get("client")
             model = kw.get("model", "gemini-test")
             obj = DocumentFeedbackSystem(gemini_client=client, default_model_id=model)
@@ -54,11 +56,13 @@ class TestDocumentFeedback:
 
     def test_extract_summary_fallback_text(self):
         obj = self._make()
-        assert obj._extract_summary("Some plain text review") == "Some plain text review"
+        assert (
+            obj._extract_summary("Some plain text review") == "Some plain text review"
+        )
 
     def test_extract_summary_invalid_json(self):
         obj = self._make()
-        resp = '```json\n{invalid}\n```'
+        resp = "```json\n{invalid}\n```"
         assert obj._extract_summary(resp) == "AI建议已生成"
 
     def test_extract_summary_empty(self):
@@ -77,7 +81,11 @@ class TestDocumentFeedback:
     # -- _INTERACTIONS_ONLY_MODELS ------------------------------------------
     def test_interactions_only_models_constant(self):
         from web.document_feedback import DocumentFeedbackSystem
-        assert "deep-research-pro-preview-12-2025" in DocumentFeedbackSystem._INTERACTIONS_ONLY_MODELS
+
+        assert (
+            "deep-research-pro-preview-12-2025"
+            in DocumentFeedbackSystem._INTERACTIONS_ONLY_MODELS
+        )
 
     # -- _format_model_table ------------------------------------------------
     def test_format_model_table_empty(self):
@@ -149,9 +157,7 @@ class TestDocumentFeedback:
     # -- _parse_annotation_response -----------------------------------------
     def test_parse_annotation_json_array(self):
         obj = self._make()
-        payload = json.dumps([
-            {"原文": "旧文本", "改为": "新文本", "原因": "简化"}
-        ])
+        payload = json.dumps([{"原文": "旧文本", "改为": "新文本", "原因": "简化"}])
         resp = f"```json\n{payload}\n```"
         annotations = obj._parse_annotation_response(resp)
         assert len(annotations) == 1
@@ -166,9 +172,7 @@ class TestDocumentFeedback:
 
     def test_parse_annotation_dict_wrapper(self):
         obj = self._make()
-        payload = json.dumps({
-            "annotations": [{"original": "old", "modified": "new"}]
-        })
+        payload = json.dumps({"annotations": [{"original": "old", "modified": "new"}]})
         annotations = obj._parse_annotation_response(payload)
         assert len(annotations) == 1
 
@@ -215,6 +219,7 @@ class TestDocumentFeedback:
     # -- _fallback_annotations_from_chunk -----------------------------------
     def test_fallback_passive(self):
         from web.document_feedback import DocumentFeedbackSystem
+
         chunk = "本文被广泛使用的技术被认为很重要"
         result = DocumentFeedbackSystem._fallback_annotations_from_chunk(chunk)
         assert isinstance(result, list)
@@ -223,12 +228,14 @@ class TestDocumentFeedback:
 
     def test_fallback_nominalization(self):
         from web.document_feedback import DocumentFeedbackSystem
+
         chunk = "我们对系统进行了优化，对数据进行分析"
         result = DocumentFeedbackSystem._fallback_annotations_from_chunk(chunk)
         assert isinstance(result, list)
 
     def test_fallback_empty_chunk(self):
         from web.document_feedback import DocumentFeedbackSystem
+
         assert DocumentFeedbackSystem._fallback_annotations_from_chunk("") == []
 
 
@@ -241,6 +248,7 @@ class TestTrackChangesEditor:
 
     def _make(self, **kw):
         from web.track_changes_editor import TrackChangesEditor
+
         return TrackChangesEditor(**kw)
 
     # -- construction -------------------------------------------------------
@@ -256,6 +264,7 @@ class TestTrackChangesEditor:
     # -- _esc ---------------------------------------------------------------
     def test_esc_basic(self):
         from web.track_changes_editor import TrackChangesEditor
+
         assert TrackChangesEditor._esc("a & b") == "a &amp; b"
         assert TrackChangesEditor._esc("<tag>") == "&lt;tag&gt;"
         assert TrackChangesEditor._esc('"hi"') == "&quot;hi&quot;"
@@ -263,17 +272,20 @@ class TestTrackChangesEditor:
 
     def test_esc_empty(self):
         from web.track_changes_editor import TrackChangesEditor
+
         assert TrackChangesEditor._esc("") == ""
         assert TrackChangesEditor._esc(None) == ""
 
     def test_esc_no_special(self):
         from web.track_changes_editor import TrackChangesEditor
+
         assert TrackChangesEditor._esc("hello world") == "hello world"
 
     # -- _get_run_text ------------------------------------------------------
     def test_get_run_text(self):
         from lxml import etree
         from docx.oxml.ns import qn
+
         obj = self._make()
         ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         run_xml = f'<w:r xmlns:w="{ns}"><w:t>Hello</w:t><w:t> World</w:t></w:r>'
@@ -282,6 +294,7 @@ class TestTrackChangesEditor:
 
     def test_get_run_text_empty(self):
         from lxml import etree
+
         obj = self._make()
         ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         run_xml = f'<w:r xmlns:w="{ns}"></w:r>'
@@ -295,6 +308,7 @@ class TestTrackChangesEditor:
 
     def test_clone_rpr_element(self):
         from lxml import etree
+
         obj = self._make()
         ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         rpr = etree.fromstring(f'<w:rPr xmlns:w="{ns}"><w:b/></w:rPr>')
@@ -305,11 +319,12 @@ class TestTrackChangesEditor:
     # -- _make_run ----------------------------------------------------------
     def test_make_run(self):
         from lxml import etree
+
         obj = self._make()
         ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
         rpr_xml = f'<w:rPr xmlns:w="{ns}"><w:b/></w:rPr>'
         run = obj._make_run("Hello", rpr_xml)
-        text = run.findall(f'{{{ns}}}t')
+        text = run.findall(f"{{{ns}}}t")
         assert len(text) == 1
         assert text[0].text == "Hello"
 
@@ -323,7 +338,9 @@ class TestTrackChangesEditor:
     def test_add_comments_content_type_new(self):
         obj = self._make()
         ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
-        xml_str = f'<?xml version="1.0" encoding="UTF-8"?><Types xmlns="{ct_ns}"></Types>'
+        xml_str = (
+            f'<?xml version="1.0" encoding="UTF-8"?><Types xmlns="{ct_ns}"></Types>'
+        )
         result = obj._add_comments_content_type(xml_str.encode("utf-8"))
         assert b"comments.xml" in result
 
@@ -334,7 +351,7 @@ class TestTrackChangesEditor:
             f'<?xml version="1.0" encoding="UTF-8"?>'
             f'<Types xmlns="{ct_ns}">'
             f'<Override PartName="/word/comments.xml" ContentType="x"/>'
-            f'</Types>'
+            f"</Types>"
         )
         data = xml_str.encode("utf-8")
         result = obj._add_comments_content_type(data)
@@ -349,7 +366,7 @@ class TestTrackChangesEditor:
             f'<?xml version="1.0" encoding="UTF-8"?>'
             f'<Relationships xmlns="{rel_ns}">'
             f'<Relationship Id="rId1" Type="http://example.com/doc" Target="document.xml"/>'
-            f'</Relationships>'
+            f"</Relationships>"
         )
         result = obj._add_comments_relationship(xml_str.encode("utf-8"))
         assert b"comments.xml" in result
@@ -362,7 +379,7 @@ class TestTrackChangesEditor:
             f'<?xml version="1.0" encoding="UTF-8"?>'
             f'<Relationships xmlns="{rel_ns}">'
             f'<Relationship Id="rId5" Type="http://example.com/comments" Target="comments.xml"/>'
-            f'</Relationships>'
+            f"</Relationships>"
         )
         data = xml_str.encode("utf-8")
         result = obj._add_comments_relationship(data)
@@ -378,6 +395,7 @@ class TestBatchFileOps:
 
     def _make(self):
         from web.batch_file_ops import BatchFileOpsManager
+
         return BatchFileOpsManager()
 
     # -- construction -------------------------------------------------------
@@ -606,12 +624,18 @@ class TestBatchFileOps:
     # -- _build_summary & _job_to_dict --------------------------------------
     def test_build_summary(self):
         from web.batch_file_ops import BatchJobRecord
+
         mgr = self._make()
         job = BatchJobRecord(
-            job_id="abc", name="test", operation="convert",
-            input_dir="/in", output_dir="/out",
-            total_items=10, processed_items=8, failed_items=2,
-            errors=["err1"]
+            job_id="abc",
+            name="test",
+            operation="convert",
+            input_dir="/in",
+            output_dir="/out",
+            total_items=10,
+            processed_items=8,
+            failed_items=2,
+            errors=["err1"],
         )
         summary = mgr._build_summary(job)
         assert "10" in summary
@@ -624,6 +648,7 @@ class TestBatchFileOps:
     # -- _emit / stream_job -------------------------------------------------
     def test_emit_and_stream(self):
         import queue as q
+
         mgr = self._make()
         job = mgr.create_job("j", "convert", "/in", "/out", {})
         mgr._emit(job.job_id, {"type": "progress", "current": 1})
@@ -654,6 +679,7 @@ class TestOrganizeCleanup:
 
     def _make(self, root=None):
         from web.organize_cleanup import OrganizeCleanup
+
         return OrganizeCleanup(organize_root=root or "workspace/_organize")
 
     # -- construction -------------------------------------------------------
@@ -674,6 +700,7 @@ class TestOrganizeCleanup:
     # -- _REVISION_PATTERNS ------------------------------------------------
     def test_revision_patterns(self):
         from web.organize_cleanup import OrganizeCleanup
+
         assert len(OrganizeCleanup._REVISION_PATTERNS) == 8
 
     # -- _clean_folder_name -------------------------------------------------
@@ -714,6 +741,7 @@ class TestOrganizeCleanup:
     # -- _file_hash ---------------------------------------------------------
     def test_file_hash(self, tmp_path):
         from web.organize_cleanup import OrganizeCleanup
+
         f = tmp_path / "test.txt"
         f.write_bytes(b"hello world")
         h = OrganizeCleanup._file_hash(f)
@@ -722,12 +750,14 @@ class TestOrganizeCleanup:
 
     def test_file_hash_nonexistent(self, tmp_path):
         from web.organize_cleanup import OrganizeCleanup
+
         h = OrganizeCleanup._file_hash(tmp_path / "nope.txt")
         assert h == ""
 
     # -- _unique_dest -------------------------------------------------------
     def test_unique_dest(self, tmp_path):
         from web.organize_cleanup import OrganizeCleanup
+
         target = tmp_path / "file.txt"
         # File doesn't exist yet – _unique_dest always appends counter
         result = OrganizeCleanup._unique_dest(target)
@@ -736,6 +766,7 @@ class TestOrganizeCleanup:
 
     def test_unique_dest_collisions(self, tmp_path):
         from web.organize_cleanup import OrganizeCleanup
+
         (tmp_path / "file_1.txt").write_text("x")
         result = OrganizeCleanup._unique_dest(tmp_path / "file.txt")
         assert result.name == "file_2.txt"
@@ -828,6 +859,7 @@ class TestFileAnalyzer:
 
     def _make(self):
         from web.file_analyzer import FileAnalyzer
+
         return FileAnalyzer()
 
     # -- construction -------------------------------------------------------
@@ -841,6 +873,7 @@ class TestFileAnalyzer:
 
     def test_class_constants(self):
         from web.file_analyzer import FileAnalyzer
+
         assert FileAnalyzer.OLLAMA_URL == "http://localhost:11434"
         assert FileAnalyzer.AI_MODEL == "qwen3:8b"
 
@@ -962,12 +995,16 @@ class TestFileAnalyzer:
     # -- _generate_folder_path ----------------------------------------------
     def test_generate_folder_path_with_entity(self):
         fa = self._make()
-        path = fa._generate_folder_path("finance", "contract", "2024", [], entity_name="华芯科技")
+        path = fa._generate_folder_path(
+            "finance", "contract", "2024", [], entity_name="华芯科技"
+        )
         assert path == "finance/华芯科技"
 
     def test_generate_folder_path_generic_entity(self):
         fa = self._make()
-        path = fa._generate_folder_path("finance", "contract", "2024", [], entity_name="报告")
+        path = fa._generate_folder_path(
+            "finance", "contract", "2024", [], entity_name="报告"
+        )
         assert path == "finance/contract"
 
     def test_generate_folder_path_no_entity(self):
@@ -989,7 +1026,9 @@ class TestFileAnalyzer:
 
     def test_extract_primary_entity_company_suffix(self):
         fa = self._make()
-        name, etype = fa._extract_primary_entity("file.txt", "北京明德科技有限公司签署了合同")
+        name, etype = fa._extract_primary_entity(
+            "file.txt", "北京明德科技有限公司签署了合同"
+        )
         assert name is not None
         assert etype == "company"
 
@@ -1030,7 +1069,11 @@ class TestFileAnalyzer:
         assert content == "image.bmp"  # falls back to filename
 
     # -- analyze_file -------------------------------------------------------
-    @patch.object(__import__('web.file_analyzer', fromlist=['FileAnalyzer']).FileAnalyzer, '_ai_classify', return_value=None)
+    @patch.object(
+        __import__("web.file_analyzer", fromlist=["FileAnalyzer"]).FileAnalyzer,
+        "_ai_classify",
+        return_value=None,
+    )
     def test_analyze_file_basic(self, mock_ai, tmp_path):
         fa = self._make()
         f = tmp_path / "投资合同_2024.txt"
@@ -1041,14 +1084,22 @@ class TestFileAnalyzer:
         assert result["industry"] == "finance"
         assert result["timestamp"] == "2024"
 
-    @patch.object(__import__('web.file_analyzer', fromlist=['FileAnalyzer']).FileAnalyzer, '_ai_classify', return_value=None)
+    @patch.object(
+        __import__("web.file_analyzer", fromlist=["FileAnalyzer"]).FileAnalyzer,
+        "_ai_classify",
+        return_value=None,
+    )
     def test_analyze_file_not_found(self, mock_ai):
         fa = self._make()
         result = fa.analyze_file("/nonexistent/file.txt")
         assert result["success"] is False
 
     # -- analyze_batch ------------------------------------------------------
-    @patch.object(__import__('web.file_analyzer', fromlist=['FileAnalyzer']).FileAnalyzer, '_ai_classify', return_value=None)
+    @patch.object(
+        __import__("web.file_analyzer", fromlist=["FileAnalyzer"]).FileAnalyzer,
+        "_ai_classify",
+        return_value=None,
+    )
     def test_analyze_batch(self, mock_ai, tmp_path):
         fa = self._make()
         f1 = tmp_path / "a.txt"
@@ -1063,6 +1114,7 @@ class TestFileAnalyzer:
     @patch("web.file_analyzer.requests.post")
     def test_ai_classify_ollama_unavailable(self, mock_post, tmp_path):
         from web.file_analyzer import FileAnalyzer
+
         FileAnalyzer._ai_available = False
         FileAnalyzer._ai_check_time = datetime.now().timestamp()
         fa = self._make()

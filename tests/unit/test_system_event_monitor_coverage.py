@@ -21,6 +21,7 @@ from app.core.monitoring.system_event_monitor import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_event(**overrides) -> SystemEvent:
     """Create a SystemEvent with sensible defaults, overridden as needed."""
     defaults = dict(
@@ -44,6 +45,7 @@ def _make_monitor(**kwargs) -> SystemEventMonitor:
 # ---------------------------------------------------------------------------
 # 1. SystemEvent dataclass
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 class TestSystemEvent:
@@ -87,6 +89,7 @@ class TestSystemEvent:
 # ---------------------------------------------------------------------------
 # 2–10. SystemEventMonitor public API
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 class TestSystemEventMonitorInit:
@@ -223,7 +226,9 @@ class TestGetEvents:
 
     def test_limit(self):
         monitor = _make_monitor()
-        monitor.events = [_make_event(timestamp=f"2025-01-{i+1:02d}T00:00:00") for i in range(10)]
+        monitor.events = [
+            _make_event(timestamp=f"2025-01-{i+1:02d}T00:00:00") for i in range(10)
+        ]
         result = monitor.get_events(limit=3)
         assert len(result) == 3
 
@@ -308,6 +313,7 @@ class TestClearEvents:
 # 11–14. Internal _check_system_metrics (psutil mocked)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 class TestCheckSystemMetrics:
     """Tests for _check_system_metrics with mocked psutil."""
@@ -318,7 +324,9 @@ class TestCheckSystemMetrics:
     @patch("psutil.cpu_percent", return_value=95.0)
     def test_high_cpu_spike(self, mock_cpu, mock_mem, mock_disk, mock_procs):
         """CPU spike (>threshold AND >20% jump) records cpu_spike event."""
-        mock_mem.return_value = MagicMock(percent=50.0, used=4 * 1024**3, total=16 * 1024**3)
+        mock_mem.return_value = MagicMock(
+            percent=50.0, used=4 * 1024**3, total=16 * 1024**3
+        )
         mock_disk.return_value = MagicMock(percent=50.0, used=50 * 1024**3)
 
         monitor = _make_monitor()
@@ -335,7 +343,9 @@ class TestCheckSystemMetrics:
     @patch("psutil.cpu_percent", return_value=90.0)
     def test_high_cpu_no_spike(self, mock_cpu, mock_mem, mock_disk, mock_procs):
         """CPU above threshold but no spike (small jump) records cpu_high."""
-        mock_mem.return_value = MagicMock(percent=50.0, used=4 * 1024**3, total=16 * 1024**3)
+        mock_mem.return_value = MagicMock(
+            percent=50.0, used=4 * 1024**3, total=16 * 1024**3
+        )
         mock_disk.return_value = MagicMock(percent=50.0, used=50 * 1024**3)
 
         monitor = _make_monitor()
@@ -369,7 +379,9 @@ class TestCheckSystemMetrics:
     @patch("psutil.cpu_percent", return_value=50.0)
     def test_high_disk(self, mock_cpu, mock_mem, mock_disk, mock_procs):
         """Disk above 85% records disk_high event."""
-        mock_mem.return_value = MagicMock(percent=50.0, used=4 * 1024**3, total=16 * 1024**3)
+        mock_mem.return_value = MagicMock(
+            percent=50.0, used=4 * 1024**3, total=16 * 1024**3
+        )
         mock_disk.return_value = MagicMock(percent=95.0, used=200 * 1024**3)
 
         monitor = _make_monitor()
@@ -384,7 +396,9 @@ class TestCheckSystemMetrics:
     @patch("psutil.cpu_percent", return_value=50.0)
     def test_normal_no_events(self, mock_cpu, mock_mem, mock_disk, mock_procs):
         """All metrics normal → no events recorded."""
-        mock_mem.return_value = MagicMock(percent=50.0, used=4 * 1024**3, total=16 * 1024**3)
+        mock_mem.return_value = MagicMock(
+            percent=50.0, used=4 * 1024**3, total=16 * 1024**3
+        )
         mock_disk.return_value = MagicMock(percent=50.0, used=50 * 1024**3)
 
         monitor = _make_monitor()
@@ -397,7 +411,9 @@ class TestCheckSystemMetrics:
     @patch("psutil.cpu_percent", return_value=50.0)
     def test_high_memory_process(self, mock_cpu, mock_mem, mock_disk, mock_procs):
         """A process using >1 GB records process_memory_high."""
-        mock_mem.return_value = MagicMock(percent=50.0, used=4 * 1024**3, total=16 * 1024**3)
+        mock_mem.return_value = MagicMock(
+            percent=50.0, used=4 * 1024**3, total=16 * 1024**3
+        )
         mock_disk.return_value = MagicMock(percent=50.0, used=50 * 1024**3)
 
         proc = MagicMock()
@@ -415,6 +431,7 @@ class TestCheckSystemMetrics:
 # ---------------------------------------------------------------------------
 # 15. _record_event triggers callbacks
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 class TestRecordEvent:
@@ -482,6 +499,7 @@ class TestRecordEvent:
 # 16–17. Singleton factory get_system_event_monitor
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.unit
 class TestGetSystemEventMonitor:
     """Tests for the get_system_event_monitor singleton factory."""
@@ -489,11 +507,13 @@ class TestGetSystemEventMonitor:
     def setup_method(self):
         """Reset the module-level singleton before each test."""
         import app.core.monitoring.system_event_monitor as mod
+
         mod._monitor_instance = None
 
     def teardown_method(self):
         """Ensure singleton is cleared after each test."""
         import app.core.monitoring.system_event_monitor as mod
+
         if mod._monitor_instance is not None:
             mod._monitor_instance.running = False
         mod._monitor_instance = None
@@ -513,6 +533,7 @@ class TestGetSystemEventMonitor:
     def test_reset_between_tests(self):
         """After setup_method resets the singleton, a new instance is created."""
         import app.core.monitoring.system_event_monitor as mod
+
         assert mod._monitor_instance is None
         m = get_system_event_monitor(check_interval=7)
         assert m.check_interval == 7
@@ -521,6 +542,7 @@ class TestGetSystemEventMonitor:
 # ---------------------------------------------------------------------------
 # Additional edge-case tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.unit
 class TestMonitorLoopMocked:

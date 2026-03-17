@@ -64,19 +64,23 @@ def shadow_status():
     try:
         obs = _get_watcher().get_observations()
         topics = sorted(obs.get("topics", {}).items(), key=lambda x: -x[1])[:5]
-        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])[:5]
+        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])[
+            :5
+        ]
         open_tasks = _get_watcher().get_open_tasks()
         pending = _get_agent().pending()
-        return _ok({
-            "enabled": obs.get("enabled", True),
-            "total_observations": obs.get("total_observations", 0),
-            "last_seen": obs.get("last_seen"),
-            "streak_days": obs.get("streak", {}).get("days", 0),
-            "top_topics": [{"topic": k, "count": v} for k, v in topics],
-            "top_phrases": [{"phrase": k, "count": v} for k, v in phrases],
-            "open_tasks_count": len(open_tasks),
-            "pending_messages": len(pending),
-        })
+        return _ok(
+            {
+                "enabled": obs.get("enabled", True),
+                "total_observations": obs.get("total_observations", 0),
+                "last_seen": obs.get("last_seen"),
+                "streak_days": obs.get("streak", {}).get("days", 0),
+                "top_topics": [{"topic": k, "count": v} for k, v in topics],
+                "top_phrases": [{"phrase": k, "count": v} for k, v in phrases],
+                "open_tasks_count": len(open_tasks),
+                "pending_messages": len(pending),
+            }
+        )
     except Exception as exc:
         logger.exception("[shadow/status] error")
         return _err(str(exc), 500)
@@ -177,12 +181,14 @@ def shadow_retry_context(task_id: str):
         ctx = _get_watcher().get_failed_task_context(task_id)
         if not ctx:
             return _err("Task not found", 404)
-        return _ok({
-            "task_id": task_id,
-            "original_text": ctx.get("full_text") or ctx.get("text", ""),
-            "session": ctx.get("session", ""),
-            "asked_at": ctx.get("asked_at", ""),
-        })
+        return _ok(
+            {
+                "task_id": task_id,
+                "original_text": ctx.get("full_text") or ctx.get("text", ""),
+                "session": ctx.get("session", ""),
+                "asked_at": ctx.get("asked_at", ""),
+            }
+        )
     except Exception as exc:
         logger.exception("[shadow/retry-context] error")
         return _err(str(exc), 500)

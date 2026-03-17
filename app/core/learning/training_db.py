@@ -755,6 +755,7 @@ def _detect_best_base_model() -> Optional[str]:
     """检测 Ollama 中最适合做底座的模型（动态评分选择）"""
     try:
         from app.core.routing.local_model_router import LocalModelRouter
+
         return LocalModelRouter.pick_best_chat_model()
     except Exception:
         return None

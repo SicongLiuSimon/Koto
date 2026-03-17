@@ -8,6 +8,7 @@ Unit tests for web modules batch 7:
 
 Covers constructors, key public methods, and error handling with mocked I/O.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,6 +46,7 @@ class TestPPTQualityChecker:
 
     def _make_checker(self):
         from web.ppt_quality import PPTQualityChecker
+
         return PPTQualityChecker()
 
     def test_init(self):
@@ -63,7 +65,11 @@ class TestPPTQualityChecker:
         checker = self._make_checker()
         with patch.dict("sys.modules", {"pptx": None}):
             # Force import error by patching builtins
-            original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+            original_import = (
+                __builtins__.__import__
+                if hasattr(__builtins__, "__import__")
+                else __import__
+            )
 
             def mock_import(name, *args, **kwargs):
                 if name == "pptx" or (isinstance(name, str) and "pptx" in name):
@@ -157,16 +163,19 @@ class TestPPTMasterDataclasses:
 
     def test_slide_type_enum(self):
         from web.ppt_master import SlideType
+
         assert SlideType.TITLE.value == "title"
         assert SlideType.CONTENT_IMAGE.value == "content_image"
 
     def test_content_density_enum(self):
         from web.ppt_master import ContentDensity
+
         assert ContentDensity.LIGHT.value == "light"
         assert ContentDensity.DENSE.value == "dense"
 
     def test_slide_blueprint_to_dict(self):
         from web.ppt_master import SlideBlueprint, SlideType, ContentDensity
+
         sb = SlideBlueprint(
             slide_index=0,
             slide_type=SlideType.TITLE,
@@ -182,6 +191,7 @@ class TestPPTMasterDataclasses:
 
     def test_ppt_blueprint_to_dict(self):
         from web.ppt_master import PPTBlueprint
+
         bp = PPTBlueprint(title="My PPT", subtitle="sub")
         d = bp.to_dict()
         assert d["title"] == "My PPT"
@@ -190,6 +200,7 @@ class TestPPTMasterDataclasses:
 
     def test_ppt_blueprint_add_log(self):
         from web.ppt_master import PPTBlueprint
+
         bp = PPTBlueprint(title="T", subtitle="S")
         bp.add_log("test message")
         assert len(bp.generation_log) == 1
@@ -207,6 +218,7 @@ class TestPPTResourceManager:
 
     def _make_rm(self):
         from web.ppt_master import PPTResourceManager
+
         return PPTResourceManager()
 
     def test_init(self):
@@ -256,6 +268,7 @@ class TestPPTLayoutPlanner:
 
     def _make_planner(self):
         from web.ppt_master import PPTLayoutPlanner
+
         return PPTLayoutPlanner()
 
     def test_init(self):
@@ -265,6 +278,7 @@ class TestPPTLayoutPlanner:
 
     def test_plan_layout_title(self):
         from web.ppt_master import PPTLayoutPlanner, SlideBlueprint, SlideType
+
         planner = PPTLayoutPlanner()
         sb = SlideBlueprint(slide_index=0, slide_type=SlideType.TITLE, title="T")
         config = planner.plan_layout(sb)
@@ -272,17 +286,26 @@ class TestPPTLayoutPlanner:
 
     def test_plan_layout_comparison(self):
         from web.ppt_master import PPTLayoutPlanner, SlideBlueprint, SlideType
+
         planner = PPTLayoutPlanner()
         sb = SlideBlueprint(slide_index=1, slide_type=SlideType.COMPARISON, title="C")
         config = planner.plan_layout(sb)
         assert "left_width" in config
 
     def test_plan_layout_dense_content(self):
-        from web.ppt_master import PPTLayoutPlanner, SlideBlueprint, SlideType, ContentDensity
+        from web.ppt_master import (
+            PPTLayoutPlanner,
+            SlideBlueprint,
+            SlideType,
+            ContentDensity,
+        )
+
         planner = PPTLayoutPlanner()
         sb = SlideBlueprint(
-            slide_index=2, slide_type=SlideType.CONTENT, title="D",
-            density=ContentDensity.DENSE
+            slide_index=2,
+            slide_type=SlideType.CONTENT,
+            title="D",
+            density=ContentDensity.DENSE,
         )
         config = planner.plan_layout(sb, content_count=6)
         assert config.get("line_spacing") == 1.3
@@ -295,6 +318,7 @@ class TestPPTLayoutPlanner:
 
     def test_choose_bullet_style(self):
         from web.ppt_master import PPTLayoutPlanner, SlideType
+
         planner = PPTLayoutPlanner()
         assert planner._choose_bullet_style(SlideType.TITLE) == "none"
         assert planner._choose_bullet_style(SlideType.CONTENT) == "circle"
@@ -312,6 +336,7 @@ class TestPPTContentPlanner:
 
     def _make_planner(self):
         from web.ppt_master import PPTContentPlanner
+
         return PPTContentPlanner(ai_client=None)
 
     def test_init_no_client(self):
@@ -355,42 +380,55 @@ class TestPPTImageMatcher:
 
     def test_init(self):
         from web.ppt_master import PPTImageMatcher
+
         m = PPTImageMatcher(ai_client=None)
         assert m.image_cache == {}
 
     def test_generate_prompts_for_content_image(self):
         from web.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
-            SlideBlueprint(slide_index=0, slide_type=SlideType.CONTENT_IMAGE, title="AI Tech"),
-            "modern"
+            SlideBlueprint(
+                slide_index=0, slide_type=SlideType.CONTENT_IMAGE, title="AI Tech"
+            ),
+            "modern",
         )
         assert len(prompts) == 1
         assert "AI Tech" in prompts[0]
 
     def test_generate_prompts_for_comparison(self):
         from web.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
-            SlideBlueprint(slide_index=0, slide_type=SlideType.COMPARISON, title="A vs B"),
-            "flat"
+            SlideBlueprint(
+                slide_index=0, slide_type=SlideType.COMPARISON, title="A vs B"
+            ),
+            "flat",
         )
         assert len(prompts) == 2
 
     def test_generate_prompts_for_content_returns_empty(self):
         from web.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
-            SlideBlueprint(slide_index=0, slide_type=SlideType.CONTENT, title="Text only"),
-            "corporate"
+            SlideBlueprint(
+                slide_index=0, slide_type=SlideType.CONTENT, title="Text only"
+            ),
+            "corporate",
         )
         assert prompts == []
 
     def test_generate_image_prompts_updates_slides(self):
         from web.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+
         m = PPTImageMatcher()
         slides = [
-            SlideBlueprint(slide_index=0, slide_type=SlideType.CONTENT_IMAGE, title="Slide1"),
+            SlideBlueprint(
+                slide_index=0, slide_type=SlideType.CONTENT_IMAGE, title="Slide1"
+            ),
             SlideBlueprint(slide_index=1, slide_type=SlideType.CONTENT, title="Slide2"),
         ]
         result = run_async(m.generate_image_prompts(slides, "pro"))
@@ -411,6 +449,7 @@ class TestPPTGenerationPipeline:
     @patch("web.ppt_pipeline.PPTMasterOrchestrator")
     def test_init(self, mock_orch, mock_synth):
         from web.ppt_pipeline import PPTGenerationPipeline
+
         pipeline = PPTGenerationPipeline(ai_client=None, workspace_dir="/tmp")
         assert pipeline.workspace_dir == "/tmp"
         assert pipeline.log == []
@@ -419,6 +458,7 @@ class TestPPTGenerationPipeline:
     @patch("web.ppt_pipeline.PPTMasterOrchestrator")
     def test_log(self, mock_orch, mock_synth):
         from web.ppt_pipeline import PPTGenerationPipeline
+
         pipeline = PPTGenerationPipeline()
         pipeline._log("test")
         assert "test" in pipeline.log
@@ -427,6 +467,7 @@ class TestPPTGenerationPipeline:
     @patch("web.ppt_pipeline.PPTMasterOrchestrator")
     def test_get_logs(self, mock_orch, mock_synth):
         from web.ppt_pipeline import PPTGenerationPipeline
+
         pipeline = PPTGenerationPipeline()
         pipeline._log("a")
         pipeline._log("b")
@@ -437,9 +478,12 @@ class TestPPTGenerationPipeline:
     def test_prepare_image_map_empty(self, mock_orch, mock_synth):
         from web.ppt_pipeline import PPTGenerationPipeline
         from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
-        bp.slides = [SlideBlueprint(slide_index=0, slide_type=SlideType.CONTENT, title="X")]
+        bp.slides = [
+            SlideBlueprint(slide_index=0, slide_type=SlideType.CONTENT, title="X")
+        ]
         result = pipeline._prepare_image_map(bp)
         assert result == {}
 
@@ -448,6 +492,7 @@ class TestPPTGenerationPipeline:
     def test_prepare_image_map_with_images(self, mock_orch, mock_synth):
         from web.ppt_pipeline import PPTGenerationPipeline
         from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
         s = SlideBlueprint(slide_index=0, slide_type=SlideType.CONTENT_IMAGE, title="X")
@@ -461,17 +506,24 @@ class TestPPTGenerationPipeline:
     def test_finalize_result(self, mock_orch, mock_synth):
         from web.ppt_pipeline import PPTGenerationPipeline
         from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
-        bp.slides = [SlideBlueprint(slide_index=0, slide_type=SlideType.TITLE, title="T", content=["a"])]
+        bp.slides = [
+            SlideBlueprint(
+                slide_index=0, slide_type=SlideType.TITLE, title="T", content=["a"]
+            )
+        ]
         # Mock the orchestrator's resource_manager
         pipeline.orchestrator = MagicMock()
-        pipeline.orchestrator.resource_manager.get_summary_for_blueprint.return_value = {}
+        pipeline.orchestrator.resource_manager.get_summary_for_blueprint.return_value = (
+            {}
+        )
         result = pipeline._finalize_result(
             {"file_size": 100, "slide_count": 1},
             bp,
             {"quality_score": 85, "checks": {}, "recommendations": []},
-            "/out.pptx"
+            "/out.pptx",
         )
         assert result["success"] is True
         assert result["slide_count"] == 1
@@ -488,6 +540,7 @@ class TestTaskSchedulerModule:
 
     def _make_task(self, action=None, **kwargs):
         from web.task_scheduler import Task, TaskPriority
+
         if action is None:
             action = MagicMock(return_value="done")
         return Task(task_id="t1", name="TestTask", action=action, **kwargs)
@@ -499,6 +552,7 @@ class TestTaskSchedulerModule:
         assert task.task_id == "t1"
         assert task.name == "TestTask"
         from web.task_scheduler import TaskStatus
+
         assert task.status == TaskStatus.PENDING
 
     @patch("web.task_scheduler.os.makedirs")
@@ -509,6 +563,7 @@ class TestTaskSchedulerModule:
         result = task.execute()
         assert result is True
         from web.task_scheduler import TaskStatus
+
         assert task.status == TaskStatus.COMPLETED
         assert task.result == "result"
 
@@ -520,6 +575,7 @@ class TestTaskSchedulerModule:
         result = task.execute()
         assert result is False
         from web.task_scheduler import TaskStatus
+
         assert task.status == TaskStatus.FAILED
         assert "boom" in task.error
 
@@ -530,6 +586,7 @@ class TestTaskSchedulerModule:
         task.mark_cancelled()
         assert task.is_cancelled() is True
         from web.task_scheduler import TaskStatus
+
         assert task.status == TaskStatus.CANCELLED
 
     @patch("web.task_scheduler.os.makedirs")
@@ -545,6 +602,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_init(self, mock_exists, mock_makedirs):
         from web.task_scheduler import TaskScheduler
+
         sched = TaskScheduler()
         assert sched.running is False
         assert sched.tasks == {}
@@ -555,6 +613,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_add_task(self, mock_exists, mock_makedirs, mock_dump):
         from web.task_scheduler import TaskScheduler, Task, TaskPriority
+
         sched = TaskScheduler()
         action = MagicMock()
         task = Task(task_id="t1", name="T1", action=action, priority=TaskPriority.HIGH)
@@ -569,6 +628,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_cancel_task(self, mock_exists, mock_makedirs, mock_dump):
         from web.task_scheduler import TaskScheduler, Task
+
         sched = TaskScheduler()
         task = Task(task_id="t1", name="T1", action=MagicMock())
         sched.add_task(task)
@@ -582,6 +642,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_get_task(self, mock_exists, mock_makedirs, mock_dump):
         from web.task_scheduler import TaskScheduler, Task
+
         sched = TaskScheduler()
         task = Task(task_id="t1", name="T1", action=MagicMock())
         sched.add_task(task)
@@ -594,6 +655,7 @@ class TestTaskSchedulerModule:
     @patch("web.task_scheduler.os.path.exists", return_value=False)
     def test_scheduler_list_tasks(self, mock_exists, mock_makedirs, mock_dump):
         from web.task_scheduler import TaskScheduler, Task, TaskStatus
+
         sched = TaskScheduler()
         t1 = Task(task_id="t1", name="T1", action=MagicMock())
         t2 = Task(task_id="t2", name="T2", action=MagicMock())
@@ -619,6 +681,7 @@ class TestTaskDispatcher:
     @patch("web.task_dispatcher.get_queue_manager")
     def test_dispatcher_scheduler_init(self, mock_qm, mock_rm, mock_mon):
         from web.task_dispatcher import TaskScheduler as DispatcherScheduler
+
         sched = DispatcherScheduler(max_workers=3)
         assert sched.max_workers == 3
         assert sched.running is False
@@ -629,6 +692,7 @@ class TestTaskDispatcher:
     def test_dispatcher_scheduler_register_executor(self, mock_qm, mock_rm, mock_mon):
         from web.task_dispatcher import TaskScheduler as DispatcherScheduler
         from web.parallel_executor import TaskType
+
         sched = DispatcherScheduler()
         fn = MagicMock()
         sched.register_executor(TaskType.CHAT, fn)
@@ -639,6 +703,7 @@ class TestTaskDispatcher:
     @patch("web.task_dispatcher.get_queue_manager")
     def test_dispatcher_scheduler_get_stats(self, mock_qm, mock_rm, mock_mon):
         from web.task_dispatcher import TaskScheduler as DispatcherScheduler
+
         sched = DispatcherScheduler(max_workers=4)
         stats = sched.get_stats()
         assert stats["running"] is False
@@ -649,6 +714,7 @@ class TestTaskDispatcher:
     @patch("web.task_dispatcher.get_queue_manager")
     def test_dispatcher_scheduler_start_stop(self, mock_qm, mock_rm, mock_mon):
         from web.task_dispatcher import TaskScheduler as DispatcherScheduler
+
         mock_qm.return_value.get_next.return_value = None
         sched = DispatcherScheduler()
         sched.start()
@@ -662,6 +728,7 @@ class TestTaskDispatcher:
     def test_task_executor_circuit_breaker_open(self, mock_qm, mock_rm, mock_mon):
         from web.task_dispatcher import TaskExecutor
         from web.parallel_executor import Task, TaskType, Priority
+
         task = Task(
             id="test-1",
             session_id="s1",
@@ -687,6 +754,7 @@ class TestWorkflowManager:
 
     def test_workflow_init(self):
         from web.workflow_manager import Workflow
+
         wf = Workflow("Test Flow", "A test workflow")
         assert wf.name == "Test Flow"
         assert wf.id == "Test_Flow"
@@ -695,6 +763,7 @@ class TestWorkflowManager:
 
     def test_workflow_add_step(self):
         from web.workflow_manager import Workflow
+
         wf = Workflow("WF")
         step = wf.add_step("step1", "agent", {"request": "do something"})
         assert step["name"] == "step1"
@@ -703,6 +772,7 @@ class TestWorkflowManager:
 
     def test_workflow_set_variable(self):
         from web.workflow_manager import Workflow
+
         wf = Workflow("WF")
         wf.set_variable("topic", default_value="AI", description="The topic")
         assert "topic" in wf.variables
@@ -711,6 +781,7 @@ class TestWorkflowManager:
 
     def test_workflow_to_dict_from_dict(self):
         from web.workflow_manager import Workflow
+
         wf = Workflow("WF", "desc")
         wf.add_step("s1", "tool")
         wf.tags = ["test"]
@@ -724,6 +795,7 @@ class TestWorkflowManager:
     @patch("web.workflow_manager.Path.glob", return_value=[])
     def test_workflow_manager_init(self, mock_glob, mock_makedirs):
         from web.workflow_manager import WorkflowManager
+
         mgr = WorkflowManager(storage_dir="/tmp/wf")
         assert mgr.workflows == {}
 
@@ -731,6 +803,7 @@ class TestWorkflowManager:
     @patch("web.workflow_manager.Path.glob", return_value=[])
     def test_workflow_manager_create_and_list(self, mock_glob, mock_makedirs):
         from web.workflow_manager import WorkflowManager
+
         with patch("builtins.open", mock_open()):
             with patch("web.workflow_manager.json.dump"):
                 mgr = WorkflowManager(storage_dir="/tmp/wf")
@@ -743,6 +816,7 @@ class TestWorkflowManager:
     @patch("web.workflow_manager.Path.glob", return_value=[])
     def test_workflow_manager_delete(self, mock_glob, mock_makedirs):
         from web.workflow_manager import WorkflowManager
+
         with patch("builtins.open", mock_open()):
             with patch("web.workflow_manager.json.dump"):
                 with patch("web.workflow_manager.os.path.exists", return_value=False):
@@ -755,6 +829,7 @@ class TestWorkflowManager:
     @patch("web.workflow_manager.Path.glob", return_value=[])
     def test_workflow_manager_get_statistics(self, mock_glob, mock_makedirs):
         from web.workflow_manager import WorkflowManager
+
         with patch("builtins.open", mock_open()):
             with patch("web.workflow_manager.json.dump"):
                 mgr = WorkflowManager(storage_dir="/tmp/wf")
@@ -764,11 +839,13 @@ class TestWorkflowManager:
 
     def test_workflow_executor_init(self):
         from web.workflow_manager import WorkflowExecutor
+
         ex = WorkflowExecutor()
         assert ex.execution_history == []
 
     def test_workflow_executor_execute_tool_step(self):
         from web.workflow_manager import WorkflowExecutor, Workflow
+
         ex = WorkflowExecutor()
         wf = Workflow("WF")
         wf.add_step("s1", "tool", {"tool": "search", "args": {}})
@@ -778,6 +855,7 @@ class TestWorkflowManager:
 
     def test_workflow_executor_execute_unknown_step(self):
         from web.workflow_manager import WorkflowExecutor, Workflow
+
         ex = WorkflowExecutor()
         wf = Workflow("WF")
         wf.add_step("s1", "unknown_type")
@@ -786,6 +864,7 @@ class TestWorkflowManager:
 
     def test_workflow_executor_get_execution_history(self):
         from web.workflow_manager import WorkflowExecutor, Workflow
+
         ex = WorkflowExecutor()
         wf = Workflow("WF")
         wf.add_step("s1", "tool", {"tool": "t"})
@@ -795,12 +874,15 @@ class TestWorkflowManager:
 
     def test_workflow_executor_callbacks(self):
         from web.workflow_manager import WorkflowExecutor, Workflow
+
         ex = WorkflowExecutor()
         wf = Workflow("WF")
         wf.add_step("s1", "conditional", {"condition": "x > 1"})
         on_start = MagicMock()
         on_done = MagicMock()
-        result = ex.execute(wf, callbacks={"on_step_start": on_start, "on_step_done": on_done})
+        result = ex.execute(
+            wf, callbacks={"on_step_start": on_start, "on_step_done": on_done}
+        )
         on_start.assert_called_once()
         on_done.assert_called_once()
 
@@ -819,6 +901,7 @@ class TestReminderManager:
     @patch("web.reminder_manager.os.path.exists", return_value=False)
     def test_init(self, mock_exists, mock_makedirs, mock_toast):
         from web.reminder_manager import ReminderManager
+
         mgr = ReminderManager()
         assert mgr.reminders == {}
         assert mgr.timers == {}
@@ -828,9 +911,10 @@ class TestReminderManager:
     @patch("web.reminder_manager.os.path.exists", return_value=False)
     def test_add_reminder(self, mock_exists, mock_makedirs, mock_toast):
         from web.reminder_manager import ReminderManager
+
         mgr = ReminderManager()
         future = datetime.now() + timedelta(hours=1)
-        with patch.object(mgr, '_save'):
+        with patch.object(mgr, "_save"):
             rid = mgr.add_reminder("Test", "Message", future)
             assert rid.startswith("reminder_")
             assert rid in mgr.reminders
@@ -841,8 +925,9 @@ class TestReminderManager:
     @patch("web.reminder_manager.os.path.exists", return_value=False)
     def test_add_reminder_in(self, mock_exists, mock_makedirs, mock_toast):
         from web.reminder_manager import ReminderManager
+
         mgr = ReminderManager()
-        with patch.object(mgr, '_save'):
+        with patch.object(mgr, "_save"):
             rid = mgr.add_reminder_in("Test", "Msg", 3600)
             assert rid in mgr.reminders
 
@@ -851,8 +936,9 @@ class TestReminderManager:
     @patch("web.reminder_manager.os.path.exists", return_value=False)
     def test_cancel_reminder(self, mock_exists, mock_makedirs, mock_toast):
         from web.reminder_manager import ReminderManager
+
         mgr = ReminderManager()
-        with patch.object(mgr, '_save'):
+        with patch.object(mgr, "_save"):
             rid = mgr.add_reminder("T", "M", datetime.now() + timedelta(hours=1))
             assert mgr.cancel_reminder(rid) is True
             assert mgr.reminders[rid]["status"] == "cancelled"
@@ -863,8 +949,9 @@ class TestReminderManager:
     @patch("web.reminder_manager.os.path.exists", return_value=False)
     def test_list_reminders(self, mock_exists, mock_makedirs, mock_toast):
         from web.reminder_manager import ReminderManager
+
         mgr = ReminderManager()
-        with patch.object(mgr, '_save'):
+        with patch.object(mgr, "_save"):
             mgr.add_reminder("A", "M", datetime.now() + timedelta(hours=1))
             mgr.add_reminder("B", "M", datetime.now() + timedelta(hours=2))
             assert len(mgr.list_reminders()) == 2
@@ -874,13 +961,14 @@ class TestReminderManager:
     @patch("web.reminder_manager.os.path.exists", return_value=False)
     def test_clear_expired(self, mock_exists, mock_makedirs, mock_toast):
         from web.reminder_manager import ReminderManager
+
         mgr = ReminderManager()
         mgr.reminders = {
             "r1": {"status": "sent"},
             "r2": {"status": "expired"},
             "r3": {"status": "scheduled"},
         }
-        with patch.object(mgr, '_save'):
+        with patch.object(mgr, "_save"):
             cleared = mgr.clear_expired()
             assert cleared == 2
             assert "r3" in mgr.reminders
@@ -888,12 +976,15 @@ class TestReminderManager:
     @patch("web.reminder_manager.show_toast")
     @patch("web.reminder_manager.os.makedirs")
     @patch("web.reminder_manager.os.path.exists", return_value=False)
-    def test_restore_pending_marks_expired(self, mock_exists, mock_makedirs, mock_toast):
+    def test_restore_pending_marks_expired(
+        self, mock_exists, mock_makedirs, mock_toast
+    ):
         from web.reminder_manager import ReminderManager
+
         mgr = ReminderManager()
         old_time = (datetime.now() - timedelta(hours=2)).isoformat()
         mgr.reminders = {"r1": {"status": "pending", "time": old_time}}
-        with patch.object(mgr, '_save'):
+        with patch.object(mgr, "_save"):
             mgr._restore_pending()
             assert mgr.reminders["r1"]["status"] == "expired"
 
@@ -909,6 +1000,7 @@ class TestSmartFeedback:
 
     def _make_fb(self, **kwargs):
         from web.smart_feedback import SmartFeedback
+
         defaults = {
             "user_request": "帮我做一个关于AI的PPT",
             "task_type": "PPT",
@@ -993,12 +1085,14 @@ class TestSmartFeedback:
 
     def test_for_ppt_factory(self):
         from web.smart_feedback import SmartFeedback
+
         fb = SmartFeedback.for_ppt("request", MagicMock())
         assert fb.task_type == "PPT"
         assert fb.total_steps == 7
 
     def test_for_document_factory(self):
         from web.smart_feedback import SmartFeedback
+
         fb = SmartFeedback.for_document("request", MagicMock(), "EXCEL")
         assert fb.task_type == "EXCEL"
 
@@ -1030,11 +1124,14 @@ class TestSuggestionEngine:
 
         patches = {}
         modules_to_mock = [
-            "web.behavior_monitor", "behavior_monitor",
-            "web.knowledge_graph", "knowledge_graph",
+            "web.behavior_monitor",
+            "behavior_monitor",
+            "web.knowledge_graph",
+            "knowledge_graph",
             "concept_extractor",
         ]
         import sys
+
         for mod_name in modules_to_mock:
             if mod_name in ("web.behavior_monitor", "behavior_monitor"):
                 patches[mod_name] = mock_bm_mod
@@ -1051,12 +1148,14 @@ class TestSuggestionEngine:
         with patch.dict("sys.modules", patches):
             # Re-import with mocked deps
             import importlib
+
             if "web.suggestion_engine" in sys.modules:
                 importlib.reload(sys.modules["web.suggestion_engine"])
             yield
 
     def _make_engine(self, db_path=":memory:"):
         from web.suggestion_engine import SuggestionEngine
+
         mock_bm = MagicMock()
         mock_kg = MagicMock()
         # Set constants on the mock
@@ -1094,10 +1193,16 @@ class TestSuggestionEngine:
     def test_dismiss_suggestion(self, tmp_path):
         db = str(tmp_path / "test.db")
         engine, _, _ = self._make_engine(db_path=db)
-        sid = engine._save_suggestion({
-            "type": "backup", "title": "T", "description": "D",
-            "priority": "low", "context": {}, "action_items": [],
-        })
+        sid = engine._save_suggestion(
+            {
+                "type": "backup",
+                "title": "T",
+                "description": "D",
+                "priority": "low",
+                "context": {},
+                "action_items": [],
+            }
+        )
         engine.dismiss_suggestion(sid, "not useful")
         pending = engine.get_pending_suggestions()
         assert len(pending) == 0
@@ -1105,10 +1210,16 @@ class TestSuggestionEngine:
     def test_apply_suggestion(self, tmp_path):
         db = str(tmp_path / "test.db")
         engine, _, _ = self._make_engine(db_path=db)
-        sid = engine._save_suggestion({
-            "type": "cleanup", "title": "T", "description": "D",
-            "priority": "high", "context": {}, "action_items": [],
-        })
+        sid = engine._save_suggestion(
+            {
+                "type": "cleanup",
+                "title": "T",
+                "description": "D",
+                "priority": "high",
+                "context": {},
+                "action_items": [],
+            }
+        )
         engine.apply_suggestion(sid)
         pending = engine.get_pending_suggestions()
         assert len(pending) == 0
@@ -1116,10 +1227,16 @@ class TestSuggestionEngine:
     def test_get_statistics(self, tmp_path):
         db = str(tmp_path / "test.db")
         engine, _, _ = self._make_engine(db_path=db)
-        engine._save_suggestion({
-            "type": "optimize", "title": "T", "description": "D",
-            "priority": "low", "context": {}, "action_items": [],
-        })
+        engine._save_suggestion(
+            {
+                "type": "optimize",
+                "title": "T",
+                "description": "D",
+                "priority": "low",
+                "context": {},
+                "action_items": [],
+            }
+        )
         stats = engine.get_statistics()
         assert stats["total_suggestions"] == 1
         assert stats["pending_suggestions"] == 1
@@ -1161,6 +1278,7 @@ class TestSuggestionAnnotator:
 
     def _make_annotator(self, batch_size=3):
         from web.suggestion_annotator import SuggestionAnnotator
+
         return SuggestionAnnotator(batch_size=batch_size)
 
     def test_init(self):
@@ -1210,7 +1328,9 @@ class TestSuggestionAnnotator:
         mock_doc = MagicMock()
         mock_doc.paragraphs = []
         with patch("docx.Document", return_value=mock_doc, create=True):
-            result = ann.apply_user_choices("test.docx", [{"id": "s_0_0", "接受": True}])
+            result = ann.apply_user_choices(
+                "test.docx", [{"id": "s_0_0", "接受": True}]
+            )
             assert result["success"] is True
 
     def test_apply_user_choices_error(self):
@@ -1233,6 +1353,7 @@ class TestTemplateLibrary:
     @patch("web.template_library.os.makedirs")
     def _make_library(self, mock_makedirs, workspace_dir="/tmp/ws"):
         from web.template_library import TemplateLibrary
+
         return TemplateLibrary(workspace_dir=workspace_dir)
 
     def test_init(self):
@@ -1265,7 +1386,12 @@ class TestTemplateLibrary:
     def test_generate_from_template_unsupported_type(self):
         lib = self._make_library()
         # Temporarily add a bad template
-        lib.TEMPLATES["bad"] = {"name": "Bad", "type": "xyz", "description": "", "variables": []}
+        lib.TEMPLATES["bad"] = {
+            "name": "Bad",
+            "type": "xyz",
+            "description": "",
+            "variables": [],
+        }
         result = lib.generate_from_template("bad", {})
         assert result["success"] is False
         del lib.TEMPLATES["bad"]
@@ -1273,14 +1399,16 @@ class TestTemplateLibrary:
     @patch("web.template_library.os.makedirs")
     def test_build_business_report(self, mock_makedirs):
         lib = self._make_library()
-        content = lib._build_business_report({
-            "title": "Test Report",
-            "author": "Tester",
-            "company": "Corp",
-            "executive_summary": "Summary",
-            "main_content": "Content",
-            "conclusion": "Done",
-        })
+        content = lib._build_business_report(
+            {
+                "title": "Test Report",
+                "author": "Tester",
+                "company": "Corp",
+                "executive_summary": "Summary",
+                "main_content": "Content",
+                "conclusion": "Done",
+            }
+        )
         assert "Test Report" in content
         assert "Tester" in content
 
@@ -1293,10 +1421,12 @@ class TestTemplateLibrary:
     @patch("web.template_library.os.makedirs")
     def test_build_product_ppt_outline(self, mock_makedirs):
         lib = self._make_library()
-        outline = lib._build_product_ppt_outline({
-            "product_name": "Widget",
-            "tagline": "Better widgets",
-            "features": "Fast\nReliable",
-        })
+        outline = lib._build_product_ppt_outline(
+            {
+                "product_name": "Widget",
+                "tagline": "Better widgets",
+                "features": "Fast\nReliable",
+            }
+        )
         assert len(outline) == 6
         assert outline[0]["title"] == "产品概览"

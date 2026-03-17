@@ -210,10 +210,10 @@ class OutputValidator:
     """
 
     # ── LLM 判断配置 ──────────────────────────────────────────────
-    _judge_client: Optional[Any] = None          # GeminiProvider 或兼容实例
-    _judge_model: str = "gemini-2.5-flash"       # 默认使用快速但有能力的模型
-    _judge_timeout: float = 15.0                 # 最长等待秒数，超时则跳过
-    _judge_min_len: int = 80                     # 响应短于此字符数则不启动 LLM 判断
+    _judge_client: Optional[Any] = None  # GeminiProvider 或兼容实例
+    _judge_model: str = "gemini-2.5-flash"  # 默认使用快速但有能力的模型
+    _judge_timeout: float = 15.0  # 最长等待秒数，超时则跳过
+    _judge_min_len: int = 80  # 响应短于此字符数则不启动 LLM 判断
 
     @classmethod
     def configure_llm_judge(
@@ -233,7 +233,11 @@ class OutputValidator:
         cls._judge_client = client
         cls._judge_model = model_id
         cls._judge_timeout = timeout
-        logger.info("[OutputValidator] LLM judge 已配置: model=%s timeout=%.0fs", model_id, timeout)
+        logger.info(
+            "[OutputValidator] LLM judge 已配置: model=%s timeout=%.0fs",
+            model_id,
+            timeout,
+        )
 
     @classmethod
     def _get_judge_client(cls) -> Optional[Any]:
@@ -245,6 +249,7 @@ class OutputValidator:
             return cls._judge_client
         try:
             import os
+
             api_key = (
                 os.environ.get("GEMINI_API_KEY")
                 or os.environ.get("API_KEY")
@@ -253,8 +258,11 @@ class OutputValidator:
             if not api_key:
                 return None
             from app.core.llm.gemini import GeminiProvider
+
             cls._judge_client = GeminiProvider(api_key=api_key)
-            logger.info("[OutputValidator] LLM judge 懒加载成功: model=%s", cls._judge_model)
+            logger.info(
+                "[OutputValidator] LLM judge 懒加载成功: model=%s", cls._judge_model
+            )
             return cls._judge_client
         except Exception as e:
             logger.debug("[OutputValidator] LLM judge 懒加载失败（跳过）: %s", e)
@@ -306,6 +314,7 @@ class OutputValidator:
                 response = future.result(timeout=cls._judge_timeout)
 
             import json
+
             raw = response.get("content", "{}") if isinstance(response, dict) else "{}"
             # 兼容模型直接返回 markdown 代码块包裹 JSON 的情况
             raw = raw.strip().strip("```json").strip("```").strip()

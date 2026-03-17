@@ -192,7 +192,8 @@ class SkillToolsPlugin(AgentPlugin):
                 meta_lines.append(f"  - ⚙️ 执行步骤:\n{plan_str}")
             analysis_note = (
                 "\n**语义分析结果:**\n" + "\n".join(meta_lines)
-                if meta_lines else "\n（未进行 LLM 语义分析，使用规则提取）"
+                if meta_lines
+                else "\n（未进行 LLM 语义分析，使用规则提取）"
             )
 
             return (
@@ -221,6 +222,7 @@ class SkillToolsPlugin(AgentPlugin):
         """列出已加载的 Skill。"""
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
             rows = []
             for sid, s in SkillManager._registry.items():
@@ -244,6 +246,7 @@ class SkillToolsPlugin(AgentPlugin):
         """启用指定 Skill。"""
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
             if skill_id not in SkillManager._registry:
                 return f"❌ 未找到 Skill ID: `{skill_id}`，请先用 list_skills 确认正确 ID。"
@@ -258,6 +261,7 @@ class SkillToolsPlugin(AgentPlugin):
         """停用指定 Skill。"""
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
             if skill_id not in SkillManager._registry:
                 return f"❌ 未找到 Skill ID: `{skill_id}`，请先用 list_skills 确认正确 ID。"

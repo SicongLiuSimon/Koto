@@ -120,10 +120,7 @@ class FileConverterPlugin(AgentPlugin):
         targets = matrix.get(ext)
         if targets is None:
             supported = ", ".join(sorted(matrix.keys()))
-            return (
-                f"不支持的格式: {ext}\n"
-                f"支持的来源格式: {supported}"
-            )
+            return f"不支持的格式: {ext}\n" f"支持的来源格式: {supported}"
         return (
             f"{ext} 可转换为: {', '.join(targets)}\n"
             f"调用 convert_file 并传入 target_format 即可完成转换。"

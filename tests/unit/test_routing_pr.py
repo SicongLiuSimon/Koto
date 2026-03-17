@@ -58,7 +58,7 @@ class TestAIRouterCacheEviction:
 
         # Trigger eviction by simulating what classify() does
         if len(cache) >= max_size:
-            keys = list(cache.keys())[:max_size // 2]
+            keys = list(cache.keys())[: max_size // 2]
             for k in keys:
                 del cache[k]
         cache["key_new"] = "val_new"
@@ -159,7 +159,9 @@ class TestInitResponseModel:
             LocalModelRouter._response_model = None
             LocalModelRouter._response_model_inited = False
             LocalModelRouter._model_name = None
-            with patch.object(LocalModelRouter, "is_ollama_available", return_value=False):
+            with patch.object(
+                LocalModelRouter, "is_ollama_available", return_value=False
+            ):
                 result = LocalModelRouter._init_response_model()
                 assert result is False
         finally:

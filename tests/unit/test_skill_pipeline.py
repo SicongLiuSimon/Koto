@@ -109,9 +109,7 @@ class TestSkillPipelineSingleStep:
     def test_single_step_stores_output_under_effective_key(self, mock_registry):
         mock_registry.dispatch.return_value = 42
 
-        pipeline = SkillPipeline(
-            steps=[PipelineStep("skill_a", output_key="my_key")]
-        )
+        pipeline = SkillPipeline(steps=[PipelineStep("skill_a", output_key="my_key")])
         result = pipeline.run(user_input="hi")
 
         assert result.context["my_key"] == 42
@@ -200,9 +198,7 @@ class TestSkillPipelineContextPassing:
         mock_registry.dispatch.return_value = "ok"
 
         step = PipelineStep("s1", pass_full_ctx=True)
-        SkillPipeline(steps=[step]).run(
-            user_input="x", context={"key": "val"}
-        )
+        SkillPipeline(steps=[step]).run(user_input="x", context={"key": "val"})
 
         ctx_passed = mock_registry.dispatch.call_args.kwargs["context"]
         # When pass_full_ctx=True, ctx["context"] should be a copy of the shared context
@@ -238,9 +234,7 @@ class TestSkillPipelineContextPassing:
         mock_registry.dispatch.return_value = "new_data"
 
         original = {"initial": "value"}
-        SkillPipeline(steps=[PipelineStep("s1")]).run(
-            user_input="x", context=original
-        )
+        SkillPipeline(steps=[PipelineStep("s1")]).run(user_input="x", context=original)
 
         # The original dict must not be mutated
         assert "s1" not in original
@@ -491,4 +485,3 @@ class TestSkillChainBuildFromActive:
         pipeline = SkillChain.build_from_active(["s1"], pass_full_ctx=False)
         assert pipeline is not None
         assert pipeline.steps[0].pass_full_ctx is False
-

@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 # 单个工具调用的最大允许执行秒数（超时后返回错误，不挂死 agent 循环）
 _TOOL_TIMEOUT: int = 60
 
+
 class ToolRegistry:
     """
     Manages tools and plugins for the agent.

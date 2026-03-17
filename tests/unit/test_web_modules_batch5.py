@@ -9,6 +9,7 @@ Unit tests for web modules batch 5:
 
 Each test class covers constructors, core logic, and edge cases with mocked I/O.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,7 +22,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, mock_open, PropertyMock
 
 import pytest
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ProactiveTriggerSystem
@@ -38,6 +38,7 @@ class TestProactiveTrigger:
 
     def _make_system(self, **kwargs):
         from web.proactive_trigger import ProactiveTriggerSystem
+
         return ProactiveTriggerSystem(db_path=self.db_path, **kwargs)
 
     # --- init & database ---
@@ -65,6 +66,7 @@ class TestProactiveTrigger:
     def test_register_trigger_custom(self):
         """register_trigger should add custom trigger to registry and db."""
         from web.proactive_trigger import TriggerCondition, TriggerType
+
         system = self._make_system()
         cond = TriggerCondition(
             trigger_id="custom_test",
@@ -80,7 +82,9 @@ class TestProactiveTrigger:
         # Verify it's persisted in database
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT trigger_id FROM trigger_config WHERE trigger_id = 'custom_test'")
+        cursor.execute(
+            "SELECT trigger_id FROM trigger_config WHERE trigger_id = 'custom_test'"
+        )
         row = cursor.fetchone()
         conn.close()
         assert row is not None
@@ -108,7 +112,9 @@ class TestProactiveTrigger:
         system = self._make_system()
         trigger_id = "periodic_check_suggestions"
         cooldown = system.triggers[trigger_id].cooldown_minutes
-        system.last_trigger_times[trigger_id] = datetime.now() - timedelta(minutes=cooldown + 1)
+        system.last_trigger_times[trigger_id] = datetime.now() - timedelta(
+            minutes=cooldown + 1
+        )
         assert system.should_trigger(trigger_id) is True
 
     def test_list_triggers_sorted_by_priority(self):
@@ -116,7 +122,7 @@ class TestProactiveTrigger:
         system = self._make_system()
         triggers = system.list_triggers()
         assert len(triggers) > 0
-        priorities = [t['priority'] for t in triggers]
+        priorities = [t["priority"] for t in triggers]
         assert priorities == sorted(priorities, reverse=True)
 
     def test_update_trigger_config(self):
@@ -157,6 +163,7 @@ class TestProactiveTrigger:
     def test_determine_interaction_type_emergency(self):
         """Emergency trigger type should return ALERT."""
         from web.proactive_trigger import TriggerType, InteractionType
+
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.EMERGENCY, 0.5, 0.5)
         assert itype == InteractionType.ALERT
@@ -164,6 +171,7 @@ class TestProactiveTrigger:
     def test_determine_interaction_type_high_urgency(self):
         """High urgency (>=0.8) returns ALERT regardless of trigger type."""
         from web.proactive_trigger import TriggerType, InteractionType
+
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.PERIODIC, 0.9, 0.5)
         assert itype == InteractionType.ALERT
@@ -171,6 +179,7 @@ class TestProactiveTrigger:
     def test_determine_interaction_type_pattern(self):
         """Pattern trigger type with medium urgency returns QUESTION."""
         from web.proactive_trigger import TriggerType, InteractionType
+
         system = self._make_system()
         itype = system._determine_interaction_type(TriggerType.PATTERN, 0.4, 0.4)
         assert itype == InteractionType.QUESTION
@@ -178,10 +187,14 @@ class TestProactiveTrigger:
     def test_calculate_disturbance_cost_late_night(self):
         """Disturbance cost should increase during late night hours."""
         from web.proactive_trigger import TriggerCondition, TriggerType
+
         system = self._make_system()
         trigger = TriggerCondition(
-            trigger_id="test", trigger_type=TriggerType.PERIODIC,
-            condition_func=lambda uid: None, priority=5, cooldown_minutes=60,
+            trigger_id="test",
+            trigger_type=TriggerType.PERIODIC,
+            condition_func=lambda uid: None,
+            priority=5,
+            cooldown_minutes=60,
         )
         with patch("web.proactive_trigger.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2024, 1, 1, 2, 0, 0)  # 2am
@@ -203,6 +216,7 @@ class TestParallelExecutor:
 
     def test_task_creation_defaults(self):
         from web.parallel_executor import Task, TaskType, Priority, TaskStatus
+
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         assert t.status == TaskStatus.PENDING
         assert t.retry_count == 0
@@ -211,6 +225,7 @@ class TestParallelExecutor:
 
     def test_task_abort(self):
         from web.parallel_executor import Task, TaskType, Priority, TaskStatus
+
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         t.abort()
         assert t.is_aborted is True
@@ -218,16 +233,23 @@ class TestParallelExecutor:
 
     def test_task_to_dict(self):
         from web.parallel_executor import Task, TaskType, Priority
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL,
-                 user_input="hello world")
+
+        t = Task(
+            id="t1",
+            session_id="s1",
+            type=TaskType.CHAT,
+            priority=Priority.NORMAL,
+            user_input="hello world",
+        )
         d = t.to_dict()
-        assert d['id'] == 't1'
-        assert d['type'] == 'chat'
-        assert d['priority'] == 'NORMAL'
-        assert d['status'] == 'pending'
+        assert d["id"] == "t1"
+        assert d["type"] == "chat"
+        assert d["priority"] == "NORMAL"
+        assert d["status"] == "pending"
 
     def test_task_elapsed_time_running(self):
         from web.parallel_executor import Task, TaskType, Priority, TaskStatus
+
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         t.started_at = datetime.now() - timedelta(seconds=5)
         t.status = TaskStatus.RUNNING
@@ -237,6 +259,7 @@ class TestParallelExecutor:
 
     def test_queue_submit_and_get_next(self):
         from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+
         mgr = TaskQueueManager()
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         mgr.submit(t)
@@ -247,16 +270,28 @@ class TestParallelExecutor:
     def test_queue_priority_ordering(self):
         """CRITICAL tasks should be returned before HIGH/NORMAL."""
         from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+
         mgr = TaskQueueManager()
-        t_normal = Task(id="t_n", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
-        t_critical = Task(id="t_c", session_id="s1", type=TaskType.CHAT, priority=Priority.CRITICAL)
+        t_normal = Task(
+            id="t_n", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL
+        )
+        t_critical = Task(
+            id="t_c", session_id="s1", type=TaskType.CHAT, priority=Priority.CRITICAL
+        )
         mgr.submit(t_normal)
         mgr.submit(t_critical)
         first = mgr.get_next(timeout=0.1)
         assert first.id == "t_c"
 
     def test_queue_cancel_task(self):
-        from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority, TaskStatus
+        from web.parallel_executor import (
+            TaskQueueManager,
+            Task,
+            TaskType,
+            Priority,
+            TaskStatus,
+        )
+
         mgr = TaskQueueManager()
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         mgr.submit(t)
@@ -265,30 +300,54 @@ class TestParallelExecutor:
 
     def test_queue_cancel_nonexistent(self):
         from web.parallel_executor import TaskQueueManager
+
         mgr = TaskQueueManager()
         assert mgr.cancel("nonexistent") is False
 
     def test_queue_full_raises(self):
         from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+
         mgr = TaskQueueManager(max_queue_size=2)
         for i in range(2):
-            mgr.submit(Task(id=f"t{i}", session_id="s1", type=TaskType.CHAT, priority=Priority.LOW))
+            mgr.submit(
+                Task(
+                    id=f"t{i}",
+                    session_id="s1",
+                    type=TaskType.CHAT,
+                    priority=Priority.LOW,
+                )
+            )
         with pytest.raises(RuntimeError, match="full"):
-            mgr.submit(Task(id="t_overflow", session_id="s1", type=TaskType.CHAT, priority=Priority.LOW))
+            mgr.submit(
+                Task(
+                    id="t_overflow",
+                    session_id="s1",
+                    type=TaskType.CHAT,
+                    priority=Priority.LOW,
+                )
+            )
 
     def test_queue_get_stats(self):
         from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+
         mgr = TaskQueueManager()
-        mgr.submit(Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.HIGH))
+        mgr.submit(
+            Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.HIGH)
+        )
         stats = mgr.get_stats()
-        assert stats['total_tasks'] == 1
-        assert stats['high'] == 1
+        assert stats["total_tasks"] == 1
+        assert stats["high"] == 1
 
     def test_queue_get_session_tasks(self):
         from web.parallel_executor import TaskQueueManager, Task, TaskType, Priority
+
         mgr = TaskQueueManager()
-        mgr.submit(Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL))
-        mgr.submit(Task(id="t2", session_id="s2", type=TaskType.CHAT, priority=Priority.NORMAL))
+        mgr.submit(
+            Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
+        )
+        mgr.submit(
+            Task(id="t2", session_id="s2", type=TaskType.CHAT, priority=Priority.NORMAL)
+        )
         tasks = mgr.get_session_tasks("s1")
         assert len(tasks) == 1
         assert tasks[0].id == "t1"
@@ -297,6 +356,7 @@ class TestParallelExecutor:
 
     def test_resource_manager_can_start_task(self):
         from web.parallel_executor import ResourceManager, Task, TaskType, Priority
+
         rm = ResourceManager()
         rm.get_memory_usage_mb = lambda: 500.0
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
@@ -306,6 +366,7 @@ class TestParallelExecutor:
 
     def test_resource_manager_release(self):
         from web.parallel_executor import ResourceManager, Task, TaskType, Priority
+
         rm = ResourceManager()
         rm.current_concurrent = 2
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
@@ -314,6 +375,7 @@ class TestParallelExecutor:
 
     def test_resource_manager_max_concurrent_blocks(self):
         from web.parallel_executor import ResourceManager, Task, TaskType, Priority
+
         rm = ResourceManager()
         rm.get_memory_usage_mb = lambda: 100.0
         rm.current_concurrent = rm.max_concurrent_tasks
@@ -324,14 +386,16 @@ class TestParallelExecutor:
 
     def test_resource_manager_get_stats(self):
         from web.parallel_executor import ResourceManager
+
         rm = ResourceManager()
         stats = rm.get_stats()
-        assert 'concurrent_tasks' in stats
-        assert 'max_concurrent' in stats
-        assert 'memory_soft_limit_mb' in stats
+        assert "concurrent_tasks" in stats
+        assert "max_concurrent" in stats
+        assert "memory_soft_limit_mb" in stats
 
     def test_resource_manager_refill_api_tokens(self):
         from web.parallel_executor import ResourceManager
+
         rm = ResourceManager()
         rm.api_call_tokens = 0.0
         rm.last_api_token_refill = time.time() - 2.0
@@ -342,6 +406,7 @@ class TestParallelExecutor:
 
     def test_retry_policy_delay_increases(self):
         from web.parallel_executor import RetryPolicy
+
         rp = RetryPolicy(base_delay=1.0)
         d0 = rp.get_retry_delay(0)
         d1 = rp.get_retry_delay(1)
@@ -351,6 +416,7 @@ class TestParallelExecutor:
 
     def test_retry_policy_fatal_errors(self):
         from web.parallel_executor import RetryPolicy, Task, TaskType, Priority
+
         rp = RetryPolicy()
         t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL)
         assert rp.should_retry(t, ValueError("bad")) is False
@@ -360,12 +426,14 @@ class TestParallelExecutor:
 
     def test_circuit_breaker_closed_by_default(self):
         from web.parallel_executor import CircuitBreaker
+
         cb = CircuitBreaker(failure_threshold=3)
         assert cb.can_execute() is True
         assert cb.state == "CLOSED"
 
     def test_circuit_breaker_opens_after_failures(self):
         from web.parallel_executor import CircuitBreaker
+
         cb = CircuitBreaker(failure_threshold=3)
         for _ in range(3):
             cb.record_failure()
@@ -374,6 +442,7 @@ class TestParallelExecutor:
 
     def test_circuit_breaker_half_open_after_timeout(self):
         from web.parallel_executor import CircuitBreaker
+
         cb = CircuitBreaker(failure_threshold=2, timeout=0.1)
         cb.record_failure()
         cb.record_failure()
@@ -384,6 +453,7 @@ class TestParallelExecutor:
 
     def test_circuit_breaker_recovers(self):
         from web.parallel_executor import CircuitBreaker
+
         cb = CircuitBreaker(failure_threshold=2, timeout=0.1)
         cb.record_failure()
         cb.record_failure()
@@ -396,22 +466,34 @@ class TestParallelExecutor:
 
     def test_task_snapshot_roundtrip(self):
         from web.parallel_executor import TaskSnapshot, Task, TaskType, Priority
-        t = Task(id="t1", session_id="s1", type=TaskType.CHAT, priority=Priority.NORMAL,
-                 user_input="test")
+
+        t = Task(
+            id="t1",
+            session_id="s1",
+            type=TaskType.CHAT,
+            priority=Priority.NORMAL,
+            user_input="test",
+        )
         snap = TaskSnapshot.from_task(t)
         assert snap.task_id == "t1"
         j = snap.to_json()
         parsed = json.loads(j)
-        assert parsed['task_id'] == "t1"
-        assert parsed['type'] == "chat"
+        assert parsed["task_id"] == "t1"
+        assert parsed["type"] == "chat"
 
     # --- TaskMonitor ---
 
     def test_task_monitor_dashboard(self):
         from web.parallel_executor import (
-            TaskMonitor, TaskQueueManager, ResourceManager,
-            Task, TaskType, Priority, TaskStatus,
+            TaskMonitor,
+            TaskQueueManager,
+            ResourceManager,
+            Task,
+            TaskType,
+            Priority,
+            TaskStatus,
         )
+
         qm = TaskQueueManager()
         rm = ResourceManager()
         rm.get_memory_usage_mb = lambda: 100.0
@@ -423,8 +505,8 @@ class TestParallelExecutor:
         t.status = TaskStatus.COMPLETED
         monitor.record_task_complete(t)
         dash = monitor.get_dashboard()
-        assert dash['completed_tasks'] == 1
-        assert dash['success_rate'] > 0
+        assert dash["completed_tasks"] == 1
+        assert dash["success_rate"] > 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -445,11 +527,14 @@ class TestProcessedFileNetwork:
 
     def _make_network(self):
         from web.processed_file_network import ProcessedFileNetwork
+
         return ProcessedFileNetwork(db_path=self.db_path, workspace_dir=self.workspace)
 
-    def _create_test_file(self, name="test.txt", content="Hello World file content here for testing"):
+    def _create_test_file(
+        self, name="test.txt", content="Hello World file content here for testing"
+    ):
         path = os.path.join(self.workspace, name)
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         return path
 
@@ -490,8 +575,10 @@ class TestProcessedFileNetwork:
         net = self._make_network()
         path = self._create_test_file()
         result = net.record_processing(
-            file_path=path, operation="annotate",
-            changes_count=5, duration_seconds=1.5,
+            file_path=path,
+            operation="annotate",
+            changes_count=5,
+            duration_seconds=1.5,
         )
         assert result["success"] is True
         assert "record_id" in result
@@ -547,18 +634,29 @@ class TestProcessedFileNetwork:
 
     def test_dataclass_file_record_defaults(self):
         from web.processed_file_network import FileRecord
+
         fr = FileRecord(
-            file_id="id1", path="/a/b", name="b", file_type="txt",
-            size=100, created_at="2024-01-01", modified_at="2024-01-01",
-            indexed_at="2024-01-01", content_hash="abc",
+            file_id="id1",
+            path="/a/b",
+            name="b",
+            file_type="txt",
+            size=100,
+            created_at="2024-01-01",
+            modified_at="2024-01-01",
+            indexed_at="2024-01-01",
+            content_hash="abc",
         )
         assert fr.tags == []
 
     def test_dataclass_file_relation_defaults(self):
         from web.processed_file_network import FileRelation
+
         rel = FileRelation(
-            relation_id="r1", source_file_id="f1", target_file_id="f2",
-            relation_type="derived_from", created_at="2024-01-01",
+            relation_id="r1",
+            source_file_id="f1",
+            target_file_id="f2",
+            relation_type="derived_from",
+            created_at="2024-01-01",
         )
         assert rel.metadata == {}
 
@@ -574,17 +672,20 @@ class TestPptSynthesizer:
 
     def test_init_default_theme(self):
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer()
         assert synth.theme == "business"
         assert synth.slide_count == 0
 
     def test_init_custom_theme(self):
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer(theme="tech")
         assert synth.theme == "tech"
 
     def test_get_theme_colors_business(self):
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer()
         colors = synth._get_theme_colors("business")
         assert "primary" in colors
@@ -595,18 +696,21 @@ class TestPptSynthesizer:
 
     def test_get_theme_colors_tech(self):
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer()
         colors = synth._get_theme_colors("tech")
         assert colors["primary"] == (0, 120, 215)
 
     def test_get_theme_colors_creative(self):
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer()
         colors = synth._get_theme_colors("creative")
         assert colors["primary"] == (156, 39, 176)
 
     def test_get_theme_colors_unknown_defaults_to_business(self):
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer()
         colors = synth._get_theme_colors("nonexistent")
         business = synth._get_theme_colors("business")
@@ -615,6 +719,7 @@ class TestPptSynthesizer:
     def test_select_slide_layout_returns_blank(self):
         """_select_slide_layout always returns the blank layout (index 6)."""
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer()
         mock_prs = MagicMock()
         mock_layout = MagicMock()
@@ -627,6 +732,7 @@ class TestPptSynthesizer:
     def test_apply_beauty_rules_no_crash(self):
         """_apply_beauty_rules should not crash with minimal mocks."""
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer()
         slide = MagicMock()
         blueprint = MagicMock()
@@ -638,6 +744,7 @@ class TestPptSynthesizer:
     def test_beauty_optimizer_static_methods(self):
         """PPTBeautyOptimizer static methods should not crash with mock data."""
         from web.ppt_synthesizer import PPTBeautyOptimizer
+
         PPTBeautyOptimizer.add_visual_hierarchy(MagicMock(), {})
         PPTBeautyOptimizer.optimize_image_placement(MagicMock(), [], "balanced")
 
@@ -645,6 +752,7 @@ class TestPptSynthesizer:
         """When synthesize_from_blueprint encounters an error, it returns error dict."""
         import asyncio
         from web.ppt_synthesizer import PPTSynthesizer
+
         synth = PPTSynthesizer()
         blueprint = MagicMock()
         blueprint.slides = [MagicMock()]
@@ -654,9 +762,13 @@ class TestPptSynthesizer:
             # pptx is available but slides mock will cause attribute errors
             # triggering the except branch
             mock_prs = MagicMock()
-            mock_prs.slide_layouts.__getitem__ = MagicMock(side_effect=RuntimeError("test error"))
+            mock_prs.slide_layouts.__getitem__ = MagicMock(
+                side_effect=RuntimeError("test error")
+            )
             with patch("pptx.Presentation", return_value=mock_prs):
-                return await synth.synthesize_from_blueprint(blueprint, "/tmp/test.pptx")
+                return await synth.synthesize_from_blueprint(
+                    blueprint, "/tmp/test.pptx"
+                )
 
         result = asyncio.get_event_loop().run_until_complete(_run())
         assert result["success"] is False
@@ -665,6 +777,7 @@ class TestPptSynthesizer:
     def test_optimize_image_placement_no_images(self):
         """optimize_image_placement with empty images list should not crash."""
         from web.ppt_synthesizer import PPTBeautyOptimizer
+
         slide = MagicMock()
         PPTBeautyOptimizer.optimize_image_placement(slide, [], "balanced")
         slide.shapes.add_picture.assert_not_called()
@@ -683,11 +796,13 @@ class TestFileQualityChecker:
 
     def test_strip_markdown_bold(self):
         from web.file_quality_checker import strip_markdown_for_export
+
         assert "hello" in strip_markdown_for_export("**hello**")
         assert "**" not in strip_markdown_for_export("**hello**")
 
     def test_strip_markdown_code_block(self):
         from web.file_quality_checker import strip_markdown_for_export
+
         text = "```python\nprint('hi')\n```"
         result = strip_markdown_for_export(text)
         assert "```" not in result
@@ -695,18 +810,21 @@ class TestFileQualityChecker:
 
     def test_strip_markdown_heading(self):
         from web.file_quality_checker import strip_markdown_for_export
+
         result = strip_markdown_for_export("## My Title")
         assert "##" not in result
         assert "My Title" in result
 
     def test_strip_markdown_link(self):
         from web.file_quality_checker import strip_markdown_for_export
+
         result = strip_markdown_for_export("[Click here](https://example.com)")
         assert "Click here" in result
         assert "https://example.com" not in result
 
     def test_strip_markdown_empty_input(self):
         from web.file_quality_checker import strip_markdown_for_export
+
         assert strip_markdown_for_export("") == ""
         assert strip_markdown_for_export(None) is None
 
@@ -714,10 +832,12 @@ class TestFileQualityChecker:
 
     def test_strip_markdown_from_cell_bold(self):
         from web.file_quality_checker import strip_markdown_from_cell
+
         assert strip_markdown_from_cell("**test**") == "test"
 
     def test_strip_markdown_from_cell_empty(self):
         from web.file_quality_checker import strip_markdown_from_cell
+
         assert strip_markdown_from_cell("") == ""
         assert strip_markdown_from_cell(None) is None
 
@@ -725,11 +845,13 @@ class TestFileQualityChecker:
 
     def test_detect_markdown_in_export_finds_bold(self):
         from web.file_quality_checker import detect_markdown_in_export
+
         issues = detect_markdown_in_export("This is **bold** text")
         assert any("加粗" in i for i in issues)
 
     def test_detect_markdown_in_export_clean_text(self):
         from web.file_quality_checker import detect_markdown_in_export
+
         issues = detect_markdown_in_export("Plain text without markdown")
         assert len(issues) == 0
 
@@ -737,22 +859,26 @@ class TestFileQualityChecker:
 
     def test_sanitize_removes_ai_noise(self):
         from web.file_quality_checker import ContentSanitizer
+
         result = ContentSanitizer.sanitize_text("当然可以！这是内容")
         assert "当然可以" not in result
         assert "内容" in result
 
     def test_sanitize_removes_ai_dialogue(self):
         from web.file_quality_checker import ContentSanitizer
+
         result = ContentSanitizer.sanitize_text("数据分析报告 希望这对你有帮助")
         assert "希望这对你有帮助" not in result
 
     def test_sanitize_preserves_normal_text(self):
         from web.file_quality_checker import ContentSanitizer
+
         text = "这是一段正常的技术文档内容"
         assert ContentSanitizer.sanitize_text(text) == text
 
     def test_sanitize_ppt_outline(self):
         from web.file_quality_checker import ContentSanitizer
+
         outline = [
             {"title": "**第一章**", "points": ["当然可以！要点一", "要点二"]},
             {"title": "第二章", "content": ["内容A"]},
@@ -764,6 +890,7 @@ class TestFileQualityChecker:
 
     def test_sanitize_document_text(self):
         from web.file_quality_checker import ContentSanitizer
+
         text = "当然可以！以下是报告内容：\n第一段正文\n希望这对你有帮助"
         cleaned, fixes = ContentSanitizer.sanitize_document_text(text)
         assert len(fixes) > 0
@@ -772,74 +899,122 @@ class TestFileQualityChecker:
 
     def test_evaluate_ppt_outline_good(self):
         from web.file_quality_checker import FileQualityEvaluator
+
         outline = [
-            {"title": "引言", "type": "detail",
-             "points": ["要点A长度足够了", "要点B长度足够了", "要点C长度足够了"]},
-            {"title": "方法论", "type": "detail",
-             "points": ["研究方法一详细描述", "研究方法二详细描述", "研究方法三详细描述"]},
-            {"title": "结果与分析", "type": "detail",
-             "points": ["结果一的详细内容描述", "结果二的详细内容描述", "结果三的详细内容描述"]},
-            {"title": "结论总结", "type": "detail",
-             "points": ["总结要点一详细内容", "总结要点二详细内容", "总结要点三详细内容"]},
+            {
+                "title": "引言",
+                "type": "detail",
+                "points": ["要点A长度足够了", "要点B长度足够了", "要点C长度足够了"],
+            },
+            {
+                "title": "方法论",
+                "type": "detail",
+                "points": [
+                    "研究方法一详细描述",
+                    "研究方法二详细描述",
+                    "研究方法三详细描述",
+                ],
+            },
+            {
+                "title": "结果与分析",
+                "type": "detail",
+                "points": [
+                    "结果一的详细内容描述",
+                    "结果二的详细内容描述",
+                    "结果三的详细内容描述",
+                ],
+            },
+            {
+                "title": "结论总结",
+                "type": "detail",
+                "points": [
+                    "总结要点一详细内容",
+                    "总结要点二详细内容",
+                    "总结要点三详细内容",
+                ],
+            },
         ]
         result = FileQualityEvaluator.evaluate_ppt_outline(outline)
-        assert result['pass'] is True
-        assert result['score'] >= 60
+        assert result["pass"] is True
+        assert result["score"] >= 60
 
     def test_evaluate_ppt_outline_empty(self):
         from web.file_quality_checker import FileQualityEvaluator
+
         result = FileQualityEvaluator.evaluate_ppt_outline([])
-        assert result['score'] < 100
-        assert "过少" in str(result['issues'])
+        assert result["score"] < 100
+        assert "过少" in str(result["issues"])
 
     def test_evaluate_document_text_good(self):
         from web.file_quality_checker import FileQualityEvaluator
-        text = "# 报告标题\n\n" + "这是一段很长的正文内容。" * 50 + "\n\n## 小节\n\n更多内容在这里。"
+
+        text = (
+            "# 报告标题\n\n"
+            + "这是一段很长的正文内容。" * 50
+            + "\n\n## 小节\n\n更多内容在这里。"
+        )
         result = FileQualityEvaluator.evaluate_document_text(text)
-        assert result['pass'] is True
+        assert result["pass"] is True
 
     def test_evaluate_document_text_empty(self):
         from web.file_quality_checker import FileQualityEvaluator
+
         result = FileQualityEvaluator.evaluate_document_text("")
-        assert result['score'] == 0
-        assert result['pass'] is False
+        assert result["score"] == 0
+        assert result["pass"] is False
 
     # --- FileQualityGate ---
 
     def test_gate_check_ppt_outline_proceed(self):
         from web.file_quality_checker import FileQualityGate
+
         outline = [
-            {"title": "标题页面", "type": "detail",
-             "points": ["详细要点一内容", "详细要点二内容", "详细要点三内容"]},
-            {"title": "内容页面", "type": "detail",
-             "points": ["详细要点一内容", "详细要点二内容", "详细要点三内容"]},
-            {"title": "分析结果", "type": "detail",
-             "points": ["详细要点一内容", "详细要点二内容", "详细要点三内容"]},
-            {"title": "总结页面", "type": "detail",
-             "points": ["详细要点一内容", "详细要点二内容", "详细要点三内容"]},
+            {
+                "title": "标题页面",
+                "type": "detail",
+                "points": ["详细要点一内容", "详细要点二内容", "详细要点三内容"],
+            },
+            {
+                "title": "内容页面",
+                "type": "detail",
+                "points": ["详细要点一内容", "详细要点二内容", "详细要点三内容"],
+            },
+            {
+                "title": "分析结果",
+                "type": "detail",
+                "points": ["详细要点一内容", "详细要点二内容", "详细要点三内容"],
+            },
+            {
+                "title": "总结页面",
+                "type": "detail",
+                "points": ["详细要点一内容", "详细要点二内容", "详细要点三内容"],
+            },
         ]
         result = FileQualityGate.check_and_fix_ppt_outline(outline)
-        assert result['action'] in ('proceed', 'warn')
-        assert 'outline' in result
-        assert 'quality' in result
+        assert result["action"] in ("proceed", "warn")
+        assert "outline" in result
+        assert "quality" in result
 
     def test_gate_check_document_empty(self):
         from web.file_quality_checker import FileQualityGate
+
         result = FileQualityGate.check_and_fix_document("")
-        assert result['action'] == 'regenerate'
+        assert result["action"] == "regenerate"
 
     def test_gate_check_and_fix_for_export_empty(self):
         from web.file_quality_checker import FileQualityGate
+
         result = FileQualityGate.check_and_fix_for_export("")
-        assert result['stripped_md'] is False
-        assert result['quality']['score'] == 0
+        assert result["stripped_md"] is False
+        assert result["quality"]["score"] == 0
 
     def test_gate_check_and_fix_for_export_excel(self):
         from web.file_quality_checker import FileQualityGate
+
         text = "# 标题\n\n" + "正文内容很长的段落。" * 50 + "\n\n**加粗文字**"
         result = FileQualityGate.check_and_fix_for_export(text, target_format="excel")
-        assert "**" not in result['text']
-        assert "#" not in result['text']
+        assert "**" not in result["text"]
+        assert "#" not in result["text"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -861,6 +1036,7 @@ class TestSearchEngine:
 
     def _make_engine(self):
         from web.search_engine import SearchEngine
+
         engine = SearchEngine()
         engine.workspace_root = self.workspace
         engine.chats_root = self.chats
@@ -869,6 +1045,7 @@ class TestSearchEngine:
 
     def test_init_sets_paths(self):
         from web.search_engine import SearchEngine
+
         engine = SearchEngine()
         assert engine.workspace_root is not None
         assert engine.chats_root is not None
@@ -876,20 +1053,20 @@ class TestSearchEngine:
     def test_search_files_by_filename(self):
         engine = self._make_engine()
         # Create a file
-        with open(os.path.join(self.workspace, "report.txt"), 'w') as f:
+        with open(os.path.join(self.workspace, "report.txt"), "w") as f:
             f.write("some content")
         results = engine.search_files("report")
         assert len(results) >= 1
-        assert results[0]['type'] == 'filename'
+        assert results[0]["type"] == "filename"
 
     def test_search_files_by_content(self):
         engine = self._make_engine()
-        with open(os.path.join(self.workspace, "data.txt"), 'w') as f:
+        with open(os.path.join(self.workspace, "data.txt"), "w") as f:
             f.write("line1\nthe quick brown fox\nline3")
         results = engine.search_files("quick brown")
         assert len(results) >= 1
-        assert results[0]['type'] == 'content'
-        assert results[0]['line'] == 2
+        assert results[0]["type"] == "content"
+        assert results[0]["line"] == 2
 
     def test_search_files_no_match(self):
         engine = self._make_engine()
@@ -900,16 +1077,24 @@ class TestSearchEngine:
         engine = self._make_engine()
         chat_data = {
             "messages": [
-                {"content": "Hello world", "role": "user", "timestamp": "2024-01-01T10:00:00"},
-                {"content": "Hi there", "role": "assistant", "timestamp": "2024-01-01T10:00:01"},
+                {
+                    "content": "Hello world",
+                    "role": "user",
+                    "timestamp": "2024-01-01T10:00:00",
+                },
+                {
+                    "content": "Hi there",
+                    "role": "assistant",
+                    "timestamp": "2024-01-01T10:00:01",
+                },
             ]
         }
-        with open(os.path.join(self.chats, "chat1.json"), 'w') as f:
+        with open(os.path.join(self.chats, "chat1.json"), "w") as f:
             json.dump(chat_data, f)
         results = engine.search_chats("Hello")
         assert len(results) >= 1
-        assert results[0]['type'] == 'chat'
-        assert results[0]['role'] == 'user'
+        assert results[0]["type"] == "chat"
+        assert results[0]["role"] == "user"
 
     def test_search_chats_no_chats_dir(self):
         engine = self._make_engine()
@@ -930,11 +1115,11 @@ class TestSearchEngine:
                 "created_at": "2024-01-01T10:00:00",
             }
         }
-        with open(os.path.join(notes_dir, "notes_index.json"), 'w') as f:
+        with open(os.path.join(notes_dir, "notes_index.json"), "w") as f:
             json.dump(index, f)
         results = engine.search_notes("Python")
         assert len(results) >= 1
-        assert results[0]['type'] == 'note'
+        assert results[0]["type"] == "note"
 
     def test_search_notes_no_dir(self):
         engine = self._make_engine()
@@ -947,10 +1132,18 @@ class TestSearchEngine:
         clip_dir = os.path.join(self.workspace, "clipboard")
         os.makedirs(clip_dir, exist_ok=True)
         history = [
-            {"content": "clipboard item one", "type": "text", "timestamp": "2024-06-01T10:00:00"},
-            {"content": "another clipboard item", "type": "text", "timestamp": "2024-06-01T11:00:00"},
+            {
+                "content": "clipboard item one",
+                "type": "text",
+                "timestamp": "2024-06-01T10:00:00",
+            },
+            {
+                "content": "another clipboard item",
+                "type": "text",
+                "timestamp": "2024-06-01T11:00:00",
+            },
         ]
-        with open(os.path.join(clip_dir, "history.json"), 'w') as f:
+        with open(os.path.join(clip_dir, "history.json"), "w") as f:
             json.dump(history, f)
         results = engine.search_clipboard("clipboard item")
         assert len(results) >= 1
@@ -958,14 +1151,16 @@ class TestSearchEngine:
     def test_search_all_aggregates(self):
         engine = self._make_engine()
         results = engine.search_all("test")
-        assert 'files' in results
-        assert 'chats' in results
-        assert 'notes' in results
-        assert 'clipboard' in results
+        assert "files" in results
+        assert "chats" in results
+        assert "notes" in results
+        assert "clipboard" in results
 
     def test_extract_match_context_found(self):
         engine = self._make_engine()
-        ctx = engine._extract_match_context("The quick brown fox jumps over the lazy dog", "fox", 20)
+        ctx = engine._extract_match_context(
+            "The quick brown fox jumps over the lazy dog", "fox", 20
+        )
         assert "fox" in ctx
 
     def test_extract_match_context_not_found(self):
@@ -997,6 +1192,7 @@ class TestSearchEngine:
 
     def test_get_search_engine_singleton(self):
         import web.search_engine as mod
+
         old = mod._search_engine
         mod._search_engine = None
         try:

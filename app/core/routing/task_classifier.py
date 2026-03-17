@@ -30,7 +30,7 @@ os.environ.setdefault("TRANSFORMERS_SAFETENSORS_DISABLE_AUTO_CONVERSION", "1")
 logger = logging.getLogger(__name__)
 
 # 定位工件目录（相对仓库根目录）
-_HERE      = os.path.abspath(__file__)                          # …/app/core/routing/task_classifier.py
+_HERE = os.path.abspath(__file__)  # …/app/core/routing/task_classifier.py
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_HERE))))
 _MODEL_DIR = os.path.join(_REPO_ROOT, "models", "task_classifier")
 
@@ -43,11 +43,11 @@ class TaskClassifier:
     不可用时（工件未训练）gracefully 返回 ("CHAT", 0.0)，不影响上层逻辑。
     """
 
-    _st_model   = None
-    _clf        = None
-    _le         = None
+    _st_model = None
+    _clf = None
+    _le = None
     _config: dict = {}
-    _available: bool | None = None   # None = 尚未检测
+    _available: bool | None = None  # None = 尚未检测
     _load_error: str = ""
 
     # ── 加载 ─────────────────────────────────────────────────────────────────
@@ -58,13 +58,13 @@ class TaskClassifier:
         if cls._available is not None:
             return cls._available
 
-        clf_path    = os.path.join(_MODEL_DIR, "clf.pkl")
-        le_path     = os.path.join(_MODEL_DIR, "label_encoder.pkl")
+        clf_path = os.path.join(_MODEL_DIR, "clf.pkl")
+        le_path = os.path.join(_MODEL_DIR, "label_encoder.pkl")
         config_path = os.path.join(_MODEL_DIR, "config.json")
 
         # 工件存在性检查
         if not (os.path.exists(clf_path) and os.path.exists(le_path)):
-            cls._available  = False
+            cls._available = False
             cls._load_error = "工件文件不存在，请先运行 train_task_classifier.py"
             logger.info(f"[TaskClassifier] {cls._load_error}")
             return False
@@ -72,41 +72,49 @@ class TaskClassifier:
         # 加载 sklearn 工件
         try:
             import pickle
+
             with open(clf_path, "rb") as f:
                 cls._clf = pickle.load(f)
             with open(le_path, "rb") as f:
                 cls._le = pickle.load(f)
             if os.path.exists(config_path):
                 import json as _json
+
                 with open(config_path, encoding="utf-8") as f:
                     cls._config = _json.load(f)
         except Exception as e:
-            cls._available  = False
+            cls._available = False
             cls._load_error = f"pickle 加载失败: {e}"
             logger.warning(f"[TaskClassifier] {cls._load_error}")
             return False
 
         # 加载编码器（支持两种后端）
-        backend    = cls._config.get("backend", "sentence_transformers")
-        model_name = cls._config.get("model_name", "paraphrase-multilingual-MiniLM-L12-v2")
+        backend = cls._config.get("backend", "sentence_transformers")
+        model_name = cls._config.get(
+            "model_name", "paraphrase-multilingual-MiniLM-L12-v2"
+        )
 
         try:
             t0 = time.time()
             if backend == "transformers_mean_pool":
                 # 新版：使用 transformers 直接加载，均值池化，无需 sentence-transformers
                 from transformers import AutoTokenizer, AutoModel
+
                 cls._st_model = {
                     "tokenizer": AutoTokenizer.from_pretrained(model_name),
-                    "model":     AutoModel.from_pretrained(model_name),
-                    "backend":   "transformers_mean_pool",
+                    "model": AutoModel.from_pretrained(model_name),
+                    "backend": "transformers_mean_pool",
                 }
             else:
                 # 旧版：sentence-transformers 后端
                 from sentence_transformers import SentenceTransformer
+
                 st_cache_dir = cls._config.get("st_cache_dir", "st_model")
                 if st_cache_dir:
                     st_cache = os.path.join(_MODEL_DIR, st_cache_dir)
-                    cls._st_model = SentenceTransformer(model_name, cache_folder=st_cache)
+                    cls._st_model = SentenceTransformer(
+                        model_name, cache_folder=st_cache
+                    )
                 else:
                     cls._st_model = SentenceTransformer(model_name)
             elapsed = time.time() - t0
@@ -118,12 +126,12 @@ class TaskClassifier:
                 f"训练准确率: {cls._config.get('train_accuracy', '?')}"
             )
         except ImportError as e:
-            cls._available  = False
+            cls._available = False
             cls._load_error = f"缺少依赖: {e}"
             logger.warning(f"[TaskClassifier] {cls._load_error}")
             return False
         except Exception as e:
-            cls._available  = False
+            cls._available = False
             cls._load_error = f"模型加载失败: {e}"
             logger.warning(f"[TaskClassifier] {cls._load_error}")
             return False
@@ -155,25 +163,40 @@ class TaskClassifier:
             import numpy as np
 
             t0 = time.time()
-            if isinstance(cls._st_model, dict) and cls._st_model.get("backend") == "transformers_mean_pool":
+            if (
+                isinstance(cls._st_model, dict)
+                and cls._st_model.get("backend") == "transformers_mean_pool"
+            ):
                 import torch
                 import torch.nn.functional as F
+
                 tokenizer = cls._st_model["tokenizer"]
-                model     = cls._st_model["model"]
+                model = cls._st_model["model"]
                 model.eval()
-                encoded = tokenizer([text], padding=True, truncation=True, max_length=128, return_tensors="pt")
+                encoded = tokenizer(
+                    [text],
+                    padding=True,
+                    truncation=True,
+                    max_length=128,
+                    return_tensors="pt",
+                )
                 with torch.no_grad():
                     out = model(**encoded)
-                mask_expanded = encoded["attention_mask"].unsqueeze(-1).expand(out.last_hidden_state.size()).float()
-                sum_emb  = torch.sum(out.last_hidden_state * mask_expanded, 1)
+                mask_expanded = (
+                    encoded["attention_mask"]
+                    .unsqueeze(-1)
+                    .expand(out.last_hidden_state.size())
+                    .float()
+                )
+                sum_emb = torch.sum(out.last_hidden_state * mask_expanded, 1)
                 sum_mask = torch.clamp(mask_expanded.sum(1), min=1e-9)
-                emb      = (sum_emb / sum_mask)
-                emb      = F.normalize(emb, p=2, dim=1)
+                emb = sum_emb / sum_mask
+                emb = F.normalize(emb, p=2, dim=1)
                 embedding = emb.cpu().numpy()
             else:
                 embedding = cls._st_model.encode([text], normalize_embeddings=True)
-            probs     = cls._clf.predict_proba(embedding)[0]
-            best_idx  = int(np.argmax(probs))
+            probs = cls._clf.predict_proba(embedding)[0]
+            best_idx = int(np.argmax(probs))
             task_type = str(cls._le.inverse_transform([best_idx])[0])
             confidence = float(probs[best_idx])
             elapsed_ms = int((time.time() - t0) * 1000)
@@ -202,24 +225,39 @@ class TaskClassifier:
         try:
             import numpy as np
 
-            if isinstance(cls._st_model, dict) and cls._st_model.get("backend") == "transformers_mean_pool":
+            if (
+                isinstance(cls._st_model, dict)
+                and cls._st_model.get("backend") == "transformers_mean_pool"
+            ):
                 import torch
                 import torch.nn.functional as F
+
                 tokenizer = cls._st_model["tokenizer"]
-                model     = cls._st_model["model"]
+                model = cls._st_model["model"]
                 model.eval()
-                encoded = tokenizer([text], padding=True, truncation=True, max_length=128, return_tensors="pt")
+                encoded = tokenizer(
+                    [text],
+                    padding=True,
+                    truncation=True,
+                    max_length=128,
+                    return_tensors="pt",
+                )
                 with torch.no_grad():
                     out = model(**encoded)
-                mask_expanded = encoded["attention_mask"].unsqueeze(-1).expand(out.last_hidden_state.size()).float()
-                sum_emb  = torch.sum(out.last_hidden_state * mask_expanded, 1)
+                mask_expanded = (
+                    encoded["attention_mask"]
+                    .unsqueeze(-1)
+                    .expand(out.last_hidden_state.size())
+                    .float()
+                )
+                sum_emb = torch.sum(out.last_hidden_state * mask_expanded, 1)
                 sum_mask = torch.clamp(mask_expanded.sum(1), min=1e-9)
-                emb      = (sum_emb / sum_mask)
+                emb = sum_emb / sum_mask
                 embedding = F.normalize(emb, p=2, dim=1).cpu().numpy()
             else:
                 embedding = cls._st_model.encode([text], normalize_embeddings=True)
-            probs     = cls._clf.predict_proba(embedding)[0]
-            best_idx  = int(np.argmax(probs))
+            probs = cls._clf.predict_proba(embedding)[0]
+            best_idx = int(np.argmax(probs))
             task_type = str(cls._le.inverse_transform([best_idx])[0])
             confidence = float(probs[best_idx])
 
@@ -236,10 +274,10 @@ class TaskClassifier:
     @classmethod
     def reload(cls) -> bool:
         """强制重新加载模型（训练新版本后调用）。"""
-        cls._st_model  = None
-        cls._clf       = None
-        cls._le        = None
-        cls._config    = {}
+        cls._st_model = None
+        cls._clf = None
+        cls._le = None
+        cls._config = {}
         cls._available = None
         cls._load_error = ""
         return cls._load()

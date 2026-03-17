@@ -3,6 +3,7 @@ Batch 10 – unit tests for 12 web modules at 0 % or low coverage.
 Each class contains 5-8 focused tests covering __init__, key public methods,
 and error paths.  All external deps are mocked.
 """
+
 import json
 import os
 import re
@@ -25,6 +26,7 @@ class TestBatchFileProcessor:
 
     def _make(self, **kw):
         from web.batch_processor import BatchFileProcessor
+
         return BatchFileProcessor(**kw)
 
     def test_init_default_workspace(self):
@@ -121,6 +123,7 @@ class TestCodeGenerator:
 
     def _make(self):
         from web.code_generator import CodeGenerator
+
         return CodeGenerator()
 
     def test_init_has_templates(self):
@@ -180,11 +183,13 @@ class TestCodeTemplate:
 
     def test_render_substitutes(self):
         from web.code_generator import CodeTemplate
+
         t = CodeTemplate("test", "python", "Hello {name}!", "desc")
         assert t.render(name="World") == "Hello World!"
 
     def test_attributes(self):
         from web.code_generator import CodeTemplate
+
         t = CodeTemplate("n", "js", "tpl", "d")
         assert t.name == "n"
         assert t.language == "js"
@@ -199,9 +204,13 @@ class TestClipboardOCRAssistant:
     """Tests for web.clipboard_ocr_assistant.ClipboardOCRAssistant"""
 
     @patch("web.clipboard_ocr_assistant.os.makedirs")
-    @patch("web.clipboard_ocr_assistant.ClipboardOCRAssistant._init_ocr_engine", return_value=None)
+    @patch(
+        "web.clipboard_ocr_assistant.ClipboardOCRAssistant._init_ocr_engine",
+        return_value=None,
+    )
     def _make(self, mock_engine, mock_mkdirs, **kw):
         from web.clipboard_ocr_assistant import ClipboardOCRAssistant
+
         return ClipboardOCRAssistant(**kw)
 
     def test_init_sets_output_dir(self):
@@ -264,32 +273,39 @@ class TestFileFieldsExtractor:
 
     def test_normalize_date_standard(self):
         from web.file_fields_extractor import _normalize_date
+
         assert _normalize_date("2026-03-01") == "2026-03-01"
 
     def test_normalize_date_chinese(self):
         from web.file_fields_extractor import _normalize_date
+
         assert _normalize_date("2026年3月1日") == "2026-03-01"
 
     def test_normalize_date_empty(self):
         from web.file_fields_extractor import _normalize_date
+
         assert _normalize_date("") == ""
 
     def test_normalize_date_invalid_returns_stripped(self):
         from web.file_fields_extractor import _normalize_date
+
         assert _normalize_date("  unknown  ") == "unknown"
 
     @patch("web.file_fields_extractor._ollama_available", return_value=False)
     def test_extract_fields_ollama_unavailable(self, _):
         from web.file_fields_extractor import extract_fields
+
         assert extract_fields("test.docx", "some content") is None
 
     def test_extract_fields_empty_content(self):
         from web.file_fields_extractor import extract_fields
+
         assert extract_fields("test.docx", "") is None
         assert extract_fields("test.docx", "   ") is None
 
     def test_fields_to_markdown_basic(self):
         from web.file_fields_extractor import fields_to_markdown
+
         fields = {
             "summary": "A test summary",
             "parties": ["A Corp", "B Corp"],
@@ -307,6 +323,7 @@ class TestFileFieldsExtractor:
 
     def test_fields_to_markdown_empty(self):
         from web.file_fields_extractor import fields_to_markdown
+
         md = fields_to_markdown({})
         assert md == ""
 
@@ -320,11 +337,13 @@ class TestFileParser:
 
     def test_parse_file_not_found(self):
         from web.file_parser import FileParser
+
         result = FileParser.parse_file("/nonexistent_abc.txt")
         assert result["success"] is False
 
     def test_parse_file_unsupported_format(self, tmp_path):
         from web.file_parser import FileParser
+
         f = tmp_path / "test.xyz"
         f.write_text("data")
         result = FileParser.parse_file(str(f))
@@ -332,6 +351,7 @@ class TestFileParser:
 
     def test_parse_text_file(self, tmp_path):
         from web.file_parser import FileParser
+
         f = tmp_path / "readme.txt"
         f.write_text("Hello World", encoding="utf-8")
         result = FileParser.parse_file(str(f))
@@ -341,6 +361,7 @@ class TestFileParser:
 
     def test_parse_markdown_file(self, tmp_path):
         from web.file_parser import FileParser
+
         f = tmp_path / "doc.md"
         f.write_text("# Title\nBody", encoding="utf-8")
         result = FileParser.parse_file(str(f))
@@ -349,6 +370,7 @@ class TestFileParser:
 
     def test_parse_file_too_large(self, tmp_path):
         from web.file_parser import FileParser
+
         f = tmp_path / "big.txt"
         f.write_text("x")
         with patch("os.path.getsize", return_value=60 * 1024 * 1024):
@@ -357,6 +379,7 @@ class TestFileParser:
 
     def test_batch_parse(self, tmp_path):
         from web.file_parser import FileParser
+
         f1 = tmp_path / "a.txt"
         f1.write_text("aaa", encoding="utf-8")
         f2 = tmp_path / "b.txt"
@@ -367,6 +390,7 @@ class TestFileParser:
 
     def test_merge_contents(self):
         from web.file_parser import FileParser
+
         results = [
             {"success": True, "filename": "a.txt", "format": "txt", "content": "AAA"},
             {"success": False, "error": "fail"},
@@ -377,6 +401,7 @@ class TestFileParser:
 
     def test_sanitize_file_path_relative(self):
         from web.file_parser import FileParser
+
         result = FileParser.sanitize_file_path("web/file_parser.py")
         # Should return an absolute path or None depending on safety check
         assert result is None or os.path.isabs(result)
@@ -392,6 +417,7 @@ class TestFileQA:
     @patch("web.file_qa._ollama_available", return_value=False)
     def test_answer_question_ollama_unavailable(self, _):
         from web.file_qa import answer_file_question
+
         result = answer_file_question("What is in these files?")
         assert result["success"] is False
         assert "Ollama" in result["error"]
@@ -399,6 +425,7 @@ class TestFileQA:
     @patch("web.file_qa._ollama_available", return_value=True)
     def test_answer_question_no_files_found(self, _):
         from web.file_qa import answer_file_question
+
         result = answer_file_question("question", file_paths=[])
         assert result["success"] is False
 
@@ -406,6 +433,7 @@ class TestFileQA:
     @patch("web.file_qa._extract_content_local", return_value="some content")
     def test_answer_question_with_files(self, mock_extract, mock_oll, tmp_path):
         from web.file_qa import answer_file_question
+
         f = tmp_path / "test.txt"
         f.write_text("hello")
         mock_resp = MagicMock()
@@ -420,6 +448,7 @@ class TestFileQA:
     @patch("web.file_qa._extract_content_local", return_value="")
     def test_answer_question_empty_content(self, mock_extract, mock_oll, tmp_path):
         from web.file_qa import answer_file_question
+
         f = tmp_path / "empty.txt"
         f.write_text("")
         result = answer_file_question("what?", file_paths=[str(f)])
@@ -428,11 +457,13 @@ class TestFileQA:
     @patch("web.file_qa._ollama_available", return_value=False)
     def test_filter_files_ollama_unavailable(self, _):
         from web.file_qa import filter_files_by_criterion
+
         result = filter_files_by_criterion("合同", "/tmp")
         assert result["success"] is False
 
     def test_search_files_in_dirs_nonexistent(self):
         from web.file_qa import _search_files_in_dirs
+
         result = _search_files_in_dirs(["test"], ["/nonexistent_xyz"])
         assert result == []
 
@@ -446,6 +477,7 @@ class TestFileWatcher:
 
     def _make(self):
         from web.file_watcher import FileWatcher
+
         return FileWatcher()
 
     def test_init(self):
@@ -488,6 +520,7 @@ class TestFileWatcher:
 
     def test_get_file_watcher_singleton(self):
         import web.file_watcher as mod
+
         old = mod._watcher_instance
         mod._watcher_instance = None
         try:
@@ -507,6 +540,7 @@ class TestCatalogEventHandler:
 
     def _make(self, callback=None):
         from web.file_watcher import _CatalogEventHandler
+
         cb = callback or MagicMock()
         return _CatalogEventHandler("/tmp/watch", cb), cb
 
@@ -558,6 +592,7 @@ class TestFileEditor:
 
     def _make(self, tmp_path, backup=False):
         from web.file_editor import FileEditor
+
         return FileEditor(workspace_dir=str(tmp_path), backup_enabled=backup)
 
     def test_init_defaults(self, tmp_path):
@@ -640,8 +675,11 @@ class TestIntelligentDocumentAnalyzer:
     """Tests for web.intelligent_document_analyzer.IntelligentDocumentAnalyzer"""
 
     def _make(self):
-        with patch.dict("sys.modules", {"docx": MagicMock(), "docx.shared": MagicMock()}):
+        with patch.dict(
+            "sys.modules", {"docx": MagicMock(), "docx.shared": MagicMock()}
+        ):
             from web.intelligent_document_analyzer import IntelligentDocumentAnalyzer
+
             return IntelligentDocumentAnalyzer(llm_client=MagicMock())
 
     def test_init(self):
@@ -666,9 +704,7 @@ class TestIntelligentDocumentAnalyzer:
     def test_analyze_request_write_abstract(self):
         analyzer = self._make()
         doc_structure = {
-            "paragraphs": [
-                {"text": "摘要 引言 结论 参考文献 关键词", "type": "body"}
-            ]
+            "paragraphs": [{"text": "摘要 引言 结论 参考文献 关键词", "type": "body"}]
         }
         result = analyzer.analyze_request("请帮我写摘要", doc_structure)
         assert len(result["tasks"]) >= 1
@@ -720,55 +756,71 @@ class TestDocxTranslatorModule:
 
     def test_detect_target_language_english(self):
         from web.docx_translator_module import detect_target_language
+
         assert detect_target_language("translate to english") == "English"
 
     def test_detect_target_language_japanese(self):
         from web.docx_translator_module import detect_target_language
+
         assert detect_target_language("翻译成日语") == "Japanese"
 
     def test_detect_target_language_default(self):
         from web.docx_translator_module import detect_target_language
+
         assert detect_target_language("random text") == "English"
 
     def test_lang_map_coverage(self):
         from web.docx_translator_module import LANG_MAP
+
         assert "en" in LANG_MAP
         assert "ja" in LANG_MAP
         assert "zh-cn" in LANG_MAP
 
     def test_lang_suffix_coverage(self):
         from web.docx_translator_module import LANG_SUFFIX
+
         assert LANG_SUFFIX["English"] == "en"
         assert LANG_SUFFIX["Japanese"] == "ja"
 
     def test_translate_docx_streaming_no_docx(self):
         from web.docx_translator_module import translate_docx_streaming
+
         with patch.dict("sys.modules", {"docx": None}):
             # Force re-import failure inside generator by patching builtins
             import builtins
+
             real_import = builtins.__import__
+
             def fake_import(name, *a, **kw):
                 if name == "docx":
                     raise ImportError("no docx")
                 return real_import(name, *a, **kw)
+
             with patch("builtins.__import__", side_effect=fake_import):
-                events = list(translate_docx_streaming("fake.docx", "English", MagicMock()))
+                events = list(
+                    translate_docx_streaming("fake.docx", "English", MagicMock())
+                )
         assert events[0]["stage"] == "error"
 
     def test_translate_batch_llm_empty(self):
         from web.docx_translator_module import _translate_batch_llm
+
         result = _translate_batch_llm([], "English", MagicMock())
         assert result == []
 
     @patch("web.docx_translator_module._translate_one_by_one")
     def test_translate_batch_llm_mismatch_fallback(self, mock_fallback):
         from web.docx_translator_module import _translate_batch_llm
+
         mock_fallback.return_value = ["翻译A", "翻译B"]
         mock_client = MagicMock()
         mock_resp = MagicMock()
         mock_resp.text = "only one segment"
         mock_client.models.generate_content.return_value = mock_resp
-        with patch.dict("sys.modules", {"google.genai": MagicMock(), "google.genai.types": MagicMock()}):
+        with patch.dict(
+            "sys.modules",
+            {"google.genai": MagicMock(), "google.genai.types": MagicMock()},
+        ):
             _translate_batch_llm(["text1", "text2"], "English", mock_client)
         mock_fallback.assert_called_once()
 
@@ -782,6 +834,7 @@ class TestVoiceResult:
 
     def test_to_dict(self):
         from web.voice_fast import VoiceResult
+
         vr = VoiceResult(success=True, text="hello", engine="vosk", confidence=0.95)
         d = vr.to_dict()
         assert d["success"] is True
@@ -791,6 +844,7 @@ class TestVoiceResult:
 
     def test_defaults(self):
         from web.voice_fast import VoiceResult
+
         vr = VoiceResult(success=False)
         assert vr.text == ""
         assert vr.engine == ""
@@ -806,18 +860,22 @@ class TestCleanChineseText:
 
     def test_removes_spaces_between_chinese(self):
         from web.voice_fast import _clean_chinese_text
+
         assert _clean_chinese_text("你 好 世 界") == "你好世界"
 
     def test_empty_string(self):
         from web.voice_fast import _clean_chinese_text
+
         assert _clean_chinese_text("") == ""
 
     def test_english_unchanged(self):
         from web.voice_fast import _clean_chinese_text
+
         assert _clean_chinese_text("hello world") == "hello world"
 
     def test_mixed_text(self):
         from web.voice_fast import _clean_chinese_text
+
         result = _clean_chinese_text("你好 world 世界")
         assert "你好" in result
         assert "world" in result
@@ -834,6 +892,7 @@ class TestFastVoiceRecognizer:
     @patch("web.voice_fast.FastVoiceRecognizer._detect_engines")
     def test_init(self, mock_detect, mock_bg):
         from web.voice_fast import FastVoiceRecognizer
+
         rec = FastVoiceRecognizer()
         mock_detect.assert_called_once()
         assert rec.vosk_model is None
@@ -842,6 +901,7 @@ class TestFastVoiceRecognizer:
     @patch("web.voice_fast.FastVoiceRecognizer._detect_engines")
     def test_available_engines_starts_empty(self, mock_detect, mock_bg):
         from web.voice_fast import FastVoiceRecognizer
+
         rec = FastVoiceRecognizer()
         assert rec.available_engines == []
 
@@ -849,6 +909,7 @@ class TestFastVoiceRecognizer:
     @patch("web.voice_fast.FastVoiceRecognizer._detect_engines")
     def test_primary_engine_default_none(self, mock_detect, mock_bg):
         from web.voice_fast import FastVoiceRecognizer
+
         rec = FastVoiceRecognizer()
         assert rec.primary_engine is None
 
@@ -862,7 +923,10 @@ class TestRecognitionResult:
 
     def test_to_dict(self):
         from web.voice_input import RecognitionResult
-        rr = RecognitionResult(success=True, text="test", engine="google", confidence=0.8)
+
+        rr = RecognitionResult(
+            success=True, text="test", engine="google", confidence=0.8
+        )
         d = rr.to_dict()
         assert d["success"] is True
         assert d["text"] == "test"
@@ -870,6 +934,7 @@ class TestRecognitionResult:
 
     def test_defaults(self):
         from web.voice_input import RecognitionResult
+
         rr = RecognitionResult(success=False)
         assert rr.text == ""
         assert rr.audio_file is None
@@ -885,6 +950,7 @@ class TestVoiceInputEngine:
     @patch("web.voice_input.VoiceInputEngine._detect_engines")
     def _make(self, mock_detect):
         from web.voice_input import VoiceInputEngine, EngineType
+
         engine = VoiceInputEngine()
         engine.available_engines = [EngineType.OFFLINE]
         engine.primary_engine = EngineType.OFFLINE
@@ -902,17 +968,20 @@ class TestVoiceInputEngine:
 
     def test_engine_type_enum(self):
         from web.voice_input import EngineType
+
         assert EngineType.VOSK_LOCAL.value == "vosk"
         assert EngineType.OFFLINE.value == "offline"
 
     def test_get_engine_name(self):
         from web.voice_input import EngineType
+
         eng = self._make()
         name = eng._get_engine_name(EngineType.VOSK_LOCAL)
         assert "Vosk" in name
 
     def test_get_engine_description(self):
         from web.voice_input import EngineType
+
         eng = self._make()
         desc = eng._get_engine_description(EngineType.OFFLINE)
         assert "录音" in desc

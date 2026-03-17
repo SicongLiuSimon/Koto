@@ -1,5 +1,6 @@
 import threading
 import hashlib
+
 # google.genai.types 延迟到 classify() 内部加载，避免启动时加载 (~4.7s)
 
 
@@ -8,7 +9,7 @@ class AIRouter:
     基于轻量级 AI 模型的智能任务路由器
     使用 gemini-2.0-flash-lite 进行任务分类
     """
-    
+
     # 路由器专用系统指令
     ROUTER_INSTRUCTION = """你是任务分类器。根据用户输入判断任务类型。只输出一个类型名称。
 
@@ -45,13 +46,13 @@ class AIRouter:
     # 缓存最近的分类结果（避免重复调用）
     _cache = {}
     _cache_max_size = 100
-    
+
     @classmethod
     def _cache_set(cls, key, value):
         """Set a cache entry, evicting oldest half when full."""
         if len(cls._cache) >= cls._cache_max_size:
             keys = list(cls._cache.keys())
-            for k in keys[:len(keys) // 2]:
+            for k in keys[: len(keys) // 2]:
                 del cls._cache[k]
         cls._cache[key] = value
 
@@ -70,12 +71,13 @@ class AIRouter:
         - confidence: 置信度描述
         - source: "AI" 或 "Cache"
         """
-        
+
         # 动态构建技能路由提示（根据当前启用的 skill）
         _dynamic_instruction = cls.ROUTER_INSTRUCTION
         _skill_hint_hash = ""
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
             _hints = []
             for s in SkillManager._registry.values():
@@ -84,13 +86,11 @@ class AIRouter:
                 _intent = s.get("intent_description", "")
                 _tts = s.get("task_types", [])
                 if _intent and _tts:
-                    _hints.append(
-                        f"- 若用户意图是「{_intent}」→ 优先路由到 {_tts[0]}"
-                    )
+                    _hints.append(f"- 若用户意图是「{_intent}」→ 优先路由到 {_tts[0]}")
             if _hints:
-                _skill_hint_hash = hashlib.md5(
-                    "\n".join(_hints).encode()
-                ).hexdigest()[:8]
+                _skill_hint_hash = hashlib.md5("\n".join(_hints).encode()).hexdigest()[
+                    :8
+                ]
                 _dynamic_instruction = (
                     cls.ROUTER_INSTRUCTION
                     + "\n\n当前用户启用的 Skill 路由提示（优先参考）:\n"
@@ -100,21 +100,32 @@ class AIRouter:
             pass
 
         # 检查缓存（加入 skill 状态哈希，技能启用变化时自动失效）
-        cache_key = hashlib.md5(
-            (user_input + _skill_hint_hash).encode()
-        ).hexdigest()[:16]
+        cache_key = hashlib.md5((user_input + _skill_hint_hash).encode()).hexdigest()[
+            :16
+        ]
         if cache_key in cls._cache:
             cached = cls._cache[cache_key]
             print(f"[AIRouter] Cache hit: {cached}")
             return cached[0], cached[1], "Cache"
-        
+
         try:
             result_holder = {"task": None, "error": None}
-            valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
-                           "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+            valid_tasks = [
+                "PAINTER",
+                "FILE_GEN",
+                "DOC_ANNOTATE",
+                "RESEARCH",
+                "CODER",
+                "FILE_SEARCH",
+                "SYSTEM",
+                "AGENT",
+                "WEB_SEARCH",
+                "CHAT",
+            ]
 
             def call_model():
                 from google.genai import types
+
                 # 构建尝试顺序：当前模型优先，再按降级链补全
                 models_to_try = [cls._router_model]
                 for m in cls._ROUTER_MODEL_CHAIN:
@@ -129,20 +140,36 @@ class AIRouter:
                                 system_instruction=_dynamic_instruction,
                                 max_output_tokens=20,  # 只需要一个词
                                 temperature=0.1,  # 低温度，更确定性
-                            )
+                            ),
                         )
                         if response.candidates and response.candidates[0].content.parts:
-                            text = response.candidates[0].content.parts[0].text.strip().upper()
+                            text = (
+                                response.candidates[0]
+                                .content.parts[0]
+                                .text.strip()
+                                .upper()
+                            )
                             # 清理输出
-                            valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH", "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+                            valid_tasks = [
+                                "PAINTER",
+                                "FILE_GEN",
+                                "DOC_ANNOTATE",
+                                "RESEARCH",
+                                "CODER",
+                                "FILE_SEARCH",
+                                "SYSTEM",
+                                "AGENT",
+                                "WEB_SEARCH",
+                                "CHAT",
+                            ]
                             for task in valid_tasks:
                                 if task in text:
-                                    result_holder['task'] = task
+                                    result_holder["task"] = task
                                     return
-                            result_holder['task'] = "CHAT"  # 默认
+                            result_holder["task"] = "CHAT"  # 默认
                     except Exception as e:
-                        result_holder['error'] = str(e)
-            
+                        result_holder["error"] = str(e)
+
             # 带超时的调用
             thread = threading.Thread(target=call_model, daemon=True)
             thread.start()
@@ -161,11 +188,11 @@ class AIRouter:
                 # 缓存结果
                 if len(cls._cache) >= cls._cache_max_size:
                     # 清除一半缓存
-                    keys = list(cls._cache.keys())[:cls._cache_max_size // 2]
+                    keys = list(cls._cache.keys())[: cls._cache_max_size // 2]
                     for k in keys:
                         del cls._cache[k]
                 cls._cache[cache_key] = (task, "🤖 AI")
-                
+
                 print(f"[AIRouter] Classified as: {task}")
                 return task, "🤖 AI", "AI"
 
@@ -223,6 +250,7 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             def call_model():
                 try:
                     from google.genai import types
+
                     response = client.models.generate_content(
                         model="gemini-2.0-flash-lite",
                         contents=user_input,
@@ -231,34 +259,59 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
                             max_output_tokens=150,
                             temperature=0.1,
                             response_mime_type="application/json",
-                        )
+                        ),
                     )
                     if response.candidates and response.candidates[0].content.parts:
                         raw = response.candidates[0].content.parts[0].text.strip()
                         import json as _json
+
                         try:
                             data = _json.loads(raw)
                             task = str(data.get("task", "")).strip().upper()
                             hint_raw = data.get("hint") or None
-                            valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
-                                           "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+                            valid_tasks = [
+                                "PAINTER",
+                                "FILE_GEN",
+                                "DOC_ANNOTATE",
+                                "RESEARCH",
+                                "CODER",
+                                "FILE_SEARCH",
+                                "SYSTEM",
+                                "AGENT",
+                                "WEB_SEARCH",
+                                "CHAT",
+                            ]
                             if task in valid_tasks:
-                                result_holder['task'] = task
-                                if hint_raw and isinstance(hint_raw, str) and len(hint_raw.strip()) > 3:
-                                    result_holder['hint'] = hint_raw.strip()
+                                result_holder["task"] = task
+                                if (
+                                    hint_raw
+                                    and isinstance(hint_raw, str)
+                                    and len(hint_raw.strip()) > 3
+                                ):
+                                    result_holder["hint"] = hint_raw.strip()
                                 return
                         except Exception:
                             pass
                         # Fallback: plain text extraction
-                        valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
-                                       "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+                        valid_tasks = [
+                            "PAINTER",
+                            "FILE_GEN",
+                            "DOC_ANNOTATE",
+                            "RESEARCH",
+                            "CODER",
+                            "FILE_SEARCH",
+                            "SYSTEM",
+                            "AGENT",
+                            "WEB_SEARCH",
+                            "CHAT",
+                        ]
                         for task in valid_tasks:
                             if task in raw.upper():
-                                result_holder['task'] = task
+                                result_holder["task"] = task
                                 return
-                        result_holder['task'] = "CHAT"
+                        result_holder["task"] = "CHAT"
                 except Exception as e:
-                    result_holder['error'] = str(e)
+                    result_holder["error"] = str(e)
 
             thread = threading.Thread(target=call_model, daemon=True)
             thread.start()
@@ -278,11 +331,13 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             if task:
                 # Cache: store task + hint
                 if len(cls._cache) >= cls._cache_max_size:
-                    keys = list(cls._cache.keys())[:cls._cache_max_size // 2]
+                    keys = list(cls._cache.keys())[: cls._cache_max_size // 2]
                     for k in keys:
                         del cls._cache[k]
                 cls._cache[cache_key] = (task, "🤖 AI+Hint", hint)
-                print(f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}")
+                print(
+                    f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}"
+                )
                 return task, "🤖 AI+Hint", "AI", hint
 
             task, conf, src = cls.classify(client, user_input, timeout=timeout)

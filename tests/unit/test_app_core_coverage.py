@@ -33,6 +33,7 @@ def _reset_file_registry_singleton():
     yield
     try:
         import app.core.file.file_registry as fr
+
         if fr._registry_instance is not None:
             try:
                 fr._registry_instance._conn.close()
@@ -47,6 +48,7 @@ def _reset_file_registry_singleton():
 # 1. TestFileRegistry
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestFileRegistry:
     """Tests for app.core.file.file_registry.FileRegistry."""
@@ -56,6 +58,7 @@ class TestFileRegistry:
         """Create a FileRegistry backed by a temp SQLite file."""
         db_path = str(tmp_path / "test_registry.sqlite")
         from app.core.file.file_registry import FileRegistry
+
         reg = FileRegistry(db_path=db_path)
         yield reg
         reg._conn.close()
@@ -71,6 +74,7 @@ class TestFileRegistry:
         """FileRegistry __init__ creates the SQLite database file."""
         db_path = str(tmp_path / "sub" / "test.sqlite")
         from app.core.file.file_registry import FileRegistry
+
         reg = FileRegistry(db_path=db_path)
         assert Path(db_path).exists()
 
@@ -214,7 +218,9 @@ class TestFileRegistry:
 
     def test_log_op_and_get_op_log(self, registry):
         """log_op() records operations and get_op_log() retrieves them."""
-        op_id = registry.log_op("move", "/src/a.txt", "/dst/a.txt", meta={"reason": "cleanup"})
+        op_id = registry.log_op(
+            "move", "/src/a.txt", "/dst/a.txt", meta={"reason": "cleanup"}
+        )
         assert op_id
         log = registry.get_op_log(limit=5)
         assert len(log) >= 1
@@ -247,6 +253,7 @@ class TestFileRegistry:
 # 2. TestFileWatcher
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestFileWatcher:
     """Tests for app.core.file.file_watcher.FileWatcher."""
@@ -255,17 +262,23 @@ class TestFileWatcher:
     def watcher(self, tmp_path):
         """Create a FileWatcher with a temporary settings file."""
         settings = tmp_path / "settings.json"
-        settings.write_text(json.dumps({
-            "file_watcher": {
-                "enabled": True,
-                "watch_dirs": [str(tmp_path / "watched")],
-                "interval_seconds": 10,
-                "max_file_size_mb": 5,
-                "skip_extensions": [".bak"],
-            }
-        }), encoding="utf-8")
+        settings.write_text(
+            json.dumps(
+                {
+                    "file_watcher": {
+                        "enabled": True,
+                        "watch_dirs": [str(tmp_path / "watched")],
+                        "interval_seconds": 10,
+                        "max_file_size_mb": 5,
+                        "skip_extensions": [".bak"],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
         (tmp_path / "watched").mkdir()
         from app.core.file.file_watcher import FileWatcher
+
         return FileWatcher(settings_path=str(settings))
 
     def test_init_loads_config(self, watcher, tmp_path):
@@ -277,6 +290,7 @@ class TestFileWatcher:
     def test_default_properties(self, tmp_path):
         """Properties return defaults when config file is absent."""
         from app.core.file.file_watcher import FileWatcher
+
         w = FileWatcher(settings_path=str(tmp_path / "nonexistent.json"))
         assert w.enabled is False
         assert w.watch_dirs == []
@@ -304,8 +318,8 @@ class TestFileWatcher:
     def test_skip_exts_includes_defaults_and_custom(self, watcher):
         """skip_exts combines default and user-configured extensions."""
         exts = watcher.skip_exts
-        assert ".tmp" in exts   # default
-        assert ".bak" in exts   # custom from settings
+        assert ".tmp" in exts  # default
+        assert ".bak" in exts  # custom from settings
 
     def test_max_file_size_bytes(self, watcher):
         """max_file_size_bytes converts MB config to bytes."""
@@ -319,6 +333,7 @@ class TestFileWatcher:
         watcher._running = False
         # Manually test start logic
         from app.core.file.file_watcher import FileWatcher
+
         watcher._stop_event.clear()
         watcher._running = True
         watcher._thread = threading.Thread(target=lambda: None, daemon=True)
@@ -342,6 +357,7 @@ class TestFileWatcher:
     def test_stop_noop_when_not_running(self, tmp_path):
         """stop() does nothing when watcher is not started."""
         from app.core.file.file_watcher import FileWatcher
+
         w = FileWatcher(settings_path=str(tmp_path / "no.json"))
         w.stop()  # should not raise
 
@@ -378,6 +394,7 @@ class TestFileWatcher:
         bad_settings = tmp_path / "bad.json"
         bad_settings.write_text("{invalid json!!", encoding="utf-8")
         from app.core.file.file_watcher import FileWatcher
+
         w = FileWatcher(settings_path=str(bad_settings))
         assert w.enabled is False
 
@@ -385,6 +402,7 @@ class TestFileWatcher:
 # ============================================================================
 # 3. TestTrainingDB
 # ============================================================================
+
 
 @pytest.mark.unit
 class TestTrainingDB:
@@ -395,10 +413,12 @@ class TestTrainingDB:
         """Create a TrainingDB with a temp database."""
         db_path = tmp_path / "test_training.db"
         from app.core.learning.training_db import TrainingDB
+
         tdb = TrainingDB(db_path=db_path)
         yield tdb
         # Force WAL checkpoint to release file locks on Windows
         import sqlite3
+
         try:
             c = sqlite3.connect(str(db_path))
             c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -409,6 +429,7 @@ class TestTrainingDB:
     @pytest.fixture
     def sample(self):
         from app.core.learning.training_db import DBSample
+
         return DBSample(
             user_input="帮我写一份周报",
             task_type="CHAT",
@@ -421,7 +442,8 @@ class TestTrainingDB:
         """__init__ creates the samples and build_history tables."""
         with db._conn() as conn:
             tables = [
-                r[0] for r in conn.execute(
+                r[0]
+                for r in conn.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
             ]
@@ -439,6 +461,7 @@ class TestTrainingDB:
         """upsert() skips duplicates with equal or lower quality."""
         db.upsert(sample)
         from app.core.learning.training_db import DBSample
+
         dup = DBSample(
             user_input="帮我写一份周报",
             task_type="CODER",
@@ -454,6 +477,7 @@ class TestTrainingDB:
         """upsert() updates when the new sample has higher quality."""
         db.upsert(sample)
         from app.core.learning.training_db import DBSample
+
         better = DBSample(
             user_input="帮我写一份周报",
             task_type="CODER",
@@ -468,6 +492,7 @@ class TestTrainingDB:
     def test_upsert_batch(self, db):
         """upsert_batch() inserts multiple samples and returns stats."""
         from app.core.learning.training_db import DBSample
+
         samples = [
             DBSample(user_input=f"input {i}", task_type="CHAT", quality=0.90)
             for i in range(5)
@@ -525,6 +550,7 @@ class TestTrainingDB:
     def test_get_all_active(self, db):
         """get_all_active() returns active samples above quality threshold."""
         from app.core.learning.training_db import DBSample
+
         db.upsert(DBSample(user_input="high q", task_type="CHAT", quality=0.95))
         db.upsert(DBSample(user_input="low q", task_type="CHAT", quality=0.30))
         actives = db.get_all_active(min_quality=0.7)
@@ -566,6 +592,7 @@ class TestTrainingDB:
     def test_dbsample_effective_task(self):
         """DBSample.effective_task prefers corrected_task over task_type."""
         from app.core.learning.training_db import DBSample
+
         s = DBSample(user_input="x", task_type="CHAT", corrected_task="CODER")
         assert s.effective_task == "CODER"
         assert s.effective_confidence == 0.99
@@ -573,6 +600,7 @@ class TestTrainingDB:
     def test_dbsample_effective_task_no_correction(self):
         """DBSample.effective_task uses task_type when no correction."""
         from app.core.learning.training_db import DBSample
+
         s = DBSample(user_input="x", task_type="CHAT")
         assert s.effective_task == "CHAT"
         assert s.effective_confidence == 0.90
@@ -582,6 +610,7 @@ class TestTrainingDB:
 # 4. TestShadowTracer
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestShadowTracer:
     """Tests for app.core.learning.shadow_tracer.ShadowTracer."""
@@ -590,9 +619,12 @@ class TestShadowTracer:
     def setup_tracer(self, tmp_path, monkeypatch):
         """Redirect ShadowTracer to a temp directory and reset state."""
         from app.core.learning.shadow_tracer import ShadowTracer
+
         self.tracer = ShadowTracer
         # Redirect _traces_dir to tmp_path
-        monkeypatch.setattr(ShadowTracer, "_traces_dir", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(
+            ShadowTracer, "_traces_dir", classmethod(lambda cls: tmp_path)
+        )
         # Reset class state
         self.tracer.recording_enabled = True
         self.tracer._listeners = []
@@ -682,6 +714,7 @@ class TestShadowTracer:
     def test_trace_record_to_jsonl_line(self):
         """TraceRecord.to_jsonl_line() produces valid JSON."""
         from app.core.learning.shadow_tracer import TraceRecord
+
         rec = TraceRecord(
             session_id="s1",
             user_input="test input",
@@ -714,6 +747,7 @@ class TestShadowTracer:
 # 5. TestConfigurationManager
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestConfigurationManager:
     """Tests for app.core.config.configuration_manager.ConfigurationManager."""
@@ -721,6 +755,7 @@ class TestConfigurationManager:
     @pytest.fixture
     def cm(self):
         from app.core.config.configuration_manager import ConfigurationManager
+
         return ConfigurationManager()
 
     def test_init_has_default_thresholds(self, cm):
@@ -803,6 +838,7 @@ class TestConfigurationManager:
 
         # Import into a fresh instance
         from app.core.config.configuration_manager import ConfigurationManager
+
         cm2 = ConfigurationManager()
         assert cm2.import_config(exported) is True
         assert cm2.get_threshold("cpu", "warning") == 55
@@ -840,6 +876,7 @@ class TestConfigurationManager:
 # 6. TestJobRunner
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestJobRunner:
     """Tests for app.core.jobs.job_runner.JobRunner."""
@@ -847,6 +884,7 @@ class TestJobRunner:
     @pytest.fixture
     def runner(self):
         from app.core.jobs.job_runner import JobRunner
+
         return JobRunner(max_workers=2)
 
     def test_init(self, runner):
@@ -881,6 +919,7 @@ class TestJobRunner:
         mock_get_ledger.return_value = mock_ledger
 
         from app.core.jobs.job_runner import JobSpec
+
         spec = JobSpec(
             job_type="agent_query",
             payload={"query": "test"},
@@ -893,6 +932,7 @@ class TestJobRunner:
     def test_jobspec_defaults(self):
         """JobSpec has sensible defaults."""
         from app.core.jobs.job_runner import JobSpec
+
         spec = JobSpec(job_type="test")
         assert spec.payload == {}
         assert spec.max_retries == 0
@@ -902,11 +942,15 @@ class TestJobRunner:
     def test_jobcontext_is_cancelled(self):
         """JobContext.is_cancelled() delegates to ledger."""
         from app.core.jobs.job_runner import JobContext
+
         mock_ledger = MagicMock()
         mock_ledger.is_cancel_requested.return_value = True
         ctx = JobContext(
-            task_id="t1", session_id="s1",
-            payload={}, ledger=mock_ledger, bus=MagicMock(),
+            task_id="t1",
+            session_id="s1",
+            payload={},
+            ledger=mock_ledger,
+            bus=MagicMock(),
         )
         assert ctx.is_cancelled() is True
         mock_ledger.is_cancel_requested.assert_called_with("t1")
@@ -914,22 +958,30 @@ class TestJobRunner:
     def test_jobcontext_is_interrupted(self):
         """JobContext.is_interrupted() delegates to ledger."""
         from app.core.jobs.job_runner import JobContext
+
         mock_ledger = MagicMock()
         mock_ledger.is_interrupt_requested.return_value = False
         ctx = JobContext(
-            task_id="t1", session_id="s1",
-            payload={}, ledger=mock_ledger, bus=MagicMock(),
+            task_id="t1",
+            session_id="s1",
+            payload={},
+            ledger=mock_ledger,
+            bus=MagicMock(),
         )
         assert ctx.is_interrupted() is False
 
     def test_jobcontext_step(self):
         """JobContext.step() calls both ledger.add_step and bus.publish_step."""
         from app.core.jobs.job_runner import JobContext
+
         mock_ledger = MagicMock()
         mock_bus = MagicMock()
         ctx = JobContext(
-            task_id="t1", session_id="s1",
-            payload={}, ledger=mock_ledger, bus=mock_bus,
+            task_id="t1",
+            session_id="s1",
+            payload={},
+            ledger=mock_ledger,
+            bus=mock_bus,
         )
         ctx.step("THOUGHT", "thinking...", progress=10)
         mock_ledger.add_step.assert_called_once()
@@ -937,13 +989,16 @@ class TestJobRunner:
 
     @patch("app.core.tasks.progress_bus.get_progress_bus")
     @patch("app.core.tasks.task_ledger.get_ledger")
-    def test_run_job_unknown_type_marks_failed(self, mock_get_ledger, mock_get_bus, runner):
+    def test_run_job_unknown_type_marks_failed(
+        self, mock_get_ledger, mock_get_bus, runner
+    ):
         """_run_job() marks the task as failed for unknown job_type."""
         mock_ledger = MagicMock()
         mock_get_ledger.return_value = mock_ledger
         mock_get_bus.return_value = MagicMock()
 
         from app.core.jobs.job_runner import JobSpec
+
         spec = JobSpec(job_type="unknown_type", payload={})
         runner._run_job("tid-1", spec)
         mock_ledger.mark_failed.assert_called_once()
@@ -961,6 +1016,7 @@ class TestJobRunner:
         runner.register_handler("test_type", handler)
 
         from app.core.jobs.job_runner import JobSpec
+
         spec = JobSpec(job_type="test_type", payload={"x": 1}, session_id="s1")
         runner._run_job("tid-2", spec)
         mock_ledger.mark_running.assert_called_with("tid-2")
@@ -982,6 +1038,7 @@ class TestJobRunner:
         runner.register_handler("fail_type", handler)
 
         from app.core.jobs.job_runner import JobSpec
+
         spec = JobSpec(job_type="fail_type", payload={})
         runner._run_job("tid-3", spec)
         mock_ledger.mark_failed.assert_called_once()
@@ -991,6 +1048,7 @@ class TestJobRunner:
 # 7. TestOpsEventBus
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestOpsEventBus:
     """Tests for app.core.ops.ops_event_bus.OpsEventBus."""
@@ -998,6 +1056,7 @@ class TestOpsEventBus:
     @pytest.fixture
     def bus(self):
         from app.core.ops.ops_event_bus import OpsEventBus
+
         return OpsEventBus()
 
     def test_init_empty(self, bus):
@@ -1081,6 +1140,7 @@ class TestOpsEventBus:
     def test_ops_event_to_dict(self):
         """OpsEvent.to_dict() serializes all fields."""
         from app.core.ops.ops_event_bus import OpsEvent
+
         event = OpsEvent(
             event_type="test",
             detail={"k": "v"},
@@ -1095,6 +1155,7 @@ class TestOpsEventBus:
     def test_history_max_limit(self):
         """History is bounded by _HISTORY_MAX."""
         from app.core.ops.ops_event_bus import OpsEventBus, _HISTORY_MAX
+
         bus = OpsEventBus()
         for i in range(_HISTORY_MAX + 50):
             bus.emit(f"overflow_{i}", {})
@@ -1114,6 +1175,7 @@ class TestOpsEventBus:
 # 8. TestOllamaLLMProvider
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestOllamaLLMProvider:
     """Tests for app.core.llm.ollama_llm_provider module."""
@@ -1121,6 +1183,7 @@ class TestOllamaLLMProvider:
     def test_init_defaults(self):
         """OllamaLLMProvider initializes with default values."""
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
         provider = OllamaLLMProvider(model="qwen3:8b")
         assert provider.model == "qwen3:8b"
         assert "localhost" in provider.base_url
@@ -1129,6 +1192,7 @@ class TestOllamaLLMProvider:
     def test_init_custom_params(self):
         """OllamaLLMProvider accepts custom parameters."""
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
         provider = OllamaLLMProvider(
             model="gemma3:4b",
             base_url="http://myhost:11434",
@@ -1143,12 +1207,14 @@ class TestOllamaLLMProvider:
     def test_get_token_count_returns_zero(self):
         """get_token_count() always returns 0 (no endpoint available)."""
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
         provider = OllamaLLMProvider(model="test")
         assert provider.get_token_count("hello world", "test") == 0
 
     def test_to_ollama_messages_string_prompt(self):
         """_to_ollama_messages() converts string prompt to messages list."""
         from app.core.llm.ollama_llm_provider import _to_ollama_messages
+
         msgs = _to_ollama_messages("hello", "You are a helper")
         assert len(msgs) == 2
         assert msgs[0]["role"] == "system"
@@ -1159,6 +1225,7 @@ class TestOllamaLLMProvider:
     def test_to_ollama_messages_list_prompt(self):
         """_to_ollama_messages() converts message list prompt."""
         from app.core.llm.ollama_llm_provider import _to_ollama_messages
+
         prompt = [
             {"role": "user", "content": "question"},
             {"role": "model", "content": "answer"},  # should become "assistant"
@@ -1170,6 +1237,7 @@ class TestOllamaLLMProvider:
     def test_to_ollama_messages_no_system(self):
         """_to_ollama_messages() omits system message when None."""
         from app.core.llm.ollama_llm_provider import _to_ollama_messages
+
         msgs = _to_ollama_messages("hi", None)
         assert len(msgs) == 1
         assert msgs[0]["role"] == "user"
@@ -1177,12 +1245,14 @@ class TestOllamaLLMProvider:
     def test_to_ollama_tools_none(self):
         """_to_ollama_tools() returns None for empty/None input."""
         from app.core.llm.ollama_llm_provider import _to_ollama_tools
+
         assert _to_ollama_tools(None) is None
         assert _to_ollama_tools([]) is None
 
     def test_to_ollama_tools_conversion(self):
         """_to_ollama_tools() converts tool defs to Ollama format."""
         from app.core.llm.ollama_llm_provider import _to_ollama_tools
+
         tools = [{"name": "search", "description": "Search the web"}]
         result = _to_ollama_tools(tools)
         assert result is not None
@@ -1193,6 +1263,7 @@ class TestOllamaLLMProvider:
     def test_to_ollama_tools_skips_invalid(self):
         """_to_ollama_tools() skips tools without a name."""
         from app.core.llm.ollama_llm_provider import _to_ollama_tools
+
         tools = [{"description": "no name"}, {"name": "valid", "description": "ok"}]
         result = _to_ollama_tools(tools)
         assert len(result) == 1
@@ -1201,6 +1272,7 @@ class TestOllamaLLMProvider:
     def test_parse_ollama_response(self):
         """_parse_ollama_response() extracts content, tool_calls, usage."""
         from app.core.llm.ollama_llm_provider import _parse_ollama_response
+
         resp = {
             "message": {"content": "Hello!", "tool_calls": None},
             "prompt_eval_count": 10,
@@ -1215,6 +1287,7 @@ class TestOllamaLLMProvider:
     def test_parse_ollama_response_with_tool_calls(self):
         """_parse_ollama_response() parses tool_calls correctly."""
         from app.core.llm.ollama_llm_provider import _parse_ollama_response
+
         resp = {
             "message": {
                 "content": "",
@@ -1231,6 +1304,7 @@ class TestOllamaLLMProvider:
     def test_parse_ollama_response_string_args(self):
         """_parse_ollama_response() parses string-encoded tool arguments."""
         from app.core.llm.ollama_llm_provider import _parse_ollama_response
+
         resp = {
             "message": {
                 "content": "",
@@ -1246,6 +1320,7 @@ class TestOllamaLLMProvider:
     def test_generate_content_non_stream(self, mock_post):
         """generate_content() calls Ollama API and returns parsed response."""
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
         mock_post.return_value = {
             "message": {"content": "Test response"},
             "prompt_eval_count": 5,
@@ -1259,7 +1334,11 @@ class TestOllamaLLMProvider:
     @patch("app.core.llm.ollama_llm_provider._raw_post")
     def test_generate_content_with_skill_preamble(self, mock_post):
         """generate_content() injects skill preamble when Skills marker present."""
-        from app.core.llm.ollama_llm_provider import OllamaLLMProvider, _SKILL_BLOCK_MARKER
+        from app.core.llm.ollama_llm_provider import (
+            OllamaLLMProvider,
+            _SKILL_BLOCK_MARKER,
+        )
+
         mock_post.return_value = {
             "message": {"content": "response"},
         }
@@ -1276,12 +1355,14 @@ class TestOllamaLLMProvider:
     def test_resolve_model_explicit(self):
         """_resolve_model() returns the explicit model when set."""
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
         provider = OllamaLLMProvider(model="explicit:model")
         assert provider._resolve_model() == "explicit:model"
 
     def test_base_url_trailing_slash_stripped(self):
         """Base URL trailing slash is stripped."""
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
         provider = OllamaLLMProvider(model="m", base_url="http://host:1234/")
         assert provider.base_url == "http://host:1234"
 
@@ -1290,6 +1371,7 @@ class TestOllamaLLMProvider:
 # 9. TestRemediationManager
 # ============================================================================
 
+
 @pytest.mark.unit
 class TestRemediationManager:
     """Tests for app.core.remediation.remediation_manager.RemediationManager."""
@@ -1297,6 +1379,7 @@ class TestRemediationManager:
     @pytest.fixture
     def mgr(self):
         from app.core.remediation.remediation_manager import RemediationManager
+
         return RemediationManager()
 
     def test_create_action(self, mgr):
@@ -1415,8 +1498,11 @@ class TestRemediationManager:
     def test_remediation_action_lifecycle(self, mgr):
         """Full lifecycle: create → approve → execute → complete."""
         from app.core.remediation.remediation_manager import RemediationAction
+
         action = RemediationAction(
-            event_id=99, action_type="fix", description="Fix issue",
+            event_id=99,
+            action_type="fix",
+            description="Fix issue",
         )
         assert action.approve("approved") is True
         assert action.start_execution() is True
@@ -1427,6 +1513,7 @@ class TestRemediationManager:
     def test_remediation_action_complete_failure(self):
         """RemediationAction marks failure correctly."""
         from app.core.remediation.remediation_manager import RemediationAction
+
         action = RemediationAction(event_id=1, action_type="fix", description="Try")
         action.approve()
         action.start_execution()
@@ -1436,9 +1523,12 @@ class TestRemediationManager:
     def test_remediation_action_to_dict(self):
         """RemediationAction.to_dict() serializes all fields."""
         from app.core.remediation.remediation_manager import RemediationAction
+
         action = RemediationAction(
-            event_id=5, action_type="scale_up",
-            description="Scale up workers", risk_level="medium",
+            event_id=5,
+            action_type="scale_up",
+            description="Scale up workers",
+            risk_level="medium",
         )
         d = action.to_dict()
         assert d["event_id"] == 5

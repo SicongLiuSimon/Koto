@@ -78,7 +78,7 @@ class LocalModelRouter:
         "qwen2.5:1.5b",  # 旧版轻量
         "llama3.2:3b",  # 英文为主
     ]
-    
+
     # 分类 Prompt（固定 JSON 格式，确保输出一致）
     # Qwen3 支持 /no_think 模式，跳过思考直接输出，加速分类
     CLASSIFY_PROMPT = """/no_think
@@ -387,39 +387,45 @@ class LocalModelRouter:
         """初始化本地模型（静默失败，不影响使用）"""
         if cls._initialized and cls._model_name:
             return True
-        
+
         if not cls.is_ollama_available():
             # 静默返回，不打印错误（避免刷屏）
             return False
-        
+
         # 获取已安装的模型
         try:
             resp = requests.get("http://localhost:11434/api/tags", timeout=2)
             if resp.status_code != 200:
                 return False
-            installed = [m['name'].split(':')[0] + ':' + m['name'].split(':')[1] if ':' in m['name'] else m['name'] 
-                        for m in resp.json().get('models', [])]
+            installed = [
+                (
+                    m["name"].split(":")[0] + ":" + m["name"].split(":")[1]
+                    if ":" in m["name"]
+                    else m["name"]
+                )
+                for m in resp.json().get("models", [])
+            ]
         except:
             return False
-        
+
         if not installed:
             return False
-        
+
         # 选择可用的最快模型
         target_model = model_name
         if not target_model:
             for m in cls.OLLAMA_MODELS:
-                base_name = m.split(':')[0]
+                base_name = m.split(":")[0]
                 if any(base_name in im for im in installed):
                     for im in installed:
                         if base_name in im:
                             target_model = im
                             break
                     break
-        
+
         if not target_model:
             return False
-        
+
         cls._model_name = target_model
         cls._initialized = True
         print(f"[LocalModelRouter] ✅ 使用本地模型: {target_model}")
@@ -840,7 +846,7 @@ class LocalModelRouter:
             resp = requests.get("http://localhost:11434/api/tags", timeout=2)
             if resp.status_code != 200:
                 return False
-            installed = [m['name'] for m in resp.json().get('models', [])]
+            installed = [m["name"] for m in resp.json().get("models", [])]
         except Exception:
             return False
 
@@ -849,7 +855,7 @@ class LocalModelRouter:
 
         # 优先选择更大的生成模型
         for want in cls.OLLAMA_RESPONSE_MODELS:
-            base = want.split(':')[0]
+            base = want.split(":")[0]
             for im in installed:
                 if base in im:
                     cls._response_model = im

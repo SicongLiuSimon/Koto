@@ -188,7 +188,9 @@ class AnnotationPlugin(AgentPlugin):
             paragraphs = result.get("paragraphs", [])[:max_paragraphs]
             total = result.get("total_paragraphs", len(paragraphs))
 
-            lines = [f"【文档：{os.path.basename(file_path)}，共 {total} 段，显示前 {len(paragraphs)} 段】\n"]
+            lines = [
+                f"【文档：{os.path.basename(file_path)}，共 {total} 段，显示前 {len(paragraphs)} 段】\n"
+            ]
             for i, p in enumerate(paragraphs, 1):
                 text = p.get("text", "").strip()
                 if text:
@@ -202,7 +204,9 @@ class AnnotationPlugin(AgentPlugin):
                 from docx import Document  # type: ignore
 
                 doc = Document(file_path)
-                paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()][:max_paragraphs]
+                paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()][
+                    :max_paragraphs
+                ]
                 lines = [f"【{os.path.basename(file_path)}，显示 {len(paras)} 段】\n"]
                 lines += [f"[{i}] {t}" for i, t in enumerate(paras, 1)]
                 return "\n".join(lines)

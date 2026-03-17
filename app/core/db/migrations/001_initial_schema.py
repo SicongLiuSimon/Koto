@@ -55,15 +55,9 @@ def upgrade(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_samples_hash   ON samples(sample_hash)"
     )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_samples_source ON samples(source)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_samples_task   ON samples(task_type)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_samples_active ON samples(active)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_source ON samples(source)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_task   ON samples(task_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_active ON samples(active)")
 
     # ── Event monitoring tables (from app/core/monitoring/event_database.py) ──
 
@@ -110,18 +104,10 @@ def upgrade(conn):
         )
     """)
 
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_timestamp ON events(timestamp DESC)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_event_type ON events(event_type)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_severity ON events(severity)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_date ON event_stats(date DESC)"
-    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON events(timestamp DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_event_type ON events(event_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_severity ON events(severity)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_date ON event_stats(date DESC)")
 
 
 def downgrade(conn):

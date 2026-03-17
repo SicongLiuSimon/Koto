@@ -33,7 +33,9 @@ def client():
 
 def _json_post(client, url, data=None):
     """Helper: POST JSON and return response."""
-    return client.post(url, data=json.dumps(data or {}), content_type="application/json")
+    return client.post(
+        url, data=json.dumps(data or {}), content_type="application/json"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -92,7 +94,9 @@ class TestSessionRoutes:
         assert resp.status_code in (200, 500)
 
     def test_create_session(self, client):
-        resp = _json_post(client, "/api/sessions", {"name": f"test_sess_{int(time.time())}"})
+        resp = _json_post(
+            client, "/api/sessions", {"name": f"test_sess_{int(time.time())}"}
+        )
         assert resp.status_code in (200, 500)
 
     def test_create_session_no_name(self, client):
@@ -118,11 +122,15 @@ class TestSettingsRoutes:
         assert resp.status_code in (200, 500)
 
     def test_update_settings(self, client):
-        resp = _json_post(client, "/api/settings", {
-            "category": "appearance",
-            "key": "theme",
-            "value": "dark",
-        })
+        resp = _json_post(
+            client,
+            "/api/settings",
+            {
+                "category": "appearance",
+                "key": "theme",
+                "value": "dark",
+            },
+        )
         assert resp.status_code in (200, 400, 500)
 
     def test_update_settings_empty(self, client):
@@ -214,10 +222,14 @@ class TestChatRoutes:
         }
         with patch("web.app.brain") as mock_brain:
             mock_brain.chat.return_value = mock_result
-            resp = _json_post(client, "/api/chat", {
-                "session": "unit_test_sess",
-                "message": "Hi there",
-            })
+            resp = _json_post(
+                client,
+                "/api/chat",
+                {
+                    "session": "unit_test_sess",
+                    "message": "Hi there",
+                },
+            )
         assert resp.status_code in (200, 500)
 
     def test_chat_interrupt(self, client):
@@ -243,10 +255,14 @@ class TestChatRoutes:
 @pytest.mark.unit
 class TestNotesRoutes:
     def test_add_note(self, client):
-        resp = _json_post(client, "/api/notes/add", {
-            "title": "Test Note",
-            "content": "Some content",
-        })
+        resp = _json_post(
+            client,
+            "/api/notes/add",
+            {
+                "title": "Test Note",
+                "content": "Some content",
+            },
+        )
         assert resp.status_code in (200, 500)
 
     def test_add_note_empty(self, client):
@@ -276,25 +292,37 @@ class TestNotesRoutes:
 @pytest.mark.unit
 class TestRemindersRoutes:
     def test_add_reminder_with_seconds(self, client):
-        resp = _json_post(client, "/api/reminders/add", {
-            "title": "Test Reminder",
-            "message": "Don't forget",
-            "seconds": 60,
-        })
+        resp = _json_post(
+            client,
+            "/api/reminders/add",
+            {
+                "title": "Test Reminder",
+                "message": "Don't forget",
+                "seconds": 60,
+            },
+        )
         assert resp.status_code in (200, 400, 500)
 
     def test_add_reminder_missing_time(self, client):
-        resp = _json_post(client, "/api/reminders/add", {
-            "title": "Bad Reminder",
-        })
+        resp = _json_post(
+            client,
+            "/api/reminders/add",
+            {
+                "title": "Bad Reminder",
+            },
+        )
         assert resp.status_code in (200, 400, 500)
 
     def test_add_reminder_with_iso_time(self, client):
-        resp = _json_post(client, "/api/reminders/add", {
-            "title": "Future Reminder",
-            "message": "Later",
-            "time": "2099-01-01T00:00:00",
-        })
+        resp = _json_post(
+            client,
+            "/api/reminders/add",
+            {
+                "title": "Future Reminder",
+                "message": "Later",
+                "time": "2099-01-01T00:00:00",
+            },
+        )
         assert resp.status_code in (200, 400, 500)
 
     def test_list_reminders(self, client):
@@ -312,11 +340,15 @@ class TestRemindersRoutes:
 @pytest.mark.unit
 class TestCalendarRoutes:
     def test_add_event(self, client):
-        resp = _json_post(client, "/api/calendar/add", {
-            "title": "Team Meeting",
-            "description": "Weekly sync",
-            "start": "2099-06-01T10:00:00",
-        })
+        resp = _json_post(
+            client,
+            "/api/calendar/add",
+            {
+                "title": "Team Meeting",
+                "description": "Weekly sync",
+                "start": "2099-06-01T10:00:00",
+            },
+        )
         assert resp.status_code in (200, 400, 500)
 
     def test_add_event_missing_start(self, client):
@@ -324,10 +356,14 @@ class TestCalendarRoutes:
         assert resp.status_code in (200, 400, 500)
 
     def test_add_event_bad_start(self, client):
-        resp = _json_post(client, "/api/calendar/add", {
-            "title": "Bad",
-            "start": "not-a-date",
-        })
+        resp = _json_post(
+            client,
+            "/api/calendar/add",
+            {
+                "title": "Bad",
+                "start": "not-a-date",
+            },
+        )
         assert resp.status_code in (200, 400, 500)
 
     def test_list_calendar(self, client):
@@ -375,19 +411,27 @@ class TestEmailRoutes:
         assert resp.status_code in (200, 500)
 
     def test_add_account(self, client):
-        resp = _json_post(client, "/api/email/accounts/add", {
-            "email": "test@example.com",
-            "password": "fake",
-            "smtp_server": "smtp.example.com",
-        })
+        resp = _json_post(
+            client,
+            "/api/email/accounts/add",
+            {
+                "email": "test@example.com",
+                "password": "fake",
+                "smtp_server": "smtp.example.com",
+            },
+        )
         assert resp.status_code in (200, 400, 500)
 
     def test_send_email(self, client):
-        resp = _json_post(client, "/api/email/send", {
-            "to": ["test@example.com"],
-            "subject": "Test",
-            "body": "Hello",
-        })
+        resp = _json_post(
+            client,
+            "/api/email/send",
+            {
+                "to": ["test@example.com"],
+                "subject": "Test",
+                "body": "Hello",
+            },
+        )
         assert resp.status_code in (200, 400, 500)
 
     def test_fetch_emails(self, client):
@@ -545,18 +589,26 @@ class TestAnalyzeRoute:
         assert resp.status_code in (200, 500)
 
     def test_analyze_with_locked_task(self, client):
-        resp = _json_post(client, "/api/analyze", {
-            "message": "Generate code",
-            "locked_task": "CODER",
-        })
+        resp = _json_post(
+            client,
+            "/api/analyze",
+            {
+                "message": "Generate code",
+                "locked_task": "CODER",
+            },
+        )
         assert resp.status_code in (200, 500)
 
     def test_analyze_with_image(self, client):
-        resp = _json_post(client, "/api/analyze", {
-            "message": "What is in this picture",
-            "has_file": True,
-            "file_type": "image/png",
-        })
+        resp = _json_post(
+            client,
+            "/api/analyze",
+            {
+                "message": "What is in this picture",
+                "has_file": True,
+                "file_type": "image/png",
+            },
+        )
         assert resp.status_code in (200, 500)
 
 
@@ -586,8 +638,9 @@ class TestMiniChatRoute:
 
     def test_mini_chat_with_mock(self, client):
         mock_result = {"response": "Hi from mini", "model": "mock", "task": "CHAT"}
-        with patch("web.app.brain") as mock_brain, \
-             patch("web.app.SmartDispatcher") as mock_disp:
+        with patch("web.app.brain") as mock_brain, patch(
+            "web.app.SmartDispatcher"
+        ) as mock_disp:
             mock_disp.analyze.return_value = ("CHAT", "mock-route", {})
             mock_brain.chat.return_value = mock_result
             resp = _json_post(client, "/api/mini/chat", {"message": "Hello"})
@@ -604,7 +657,9 @@ class TestPPTRoutes:
         assert resp.status_code == 400
 
     def test_ppt_download_nonexistent(self, client):
-        resp = _json_post(client, "/api/ppt/download", {"session_id": "nonexistent_xyz"})
+        resp = _json_post(
+            client, "/api/ppt/download", {"session_id": "nonexistent_xyz"}
+        )
         assert resp.status_code in (404, 400, 500)
 
     def test_ppt_session_nonexistent(self, client):
@@ -626,7 +681,9 @@ class TestSkillsRoutes:
         assert resp.status_code in (200, 404, 500)
 
     def test_skill_prompt_update(self, client):
-        resp = _json_post(client, "/api/skills/test_skill/prompt", {"prompt": "Be concise"})
+        resp = _json_post(
+            client, "/api/skills/test_skill/prompt", {"prompt": "Be concise"}
+        )
         assert resp.status_code in (200, 404, 500)
 
     def test_skill_prompt_reset(self, client):

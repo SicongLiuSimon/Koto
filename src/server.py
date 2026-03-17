@@ -87,6 +87,7 @@ def _cleanup():
     logger.info("Running cleanup...")
     try:
         from web.settings import SettingsManager
+
         if SettingsManager._instance:
             SettingsManager._instance.flush()
             logger.info("Settings flushed")
@@ -95,6 +96,7 @@ def _cleanup():
 
     try:
         from app.core.monitoring.event_database import EventDatabase  # noqa: F401
+
         # Close any open database connections
         logger.info("Cleanup complete")
     except Exception as e:
@@ -103,7 +105,9 @@ def _cleanup():
 
 def _shutdown_handler(signum, frame):
     """Handle SIGTERM/SIGINT for graceful shutdown."""
-    sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+    sig_name = (
+        signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+    )
     logger.info("Received %s, shutting down gracefully...", sig_name)
     _cleanup()
     raise SystemExit(0)

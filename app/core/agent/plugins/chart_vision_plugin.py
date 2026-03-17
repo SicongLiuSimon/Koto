@@ -17,7 +17,11 @@ from app.core.agent.base import AgentPlugin
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_MIME: set = {
-    "image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp",
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/bmp",
 }
 _EXT_MIME_MAP: dict = {
     ".png": "image/png",

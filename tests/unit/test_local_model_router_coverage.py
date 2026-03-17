@@ -16,10 +16,10 @@ import requests
 
 from unittest.mock import patch, MagicMock, Mock, PropertyMock
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _reset_router():
     """Reset all class-level cached state on LocalModelRouter."""
@@ -38,7 +38,9 @@ def _mock_post_response(content, status_code=200):
     resp = MagicMock()
     resp.status_code = status_code
     resp.text = content if isinstance(content, str) else json.dumps(content)
-    resp.json.return_value = {"message": {"content": content}} if isinstance(content, str) else content
+    resp.json.return_value = (
+        {"message": {"content": content}} if isinstance(content, str) else content
+    )
     return resp
 
 
@@ -46,15 +48,14 @@ def _mock_tags_response(model_names: list[str], status_code=200):
     """Build a MagicMock for GET /api/tags."""
     resp = MagicMock()
     resp.status_code = status_code
-    resp.json.return_value = {
-        "models": [{"name": n} for n in model_names]
-    }
+    resp.json.return_value = {"models": [{"name": n} for n in model_names]}
     return resp
 
 
 # ═══════════════════════════════════════════════════════════════════
 # RouterDecision dataclass
 # ═══════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestRouterDecisionCoverage:
@@ -123,13 +124,16 @@ class TestRouterDecisionCoverage:
     def test_to_legacy_tuple_preserves_source(self):
         from app.core.routing.local_model_router import RouterDecision
 
-        d = RouterDecision(task_type="CHAT", source="Cache", confidence=0.5, latency_ms=10)
+        d = RouterDecision(
+            task_type="CHAT", source="Cache", confidence=0.5, latency_ms=10
+        )
         assert d.to_legacy_tuple()[2] == "Cache"
 
 
 # ═══════════════════════════════════════════════════════════════════
 # LocalModelRouter methods
 # ═══════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestLocalModelRouterCoverage:
@@ -194,7 +198,9 @@ class TestLocalModelRouterCoverage:
         assert LocalModelRouter.is_ollama_available() is True
         assert mock_socket_cls.call_count == 2
 
-    @patch("app.core.routing.local_model_router.socket.socket", side_effect=OSError("fail"))
+    @patch(
+        "app.core.routing.local_model_router.socket.socket", side_effect=OSError("fail")
+    )
     def test_is_ollama_available_exception(self, _mock):
         from app.core.routing.local_model_router import LocalModelRouter
 
@@ -210,7 +216,9 @@ class TestLocalModelRouterCoverage:
 
     @patch("app.core.routing.local_model_router.requests.get")
     @patch.object(
-        __import__("app.core.routing.local_model_router", fromlist=["LocalModelRouter"]).LocalModelRouter,
+        __import__(
+            "app.core.routing.local_model_router", fromlist=["LocalModelRouter"]
+        ).LocalModelRouter,
         "is_ollama_available",
         return_value=True,
     )
@@ -225,7 +233,9 @@ class TestLocalModelRouterCoverage:
         assert LocalModelRouter._model_name is not None
 
     @patch.object(
-        __import__("app.core.routing.local_model_router", fromlist=["LocalModelRouter"]).LocalModelRouter,
+        __import__(
+            "app.core.routing.local_model_router", fromlist=["LocalModelRouter"]
+        ).LocalModelRouter,
         "is_ollama_available",
         return_value=False,
     )
@@ -238,7 +248,9 @@ class TestLocalModelRouterCoverage:
 
     @patch("app.core.routing.local_model_router.requests.get")
     @patch.object(
-        __import__("app.core.routing.local_model_router", fromlist=["LocalModelRouter"]).LocalModelRouter,
+        __import__(
+            "app.core.routing.local_model_router", fromlist=["LocalModelRouter"]
+        ).LocalModelRouter,
         "is_ollama_available",
         return_value=True,
     )
@@ -251,7 +263,9 @@ class TestLocalModelRouterCoverage:
 
     @patch("app.core.routing.local_model_router.requests.get")
     @patch.object(
-        __import__("app.core.routing.local_model_router", fromlist=["LocalModelRouter"]).LocalModelRouter,
+        __import__(
+            "app.core.routing.local_model_router", fromlist=["LocalModelRouter"]
+        ).LocalModelRouter,
         "is_ollama_available",
         return_value=True,
     )
@@ -262,9 +276,14 @@ class TestLocalModelRouterCoverage:
         result = LocalModelRouter.init_model()
         assert result is False
 
-    @patch("app.core.routing.local_model_router.requests.get", side_effect=Exception("network error"))
+    @patch(
+        "app.core.routing.local_model_router.requests.get",
+        side_effect=Exception("network error"),
+    )
     @patch.object(
-        __import__("app.core.routing.local_model_router", fromlist=["LocalModelRouter"]).LocalModelRouter,
+        __import__(
+            "app.core.routing.local_model_router", fromlist=["LocalModelRouter"]
+        ).LocalModelRouter,
         "is_ollama_available",
         return_value=True,
     )
@@ -284,7 +303,9 @@ class TestLocalModelRouterCoverage:
 
     @patch("app.core.routing.local_model_router.requests.get")
     @patch.object(
-        __import__("app.core.routing.local_model_router", fromlist=["LocalModelRouter"]).LocalModelRouter,
+        __import__(
+            "app.core.routing.local_model_router", fromlist=["LocalModelRouter"]
+        ).LocalModelRouter,
         "is_ollama_available",
         return_value=True,
     )
@@ -314,7 +335,9 @@ class TestLocalModelRouterCoverage:
 
     @patch("app.core.routing.local_model_router.requests.get")
     @patch.object(
-        __import__("app.core.routing.local_model_router", fromlist=["LocalModelRouter"]).LocalModelRouter,
+        __import__(
+            "app.core.routing.local_model_router", fromlist=["LocalModelRouter"]
+        ).LocalModelRouter,
         "is_ollama_available",
         return_value=True,
     )
@@ -447,7 +470,9 @@ class TestLocalModelRouterCoverage:
         assert err is None
         # Verify payload included format and options
         call_kwargs = mock_post.call_args
-        payload = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs[0][0]
+        payload = (
+            call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs[0][0]
+        )
         assert payload.get("format") == "json"
         assert payload.get("options") == {"temperature": 0.0}
 
@@ -459,7 +484,10 @@ class TestLocalModelRouterCoverage:
         # message.content is empty, but "response" field has data
         resp = MagicMock()
         resp.status_code = 200
-        resp.json.return_value = {"message": {"content": ""}, "response": "fallback text"}
+        resp.json.return_value = {
+            "message": {"content": ""},
+            "response": "fallback text",
+        }
         mock_post.return_value = resp
 
         content, err = LocalModelRouter.call_ollama_chat(
@@ -548,7 +576,9 @@ class TestLocalModelRouterCoverage:
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {
-            "message": {"content": "I think this is a PAINTER task with high confidence"}
+            "message": {
+                "content": "I think this is a PAINTER task with high confidence"
+            }
         }
         mock_post.return_value = resp
 
@@ -601,12 +631,14 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._initialized = True
         LocalModelRouter._model_name = "qwen3:4b"
 
-        payload = json.dumps({
-            "task": "WEB_SEARCH",
-            "confidence": 0.92,
-            "hint": "show weather forecast table",
-            "complexity": "normal",
-        })
+        payload = json.dumps(
+            {
+                "task": "WEB_SEARCH",
+                "confidence": 0.92,
+                "hint": "show weather forecast table",
+                "complexity": "normal",
+            }
+        )
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"message": {"content": payload}}
@@ -626,18 +658,22 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._initialized = True
         LocalModelRouter._model_name = "qwen3:4b"
 
-        payload = json.dumps({
-            "task": "RESEARCH",
-            "confidence": 0.88,
-            "hint": "deep analysis required",
-            "complexity": "complex",
-        })
+        payload = json.dumps(
+            {
+                "task": "RESEARCH",
+                "confidence": 0.88,
+                "hint": "deep analysis required",
+                "complexity": "complex",
+            }
+        )
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"message": {"content": payload}}
         mock_post.return_value = resp
 
-        task, _, _, hint, complexity = LocalModelRouter.classify_with_hint("deep research on AI")
+        task, _, _, hint, complexity = LocalModelRouter.classify_with_hint(
+            "deep research on AI"
+        )
         assert task == "RESEARCH"
         assert complexity == "complex"
 
@@ -729,12 +765,14 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._initialized = True
         LocalModelRouter._model_name = "qwen3:4b"
 
-        payload = json.dumps({
-            "task": "DRAW",  # alias for PAINTER
-            "confidence": 0.90,
-            "hint": None,
-            "complexity": "normal",
-        })
+        payload = json.dumps(
+            {
+                "task": "DRAW",  # alias for PAINTER
+                "confidence": 0.90,
+                "hint": None,
+                "complexity": "normal",
+            }
+        )
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"message": {"content": payload}}
@@ -773,8 +811,9 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._response_model_inited = False
         LocalModelRouter._model_name = "qwen3:4b"
 
-        with patch.object(LocalModelRouter, "is_ollama_available", return_value=True), \
-             patch("app.core.routing.local_model_router.requests.get") as mock_get:
+        with patch.object(
+            LocalModelRouter, "is_ollama_available", return_value=True
+        ), patch("app.core.routing.local_model_router.requests.get") as mock_get:
             mock_get.return_value = _mock_tags_response(["unknown-model:latest"])
             result = LocalModelRouter._init_response_model()
         # Falls back to _model_name when no preferred model matches
@@ -824,14 +863,19 @@ class TestLocalModelRouterCoverage:
 
         with patch.object(LocalModelRouter, "is_ollama_available", return_value=True):
             history = [{"role": "user", "parts": ["hi"]}] * 10
-            assert LocalModelRouter.is_simple_query("hi", "CHAT", history=history) is False
+            assert (
+                LocalModelRouter.is_simple_query("hi", "CHAT", history=history) is False
+            )
 
     def test_is_simple_query_with_short_history(self):
         from app.core.routing.local_model_router import LocalModelRouter
 
         with patch.object(LocalModelRouter, "is_ollama_available", return_value=True):
             history = [{"role": "user", "parts": ["hi"]}] * 4
-            assert LocalModelRouter.is_simple_query("你好", "CHAT", history=history) is True
+            assert (
+                LocalModelRouter.is_simple_query("你好", "CHAT", history=history)
+                is True
+            )
 
     def test_is_simple_query_realtime_keyword(self):
         from app.core.routing.local_model_router import LocalModelRouter
@@ -866,7 +910,9 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._initialized = True
         LocalModelRouter._model_name = "qwen3:4b"
 
-        payload = json.dumps({"steps": ["Analyze requirements", "Design solution", "Implement code"]})
+        payload = json.dumps(
+            {"steps": ["Analyze requirements", "Design solution", "Implement code"]}
+        )
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"message": {"content": payload}}
@@ -1053,12 +1099,14 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._initialized = True
         LocalModelRouter._model_name = "qwen3:4b"
 
-        payload = json.dumps({
-            "task": "CODER",
-            "confidence": 0.9,
-            "hint": "write clean code",
-            "complexity": "normal",
-        })
+        payload = json.dumps(
+            {
+                "task": "CODER",
+                "confidence": 0.9,
+                "hint": "write clean code",
+                "complexity": "normal",
+            }
+        )
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"message": {"content": payload}}
@@ -1079,12 +1127,14 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._initialized = True
         LocalModelRouter._model_name = "qwen3:4b"
 
-        payload = json.dumps({
-            "task": "PAINTER",
-            "confidence": 0.95,
-            "hint": None,
-            "complexity": "normal",
-        })
+        payload = json.dumps(
+            {
+                "task": "PAINTER",
+                "confidence": 0.95,
+                "hint": None,
+                "complexity": "normal",
+            }
+        )
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"message": {"content": payload}}
@@ -1116,12 +1166,14 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._initialized = True
         LocalModelRouter._model_name = "qwen3:4b"
 
-        payload = json.dumps({
-            "task": "CHAT",
-            "confidence": 0.85,
-            "hint": None,
-            "complexity": "normal",
-        })
+        payload = json.dumps(
+            {
+                "task": "CHAT",
+                "confidence": 0.85,
+                "hint": None,
+                "complexity": "normal",
+            }
+        )
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"message": {"content": payload}}
@@ -1139,12 +1191,14 @@ class TestLocalModelRouterCoverage:
         LocalModelRouter._initialized = True
         LocalModelRouter._model_name = "qwen3:4b"
 
-        payload = json.dumps({
-            "task": "RESEARCH",
-            "confidence": 0.88,
-            "hint": None,
-            "complexity": "normal",
-        })
+        payload = json.dumps(
+            {
+                "task": "RESEARCH",
+                "confidence": 0.88,
+                "hint": None,
+                "complexity": "normal",
+            }
+        )
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"message": {"content": payload}}

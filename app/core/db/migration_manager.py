@@ -71,9 +71,7 @@ class MigrationManager:
         try:
             for migration_file in pending:
                 path = os.path.join(self.migrations_dir, migration_file)
-                spec = importlib.util.spec_from_file_location(
-                    migration_file, path
-                )
+                spec = importlib.util.spec_from_file_location(migration_file, path)
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
 

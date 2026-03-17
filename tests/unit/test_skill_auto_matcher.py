@@ -60,8 +60,12 @@ class TestMatchContract:
         matcher = _get_matcher()
         mocker.patch.object(matcher, "_has_active_skills_for_task", return_value=True)
         mocker.patch.object(
-            matcher, "_build_skill_catalog",
-            return_value=([{"id": "s1", "name": "s1", "desc": "", "task_types": []}], "s1"),
+            matcher,
+            "_build_skill_catalog",
+            return_value=(
+                [{"id": "s1", "name": "s1", "desc": "", "task_types": []}],
+                "s1",
+            ),
         )
         mocker.patch.object(matcher, "_match_with_patterns", return_value=[])
         ollama_mock = mocker.patch.object(matcher, "_match_with_local_model")
@@ -149,7 +153,13 @@ class TestHasActiveSkillsForTask:
         mocker.patch.object(
             SkillManager,
             "_registry",
-            {"skill_a": {"enabled": True, "task_types": ["CHAT"], "category": "domain"}},
+            {
+                "skill_a": {
+                    "enabled": True,
+                    "task_types": ["CHAT"],
+                    "category": "domain",
+                }
+            },
             create=True,
         )
         matcher = _get_matcher()

@@ -25,6 +25,7 @@ import pytest
 class TestProductivityPlugin:
     def _make(self):
         from app.core.agent.plugins.productivity_plugin import ProductivityPlugin
+
         return ProductivityPlugin()
 
     def test_name(self):
@@ -110,6 +111,7 @@ class TestAlertingPlugin:
             mock_mgr.rules = {}
             mock_fn.return_value = mock_mgr
             from app.core.agent.plugins.alerting_plugin import AlertingPlugin
+
             p = AlertingPlugin()
             p._mock_mgr = mock_mgr
             return p
@@ -145,8 +147,11 @@ class TestAlertingPlugin:
         p = self._make()
         p._mock_mgr.configure_email.return_value = False
         result = p.configure_email_alerts(
-            smtp_server="s", smtp_port=587, sender_email="a@b.com",
-            sender_password="pw", recipients=["c@d.com"],
+            smtp_server="s",
+            smtp_port=587,
+            sender_email="a@b.com",
+            sender_password="pw",
+            recipients=["c@d.com"],
         )
         assert "Failed" in result or "failed" in result.lower()
 
@@ -216,6 +221,7 @@ class TestTrendAnalysisPlugin:
             mock_analyzer = MagicMock()
             mock_fn.return_value = mock_analyzer
             from app.core.agent.plugins.trend_analysis_plugin import TrendAnalysisPlugin
+
             p = TrendAnalysisPlugin()
             p._mock_analyzer = mock_analyzer
             return p
@@ -301,7 +307,10 @@ class TestAutoRemediationPlugin:
         ) as mock_fn:
             mock_mgr = MagicMock()
             mock_fn.return_value = mock_mgr
-            from app.core.agent.plugins.auto_remediation_plugin import AutoRemediationPlugin
+            from app.core.agent.plugins.auto_remediation_plugin import (
+                AutoRemediationPlugin,
+            )
+
             p = AutoRemediationPlugin()
             p._mock_mgr = mock_mgr
             return p
@@ -382,6 +391,7 @@ class TestAutoRemediationPlugin:
 class TestMemoryToolsPlugin:
     def _make(self):
         from app.core.agent.plugins.memory_tools_plugin import MemoryToolsPlugin
+
         return MemoryToolsPlugin()
 
     def test_name(self):
@@ -473,6 +483,7 @@ class TestConfigurationPlugin:
             mock_mgr = MagicMock()
             mock_fn.return_value = mock_mgr
             from app.core.agent.plugins.configuration_plugin import ConfigurationPlugin
+
             p = ConfigurationPlugin()
             p._mock_mgr = mock_mgr
             return p
@@ -547,6 +558,7 @@ class TestPerformanceAnalysisPlugin:
         from app.core.agent.plugins.performance_analysis_plugin import (
             PerformanceAnalysisPlugin,
         )
+
         return PerformanceAnalysisPlugin()
 
     def test_name(self):
@@ -566,10 +578,13 @@ class TestPerformanceAnalysisPlugin:
         from app.core.agent.plugins.performance_analysis_plugin import (
             PerformanceAnalysisPlugin,
         )
+
         result = PerformanceAnalysisPlugin._to_json({"key": "val"})
         assert '"key": "val"' in result
 
-    @patch("app.core.agent.plugins.performance_analysis_plugin.get_system_info_collector")
+    @patch(
+        "app.core.agent.plugins.performance_analysis_plugin.get_system_info_collector"
+    )
     def test_analyze_system_performance(self, mock_collector_fn):
         mock_c = MagicMock()
         mock_c.get_cpu_info.return_value = {"usage_percent": 50}
@@ -585,7 +600,9 @@ class TestPerformanceAnalysisPlugin:
         assert data["cpu"]["usage_percent"] == 50
         assert data["bottlenecks"] == []
 
-    @patch("app.core.agent.plugins.performance_analysis_plugin.get_system_info_collector")
+    @patch(
+        "app.core.agent.plugins.performance_analysis_plugin.get_system_info_collector"
+    )
     def test_analyze_high_cpu_bottleneck(self, mock_collector_fn):
         mock_c = MagicMock()
         mock_c.get_cpu_info.return_value = {"usage_percent": 95}
@@ -600,7 +617,9 @@ class TestPerformanceAnalysisPlugin:
         data = json.loads(result)
         assert any("CPU" in b for b in data["bottlenecks"])
 
-    @patch("app.core.agent.plugins.performance_analysis_plugin.get_system_info_collector")
+    @patch(
+        "app.core.agent.plugins.performance_analysis_plugin.get_system_info_collector"
+    )
     def test_suggest_optimizations_general(self, mock_collector_fn):
         mock_c = MagicMock()
         mock_c.get_cpu_info.return_value = {"usage_percent": 85}
@@ -625,6 +644,7 @@ class TestFileEditorPlugin:
             mock_svc = MagicMock()
             MockFS.return_value = mock_svc
             from app.core.agent.plugins.file_editor_plugin import FileEditorPlugin
+
             p = FileEditorPlugin(workspace_dir="/tmp/ws")
             p._mock_svc = mock_svc
             return p
@@ -710,6 +730,7 @@ class TestFileEditorPlugin:
 class TestDataProcessPlugin:
     def _make(self):
         from app.core.agent.plugins.data_process_plugin import DataProcessPlugin
+
         return DataProcessPlugin()
 
     def test_name(self):
@@ -722,11 +743,19 @@ class TestDataProcessPlugin:
         tools = self._make().get_tools()
         assert len(tools) == 6
         names = {t["name"] for t in tools}
-        assert names == {"load_data", "query_data", "describe_data", "suggest_questions", "save_data", "analyze_trends"}
+        assert names == {
+            "load_data",
+            "query_data",
+            "describe_data",
+            "suggest_questions",
+            "save_data",
+            "analyze_trends",
+        }
 
     @patch("app.core.agent.plugins.data_process_plugin.DataProcessPlugin._load_df")
     def test_load_data_success(self, mock_load):
         import pandas as pd
+
         mock_load.return_value = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
         p = self._make()
         result = p.load_data("test.csv")
@@ -740,12 +769,14 @@ class TestDataProcessPlugin:
 
     def test_load_df_unsupported(self):
         from app.core.agent.plugins.data_process_plugin import DataProcessPlugin
+
         with pytest.raises(ValueError, match="Unsupported"):
             DataProcessPlugin._load_df("data.xyz")
 
     @patch("app.core.agent.plugins.data_process_plugin.DataProcessPlugin._load_df")
     def test_query_data(self, mock_load):
         import pandas as pd
+
         mock_load.return_value = pd.DataFrame({"x": [10, 20, 30]})
         p = self._make()
         result = p.query_data("data.csv", "df[df['x'] > 15]")
@@ -766,6 +797,7 @@ class TestSystemEventMonitoringPlugin:
             from app.core.agent.plugins.system_event_monitoring_plugin import (
                 SystemEventMonitoringPlugin,
             )
+
             p = SystemEventMonitoringPlugin()
             p.monitor = MagicMock()
             return p
@@ -834,13 +866,17 @@ class TestSystemEventMonitoringPlugin:
 class TestSystemToolsPlugin:
     def _make(self):
         from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
+
         return SystemToolsPlugin()
 
     def test_name(self):
         assert self._make().name == "SystemTools"
 
     def test_description(self):
-        assert "python" in self._make().description.lower() or "pip" in self._make().description.lower()
+        assert (
+            "python" in self._make().description.lower()
+            or "pip" in self._make().description.lower()
+        )
 
     def test_get_tools(self):
         tools = self._make().get_tools()
@@ -850,31 +886,37 @@ class TestSystemToolsPlugin:
 
     def test_python_exec_success(self):
         from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
+
         result = SystemToolsPlugin.python_exec("print(1+1)")
         assert "2" in result
 
     def test_python_exec_error(self):
         from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
+
         result = SystemToolsPlugin.python_exec("raise ValueError('boom')")
         assert "error" in result.lower() or "ValueError" in result
 
     def test_python_exec_no_output(self):
         from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
+
         result = SystemToolsPlugin.python_exec("x = 42")
         assert "no output" in result.lower() or "successfully" in result.lower()
 
     def test_pip_check_available(self):
         from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
+
         result = SystemToolsPlugin.pip_check("os,sys,json")
         assert "Available" in result
 
     def test_pip_check_missing(self):
         from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
+
         result = SystemToolsPlugin.pip_check("nonexistent_pkg_xyz_42")
         assert "Missing" in result
 
     def test_pip_install_empty(self):
         from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
+
         result = SystemToolsPlugin.pip_install("")
         assert "no packages" in result.lower()
 
@@ -886,6 +928,7 @@ class TestSystemToolsPlugin:
 class TestTemplateFillPlugin:
     def _make(self):
         from app.core.agent.plugins.template_fill_plugin import TemplateFillPlugin
+
         return TemplateFillPlugin()
 
     def test_name(self):
@@ -907,10 +950,15 @@ class TestTemplateFillPlugin:
             data = json.loads(result)
             assert data["success"] is False
 
-    @patch("app.core.agent.plugins.template_fill_plugin.TemplateFillPlugin._get_template_path")
+    @patch(
+        "app.core.agent.plugins.template_fill_plugin.TemplateFillPlugin._get_template_path"
+    )
     def test_get_template_fields_success(self, mock_path):
         mock_path.return_value = Path("/fake/template.docx")
-        with patch("app.core.skills.template_engine.TemplateEngine.parse_fields", return_value=["名称", "日期"]):
+        with patch(
+            "app.core.skills.template_engine.TemplateEngine.parse_fields",
+            return_value=["名称", "日期"],
+        ):
             p = self._make()
             result = p.get_template_fields("my_skill")
             data = json.loads(result)
@@ -932,13 +980,17 @@ class TestTemplateFillPlugin:
 class TestNetworkPlugin:
     def _make(self):
         from app.core.agent.plugins.network_plugin import NetworkPlugin
+
         return NetworkPlugin()
 
     def test_name(self):
         assert self._make().name == "Network"
 
     def test_description(self):
-        assert "web" in self._make().description.lower() or "fetch" in self._make().description.lower()
+        assert (
+            "web" in self._make().description.lower()
+            or "fetch" in self._make().description.lower()
+        )
 
     def test_get_tools(self):
         tools = self._make().get_tools()
@@ -955,6 +1007,7 @@ class TestNetworkPlugin:
         mock_get.return_value = mock_resp
 
         from app.core.agent.plugins.network_plugin import NetworkPlugin
+
         result = NetworkPlugin.http_get("https://example.com")
         assert "200" in result
         assert "Hello" in result
@@ -962,6 +1015,7 @@ class TestNetworkPlugin:
     @patch("requests.get", side_effect=Exception("connection failed"))
     def test_http_get_error(self, mock_get):
         from app.core.agent.plugins.network_plugin import NetworkPlugin
+
         result = NetworkPlugin.http_get("https://bad.url")
         assert "error" in result.lower()
 
@@ -973,12 +1027,14 @@ class TestNetworkPlugin:
         mock_post.return_value = mock_resp
 
         from app.core.agent.plugins.network_plugin import NetworkPlugin
+
         result = NetworkPlugin.http_post("https://api.example.com", '{"key": "val"}')
         assert "201" in result
 
     @patch("requests.post")
     def test_http_post_bad_json(self, mock_post):
         from app.core.agent.plugins.network_plugin import NetworkPlugin
+
         result = NetworkPlugin.http_post("https://api.example.com", "not-json{{{")
         assert "error" in result.lower()
 
@@ -990,6 +1046,7 @@ class TestNetworkPlugin:
 class TestSystemInfoPlugin:
     def _make(self):
         from app.core.agent.plugins.system_info_plugin import SystemInfoPlugin
+
         return SystemInfoPlugin()
 
     def test_name(self):
@@ -1054,16 +1111,19 @@ class TestSystemInfoPlugin:
 class TestWebToolsBridgePlugin:
     def test_name(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import WebToolsBridgePlugin
+
         p = WebToolsBridgePlugin()
         assert p.name == "WebToolsBridge"
 
     def test_description(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import WebToolsBridgePlugin
+
         p = WebToolsBridgePlugin()
         assert "web" in p.description.lower() or "bridge" in p.description.lower()
 
     def test_get_tools_returns_list(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import WebToolsBridgePlugin
+
         p = WebToolsBridgePlugin()
         # Even if web.tool_registry is not available, should return list
         tools = p.get_tools()
@@ -1071,6 +1131,7 @@ class TestWebToolsBridgePlugin:
 
     def test_convert_schema(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import _convert_schema
+
         schema = {
             "type": "object",
             "properties": {
@@ -1085,6 +1146,7 @@ class TestWebToolsBridgePlugin:
 
     def test_convert_schema_nested_array(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import _convert_schema
+
         schema = {
             "type": "array",
             "items": [{"type": "string"}],
@@ -1094,6 +1156,7 @@ class TestWebToolsBridgePlugin:
 
     def test_make_wrapper(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import _make_wrapper
+
         mock_reg = MagicMock()
         mock_reg.execute.return_value = {"result": "ok"}
         wrapper = _make_wrapper(mock_reg, "test_tool")
@@ -1103,6 +1166,7 @@ class TestWebToolsBridgePlugin:
 
     def test_make_wrapper_string_result(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import _make_wrapper
+
         mock_reg = MagicMock()
         mock_reg.execute.return_value = "plain text"
         wrapper = _make_wrapper(mock_reg, "tool2")
@@ -1117,6 +1181,7 @@ class TestWebToolsBridgePlugin:
 class TestImageProcessPlugin:
     def _make(self):
         from app.core.agent.plugins.image_process_plugin import ImageProcessPlugin
+
         return ImageProcessPlugin()
 
     def test_name(self):
@@ -1141,10 +1206,12 @@ class TestImageProcessPlugin:
         mock_pil.Image.open.return_value = mock_img
 
         import sys
+
         with patch.dict(sys.modules, {"PIL": mock_pil, "PIL.Image": mock_pil.Image}):
             # Force re-import to pick up mock
             import importlib
             import app.core.agent.plugins.image_process_plugin as mod
+
             importlib.reload(mod)
             result = mod.ImageProcessPlugin.image_info("test.png")
             assert "PNG" in result
@@ -1152,6 +1219,7 @@ class TestImageProcessPlugin:
 
     def test_image_info_missing_file(self):
         from app.core.agent.plugins.image_process_plugin import ImageProcessPlugin
+
         result = ImageProcessPlugin.image_info("/nonexistent/img.png")
         # Result should either contain an error message or, if PIL is mocked by prior test,
         # return some string (coverage is achieved either way)
@@ -1166,14 +1234,21 @@ class TestImageProcessPlugin:
         mock_pil.Image.open.return_value = mock_img
 
         import sys
+
         with patch.dict(sys.modules, {"PIL": mock_pil, "PIL.Image": mock_pil.Image}):
             import importlib
             import app.core.agent.plugins.image_process_plugin as mod
+
             importlib.reload(mod)
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.png")
                 result = mod.ImageProcessPlugin.image_resize("test.png", 100, 100, out)
-                assert "resized" in result.lower() or "resize" in result.lower() or "saved" in result.lower() or "✅" in result
+                assert (
+                    "resized" in result.lower()
+                    or "resize" in result.lower()
+                    or "saved" in result.lower()
+                    or "✅" in result
+                )
 
     def test_image_convert(self):
         mock_img = MagicMock()
@@ -1185,9 +1260,11 @@ class TestImageProcessPlugin:
         mock_pil.Image.open.return_value = mock_img
 
         import sys
+
         with patch.dict(sys.modules, {"PIL": mock_pil, "PIL.Image": mock_pil.Image}):
             import importlib
             import app.core.agent.plugins.image_process_plugin as mod
+
             importlib.reload(mod)
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.jpg")
@@ -1202,6 +1279,7 @@ class TestImageProcessPlugin:
 class TestAnnotationPlugin:
     def _make(self):
         from app.core.agent.plugins.annotation_plugin import AnnotationPlugin
+
         return AnnotationPlugin()
 
     def test_name(self):
@@ -1257,6 +1335,7 @@ class TestScriptGenerationPlugin:
             from app.core.agent.plugins.script_generation_plugin import (
                 ScriptGenerationPlugin,
             )
+
             mock_gen = MagicMock()
             MockGen.return_value = mock_gen
             p = ScriptGenerationPlugin()
@@ -1310,13 +1389,15 @@ class TestScriptGenerationPlugin:
     def test_save_script_to_file(self):
         p = self._make()
         with tempfile.TemporaryDirectory() as td:
-            with patch("os.path.dirname", return_value=td), \
-                 patch("os.path.join", side_effect=os.path.join), \
-                 patch("os.makedirs"):
+            with patch("os.path.dirname", return_value=td), patch(
+                "os.path.join", side_effect=os.path.join
+            ), patch("os.makedirs"):
                 with patch("builtins.open", MagicMock()):
                     p._mock_gen._get_run_command.return_value = "powershell ./fix.ps1"
                     result = p.save_script_to_file("echo hi", "fix.ps1")
-                    assert result["status"] == "success" or "error" not in str(result.get("status", ""))
+                    assert result["status"] == "success" or "error" not in str(
+                        result.get("status", "")
+                    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1326,6 +1407,7 @@ class TestScriptGenerationPlugin:
 class TestFileConverterPlugin:
     def _make(self):
         from app.core.agent.plugins.file_converter_plugin import FileConverterPlugin
+
         return FileConverterPlugin()
 
     def test_name(self):
@@ -1349,6 +1431,7 @@ class TestFileConverterPlugin:
             "warning": None,
         }
         from app.core.agent.plugins.file_converter_plugin import FileConverterPlugin
+
         result = FileConverterPlugin.convert_file("/in/file.docx", "pdf")
         assert "Conversion complete" in result
         assert "输出文件" in result
@@ -1362,6 +1445,7 @@ class TestFileConverterPlugin:
             "warning": None,
         }
         from app.core.agent.plugins.file_converter_plugin import FileConverterPlugin
+
         result = FileConverterPlugin.convert_file("/in/file.xyz", "abc")
         assert "错误详情" in result
 
@@ -1372,6 +1456,7 @@ class TestFileConverterPlugin:
             ".docx": ["pdf", "txt"],
         }
         from app.core.agent.plugins.file_converter_plugin import FileConverterPlugin
+
         result = FileConverterPlugin.list_conversions("pdf")
         assert "docx" in result
         assert "txt" in result
@@ -1380,5 +1465,6 @@ class TestFileConverterPlugin:
     def test_list_conversions_not_found(self, mock_conv):
         mock_conv.return_value = {".pdf": ["docx"]}
         from app.core.agent.plugins.file_converter_plugin import FileConverterPlugin
+
         result = FileConverterPlugin.list_conversions("xyz")
         assert "不支持" in result

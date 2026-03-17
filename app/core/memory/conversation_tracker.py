@@ -70,13 +70,20 @@ def _extract_entities(text: str) -> List[str]:
     """
     entities: List[str] = []
     # Quoted single-char to 20-char sequences
-    for pat in [r'「([^「」]{2,20})」', r'《([^《》]{1,20})》', r'"([^"]{2,20})"',
-                r"'([^']{2,20})'", r'`([^`]{2,20})`']:
+    for pat in [
+        r"「([^「」]{2,20})」",
+        r"《([^《》]{1,20})》",
+        r'"([^"]{2,20})"',
+        r"'([^']{2,20})'",
+        r"`([^`]{2,20})`",
+    ]:
         entities += re.findall(pat, text)
     # Capitalized ASCII words (at least 2 chars)
-    entities += re.findall(r'\b[A-Z][a-zA-Z0-9_-]{1,30}\b', text)
+    entities += re.findall(r"\b[A-Z][a-zA-Z0-9_-]{1,30}\b", text)
     # Number+unit patterns
-    entities += re.findall(r'\d+(?:\.\d+)?(?:元|GB|MB|KB|TB|小时|分钟|秒|度|米|km|kg|%)', text)
+    entities += re.findall(
+        r"\d+(?:\.\d+)?(?:元|GB|MB|KB|TB|小时|分钟|秒|度|米|km|kg|%)", text
+    )
     # Deduplicate while preserving order
     seen: set = set()
     result: List[str] = []
@@ -99,10 +106,10 @@ def _extract_key_points(text: str) -> List[str]:
 
     # Numbered list
     for m in re.finditer(
-        r'(?:^|\n)\s*(?:\d+[.、\)）]|[•·▶→*-])\s*(.{5,' + str(_MAX_POINT_LEN) + r'})',
-        text
+        r"(?:^|\n)\s*(?:\d+[.、\)）]|[•·▶→*-])\s*(.{5," + str(_MAX_POINT_LEN) + r"})",
+        text,
     ):
-        pt = m.group(1).strip().rstrip('。')
+        pt = m.group(1).strip().rstrip("。")
         if pt:
             points.append(pt[:_MAX_POINT_LEN])
         if len(points) >= _MAX_KEY_POINTS:
@@ -110,7 +117,7 @@ def _extract_key_points(text: str) -> List[str]:
 
     # First sentence fallback (Chinese sentence end or period)
     if not points:
-        first_sent = re.split(r'[。！？\n]', text.strip(), maxsplit=1)[0].strip()
+        first_sent = re.split(r"[。！？\n]", text.strip(), maxsplit=1)[0].strip()
         if 10 <= len(first_sent) <= _MAX_POINT_LEN:
             points.append(first_sent)
 
@@ -118,6 +125,7 @@ def _extract_key_points(text: str) -> List[str]:
 
 
 # ── 主类 ──────────────────────────────────────────────────────────────────────
+
 
 class ConversationTracker:
     """Per-session conversation state tracker for multi-turn semantic continuity."""
@@ -199,6 +207,7 @@ class ConversationTracker:
         Fast — no LLM call. Call this from the main thread after response ready.
         """
         import time
+
         self.state["turn_count"] = self.state.get("turn_count", 0) + 1
 
         # Topic
@@ -227,10 +236,12 @@ class ConversationTracker:
 
     def update_async(self, user_input: str, ai_response: str, save_path: str) -> None:
         """Non-blocking update: run in background thread."""
+
         def _run():
             try:
                 self.update(user_input, ai_response)
                 self.save(save_path)
             except Exception as e:
                 logger.debug(f"[Tracker] async_update failed: {e}")
+
         threading.Thread(target=_run, daemon=True).start()

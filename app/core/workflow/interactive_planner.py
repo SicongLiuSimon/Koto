@@ -198,6 +198,7 @@ class InteractivePlanner:
             history:       消息历史列表（生成会话上下文摘要）
         """
         from app.core.tasks.task_planner import TaskPlanner
+
         _tid = task_id or str(uuid.uuid4())
         planner = TaskPlanner()
         return planner.plan_with_context(

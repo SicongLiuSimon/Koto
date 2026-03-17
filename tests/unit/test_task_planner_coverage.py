@@ -22,7 +22,6 @@ from app.core.tasks.task_planner import (
     TaskPlanner,
 )
 
-
 # ============================================================================
 # StepStatus
 # ============================================================================
@@ -240,10 +239,14 @@ class TestPlan:
 
     def test_ready_steps_allow_failure_unblocks_dep(self):
         plan = Plan(task_id="t1", original_request="req")
-        plan.add_step(PlanStep(
-            name="a", description="A",
-            status=StepStatus.FAILED, allow_failure=True,
-        ))
+        plan.add_step(
+            PlanStep(
+                name="a",
+                description="A",
+                status=StepStatus.FAILED,
+                allow_failure=True,
+            )
+        )
         plan.add_step(PlanStep(name="b", description="B", depends_on=["a"]))
         ready = plan.ready_steps()
         assert len(ready) == 1
@@ -273,10 +276,14 @@ class TestPlan:
 
     def test_has_blocking_failure_allow_failure(self):
         plan = Plan(task_id="t1", original_request="req")
-        plan.add_step(PlanStep(
-            name="a", description="A",
-            status=StepStatus.FAILED, allow_failure=True,
-        ))
+        plan.add_step(
+            PlanStep(
+                name="a",
+                description="A",
+                status=StepStatus.FAILED,
+                allow_failure=True,
+            )
+        )
         assert plan.has_blocking_failure() is False
 
     def test_has_blocking_failure_no_failures(self):
@@ -392,10 +399,12 @@ class TestTaskPlanner:
         planner = TaskPlanner()
         mock_llm = MagicMock()
         mock_llm.generate_content.return_value = {
-            "content": json.dumps([
-                {"name": "step1", "description": "Do A", "depends_on": []},
-                {"name": "step2", "description": "Do B", "depends_on": ["step1"]},
-            ])
+            "content": json.dumps(
+                [
+                    {"name": "step1", "description": "Do A", "depends_on": []},
+                    {"name": "step2", "description": "Do B", "depends_on": ["step1"]},
+                ]
+            )
         }
 
         plan = planner.plan_with_llm("t1", "user request", mock_llm)
@@ -458,7 +467,11 @@ class TestTaskPlanner:
             "t1", "req", mock_llm, available_tools=["web_search", "file_read"]
         )
         call_args = mock_llm.generate_content.call_args
-        prompt_text = call_args[1]["prompt"][0]["content"] if "prompt" in call_args[1] else call_args[0][0][0]["content"]
+        prompt_text = (
+            call_args[1]["prompt"][0]["content"]
+            if "prompt" in call_args[1]
+            else call_args[0][0][0]["content"]
+        )
         # The available tools should appear in the prompt
         assert "web_search" in prompt_text
 

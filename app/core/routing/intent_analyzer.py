@@ -22,24 +22,62 @@ class IntentAnalyzer:
     # Patterns that trigger intent rewriting
     TRIGGER_PATTERNS = [
         # Repeat-task patterns
-        r'重复.*任务', r'再做一遍', r'再来一次', r're(peat|do).*last.*task', r'try.*again',
-        r'重新.*做', r'重新.*来', r'再试一次', r'再跑一次',
+        r"重复.*任务",
+        r"再做一遍",
+        r"再来一次",
+        r"re(peat|do).*last.*task",
+        r"try.*again",
+        r"重新.*做",
+        r"重新.*来",
+        r"再试一次",
+        r"再跑一次",
         # Pronoun / demonstrative references
-        r'刚才', r'那个', r'这个', r'上一个', r'上个', r'前面', r'上面',
-        r'上述', r'之前', r'先前',
+        r"刚才",
+        r"那个",
+        r"这个",
+        r"上一个",
+        r"上个",
+        r"前面",
+        r"上面",
+        r"上述",
+        r"之前",
+        r"先前",
         # Modify / extend
-        r'继续', r'修改', r'换成', r'改成', r'调整', r'优化一下',
-        r'再写一个', r'再画一个', r'再生成一个', r'再做一个',
-        r'详细', r'展开', r'举个例子', r'解释一下', r'说清楚',
+        r"继续",
+        r"修改",
+        r"换成",
+        r"改成",
+        r"调整",
+        r"优化一下",
+        r"再写一个",
+        r"再画一个",
+        r"再生成一个",
+        r"再做一个",
+        r"详细",
+        r"展开",
+        r"举个例子",
+        r"解释一下",
+        r"说清楚",
         # Document / plan references
-        r'这个计划', r'该计划', r'上述计划', r'上面的计划',
-        r'这个方案', r'该方案', r'上述方案',
-        r'这个大纲', r'该大纲',
-        r'这个ppt', r'该ppt', r'这个PPT', r'该PPT',
-        r'按照这个', r'根据这个', r'基于这个',
+        r"这个计划",
+        r"该计划",
+        r"上述计划",
+        r"上面的计划",
+        r"这个方案",
+        r"该方案",
+        r"上述方案",
+        r"这个大纲",
+        r"该大纲",
+        r"这个ppt",
+        r"该ppt",
+        r"这个PPT",
+        r"该PPT",
+        r"按照这个",
+        r"根据这个",
+        r"基于这个",
         # Ordinal references like "第3点" / "其中第二步"
-        r'第[一二三四五六七八九十\d]+[点条个步]',
-        r'[其另]中',
+        r"第[一二三四五六七八九十\d]+[点条个步]",
+        r"[其另]中",
     ]
 
     REWRITE_PROMPT = (
@@ -68,7 +106,9 @@ class IntentAnalyzer:
     @classmethod
     def should_analyze(cls, user_input: str) -> bool:
         """Returns True if user_input contains patterns that require intent rewriting."""
-        return any(re.search(p, user_input, re.IGNORECASE) for p in cls.TRIGGER_PATTERNS)
+        return any(
+            re.search(p, user_input, re.IGNORECASE) for p in cls.TRIGGER_PATTERNS
+        )
 
     @classmethod
     def rewrite_intent(
@@ -158,8 +198,11 @@ class IntentAnalyzer:
 
         # --- Rule-based fallback: find the last non-repeat user message ---
         _repeat_pats = [
-            r'^重复.*任务', r'^再做一遍', r'^再来一次',
-            r'^re(peat|do).*last.*task', r'^try.*again',
+            r"^重复.*任务",
+            r"^再做一遍",
+            r"^再来一次",
+            r"^re(peat|do).*last.*task",
+            r"^try.*again",
         ]
         last_user_msg = None
         for msg in reversed(history or []):
@@ -172,8 +215,9 @@ class IntentAnalyzer:
                     break
 
         if last_user_msg and re.search(
-            r'重复.*任务|再做一遍|再来一次|re(peat|do).*last|try.*again',
-            user_input, re.IGNORECASE
+            r"重复.*任务|再做一遍|再来一次|re(peat|do).*last|try.*again",
+            user_input,
+            re.IGNORECASE,
         ):
             logger.info(
                 "[IntentAnalyzer] Rule-based rewrite: '%s' -> '%s'",
@@ -189,7 +233,7 @@ class IntentAnalyzer:
         """Strip common LLM meta-prefixes from a rewrite result."""
         if not text:
             return ""
-        text = re.sub(r'^重写后的独立指令[：:]\s*', '', text)
-        text = re.sub(r'^重写后的指令[：:]\s*', '', text)
-        text = re.sub(r'^独立指令[：:]\s*', '', text)
-        return text.strip(' "\'')
+        text = re.sub(r"^重写后的独立指令[：:]\s*", "", text)
+        text = re.sub(r"^重写后的指令[：:]\s*", "", text)
+        text = re.sub(r"^独立指令[：:]\s*", "", text)
+        return text.strip(" \"'")

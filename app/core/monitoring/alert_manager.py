@@ -206,7 +206,7 @@ class AlertManager:
             )
 
             if len(self.alert_history) > self._MAX_ALERT_HISTORY:
-                self.alert_history = self.alert_history[-self._MAX_ALERT_HISTORY:]
+                self.alert_history = self.alert_history[-self._MAX_ALERT_HISTORY :]
 
             return alert_id
         except Exception as e:

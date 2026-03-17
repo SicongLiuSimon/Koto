@@ -48,11 +48,17 @@ class TestWebSearcherRetry:
         sleep_mock = MagicMock()
         mock_time = MagicMock()
         mock_time.sleep = sleep_mock
-        with patch.dict("sys.modules", {"google.genai": MagicMock(types=fake_types),
-                                         "google.genai.types": fake_types}), \
-             patch("web.web_searcher.time", mock_time), \
-             patch("web.app.get_client", return_value=mock_client):
+        with patch.dict(
+            "sys.modules",
+            {
+                "google.genai": MagicMock(types=fake_types),
+                "google.genai.types": fake_types,
+            },
+        ), patch("web.web_searcher.time", mock_time), patch(
+            "web.app.get_client", return_value=mock_client
+        ):
             from web.web_searcher import search_with_grounding
+
             result = search_with_grounding(query)
         return result, sleep_mock
 
@@ -77,7 +83,9 @@ class TestWebSearcherRetry:
     def test_all_retries_exhausted(self):
         """All 3 attempts fail → returns success=False with error."""
         mock_client = MagicMock()
-        mock_client.models.generate_content.side_effect = RuntimeError("persistent error")
+        mock_client.models.generate_content.side_effect = RuntimeError(
+            "persistent error"
+        )
 
         result, mock_sleep = self._call_search(mock_client)
 
@@ -127,8 +135,10 @@ class TestVoiceFastDownloadTimeout:
 
         with patch("requests.get", return_value=mock_resp) as mock_get:
             import requests
-            resp = requests.get("http://example.com/model.zip",
-                                timeout=(15, 120), stream=True)
+
+            resp = requests.get(
+                "http://example.com/model.zip", timeout=(15, 120), stream=True
+            )
             resp.raise_for_status()
             # Directly verify the pattern used in voice_fast
             mock_get.assert_called_once_with(
@@ -141,29 +151,36 @@ class TestVoiceFastDownloadTimeout:
         """requests.Timeout propagates from _download_with_timeout."""
         import requests
 
-        with patch("requests.get", side_effect=requests.exceptions.Timeout("connect timed out")):
+        with patch(
+            "requests.get", side_effect=requests.exceptions.Timeout("connect timed out")
+        ):
             with pytest.raises(requests.exceptions.Timeout, match="connect timed out"):
-                resp = requests.get("http://example.com/model.zip",
-                                    timeout=(15, 120), stream=True)
+                resp = requests.get(
+                    "http://example.com/model.zip", timeout=(15, 120), stream=True
+                )
 
     def test_connection_error_propagates(self):
         """requests.ConnectionError propagates from _download_with_timeout."""
         import requests
 
-        with patch("requests.get", side_effect=requests.exceptions.ConnectionError("refused")):
+        with patch(
+            "requests.get", side_effect=requests.exceptions.ConnectionError("refused")
+        ):
             with pytest.raises(requests.exceptions.ConnectionError, match="refused"):
-                resp = requests.get("http://example.com/model.zip",
-                                    timeout=(15, 120), stream=True)
+                resp = requests.get(
+                    "http://example.com/model.zip", timeout=(15, 120), stream=True
+                )
 
     def test_schedule_vosk_download_handles_timeout(self):
         """_schedule_vosk_download catches download failure gracefully."""
         import requests
 
-        with patch("requests.get", side_effect=requests.exceptions.Timeout("timed out")), \
-             patch("os.path.exists", return_value=False), \
-             patch("os.makedirs"):
+        with patch(
+            "requests.get", side_effect=requests.exceptions.Timeout("timed out")
+        ), patch("os.path.exists", return_value=False), patch("os.makedirs"):
             # Import the class and invoke the download logic
             from web.voice_fast import FastVoiceRecognizer
+
             recognizer = FastVoiceRecognizer.__new__(FastVoiceRecognizer)
             recognizer.vosk_model_path = None
             recognizer.primary_engine = "vosk"
@@ -174,7 +191,10 @@ class TestVoiceFastDownloadTimeout:
             with patch("threading.Thread") as mock_thread:
                 recognizer._schedule_vosk_download()
                 # Get the target function passed to Thread
-                target_fn = mock_thread.call_args[1].get("target") or mock_thread.call_args[0][0]
+                target_fn = (
+                    mock_thread.call_args[1].get("target")
+                    or mock_thread.call_args[0][0]
+                )
                 # Should not raise — the except block catches it
                 target_fn()
 
@@ -182,10 +202,11 @@ class TestVoiceFastDownloadTimeout:
         """_schedule_vosk_download catches ConnectionError gracefully."""
         import requests
 
-        with patch("requests.get", side_effect=requests.exceptions.ConnectionError("refused")), \
-             patch("os.path.exists", return_value=False), \
-             patch("os.makedirs"):
+        with patch(
+            "requests.get", side_effect=requests.exceptions.ConnectionError("refused")
+        ), patch("os.path.exists", return_value=False), patch("os.makedirs"):
             from web.voice_fast import FastVoiceRecognizer
+
             recognizer = FastVoiceRecognizer.__new__(FastVoiceRecognizer)
             recognizer.vosk_model_path = None
             recognizer.primary_engine = "vosk"
@@ -193,7 +214,10 @@ class TestVoiceFastDownloadTimeout:
 
             with patch("threading.Thread") as mock_thread:
                 recognizer._schedule_vosk_download()
-                target_fn = mock_thread.call_args[1].get("target") or mock_thread.call_args[0][0]
+                target_fn = (
+                    mock_thread.call_args[1].get("target")
+                    or mock_thread.call_args[0][0]
+                )
                 target_fn()  # should not raise
 
 
@@ -213,8 +237,8 @@ class TestVoiceInputDownloadTimeout:
 
         with patch("requests.get", return_value=mock_resp) as mock_get:
             import requests
-            requests.get("http://example.com/vosk.zip",
-                         timeout=(15, 120), stream=True)
+
+            requests.get("http://example.com/vosk.zip", timeout=(15, 120), stream=True)
             mock_get.assert_called_with(
                 "http://example.com/vosk.zip",
                 timeout=(15, 120),
@@ -225,29 +249,39 @@ class TestVoiceInputDownloadTimeout:
         """requests.Timeout propagates correctly."""
         import requests
 
-        with patch("requests.get", side_effect=requests.exceptions.Timeout("read timed out")):
+        with patch(
+            "requests.get", side_effect=requests.exceptions.Timeout("read timed out")
+        ):
             with pytest.raises(requests.exceptions.Timeout, match="read timed out"):
-                requests.get("http://example.com/vosk.zip",
-                             timeout=(15, 120), stream=True)
+                requests.get(
+                    "http://example.com/vosk.zip", timeout=(15, 120), stream=True
+                )
 
     def test_connection_error_propagates(self):
         """requests.ConnectionError propagates correctly."""
         import requests
 
-        with patch("requests.get", side_effect=requests.exceptions.ConnectionError("DNS fail")):
+        with patch(
+            "requests.get", side_effect=requests.exceptions.ConnectionError("DNS fail")
+        ):
             with pytest.raises(requests.exceptions.ConnectionError, match="DNS fail"):
-                requests.get("http://example.com/vosk.zip",
-                             timeout=(15, 120), stream=True)
+                requests.get(
+                    "http://example.com/vosk.zip", timeout=(15, 120), stream=True
+                )
 
     def test_get_or_download_handles_timeout_gracefully(self):
         """_get_or_download_vosk_model returns None on Timeout."""
         import requests
 
-        with patch("requests.get", side_effect=requests.exceptions.Timeout("timed out")), \
-             patch("os.path.exists", return_value=False), \
-             patch("os.path.isdir", return_value=False), \
-             patch("os.makedirs"):
+        with patch(
+            "requests.get", side_effect=requests.exceptions.Timeout("timed out")
+        ), patch("os.path.exists", return_value=False), patch(
+            "os.path.isdir", return_value=False
+        ), patch(
+            "os.makedirs"
+        ):
             from web.voice_input import VoiceInputEngine
+
             engine = VoiceInputEngine.__new__(VoiceInputEngine)
             engine.vosk_model_path = None
             result = engine._get_or_download_vosk_model()
@@ -257,11 +291,15 @@ class TestVoiceInputDownloadTimeout:
         """_get_or_download_vosk_model returns None on ConnectionError."""
         import requests
 
-        with patch("requests.get", side_effect=requests.exceptions.ConnectionError("refused")), \
-             patch("os.path.exists", return_value=False), \
-             patch("os.path.isdir", return_value=False), \
-             patch("os.makedirs"):
+        with patch(
+            "requests.get", side_effect=requests.exceptions.ConnectionError("refused")
+        ), patch("os.path.exists", return_value=False), patch(
+            "os.path.isdir", return_value=False
+        ), patch(
+            "os.makedirs"
+        ):
             from web.voice_input import VoiceInputEngine
+
             engine = VoiceInputEngine.__new__(VoiceInputEngine)
             engine.vosk_model_path = None
             result = engine._get_or_download_vosk_model()

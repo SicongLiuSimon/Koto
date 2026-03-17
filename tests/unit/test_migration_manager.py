@@ -9,7 +9,6 @@ import pytest
 
 from app.core.db.migration_manager import MigrationManager
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -259,8 +258,7 @@ class TestApplyAll:
         conn = sqlite3.connect(db_path)
         try:
             applied = {
-                r[0]
-                for r in conn.execute("SELECT name FROM _migrations").fetchall()
+                r[0] for r in conn.execute("SELECT name FROM _migrations").fetchall()
             }
             assert "001_good.py" in applied
             assert "002_bad.py" not in applied

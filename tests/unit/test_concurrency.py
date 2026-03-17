@@ -17,6 +17,7 @@ NUM_THREADS = 25
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _run_concurrently(target, num_threads=NUM_THREADS):
     """Launch *num_threads* threads behind a Barrier so they all start together.
 
@@ -50,11 +51,13 @@ def _run_concurrently(target, num_threads=NUM_THREADS):
 # 1. get_fallback_executor() singleton thread safety
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestFallbackExecutorSingleton:
 
     def setup_method(self):
         import app.core.llm.model_fallback as _mod
+
         self._mod = _mod
         self._original = _mod._executor
         _mod._executor = None
@@ -79,11 +82,13 @@ class TestFallbackExecutorSingleton:
 # 2. get_checkpointer() singleton thread safety
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestCheckpointerSingleton:
 
     def setup_method(self):
         import app.core.agent.checkpoint_manager as _mod
+
         self._mod = _mod
         self._orig_instance = _mod._checkpointer_instance
         self._orig_type = _mod._checkpointer_type
@@ -105,7 +110,9 @@ class TestCheckpointerSingleton:
         fake_sqlite_module = MagicMock()
         fake_sqlite_module.SqliteSaver = mock_saver_cls
 
-        with patch.dict("sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}):
+        with patch.dict(
+            "sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}
+        ):
             with patch("pathlib.Path.mkdir"):
                 results = _run_concurrently(self._mod.get_checkpointer)
 
@@ -138,11 +145,13 @@ class TestCheckpointerSingleton:
 # 3. StreamInterruptManager thread safety
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestStreamInterruptManagerConcurrency:
 
     def setup_method(self):
         from web.app import StreamInterruptManager
+
         self.manager = StreamInterruptManager()
 
     # -- concurrent set + read ------------------------------------------------
@@ -223,7 +232,9 @@ class TestStreamInterruptManagerConcurrency:
             except Exception as exc:
                 errors.append(exc)
 
-        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(NUM_THREADS)]
+        threads = [
+            threading.Thread(target=_worker, args=(i,)) for i in range(NUM_THREADS)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -249,7 +260,9 @@ class TestStreamInterruptManagerConcurrency:
             except Exception as exc:
                 errors.append(exc)
 
-        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(NUM_THREADS)]
+        threads = [
+            threading.Thread(target=_worker, args=(i,)) for i in range(NUM_THREADS)
+        ]
         for t in threads:
             t.start()
         for t in threads:
@@ -262,11 +275,13 @@ class TestStreamInterruptManagerConcurrency:
 # 4. _user_settings_cache / _user_settings_lock
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestUserSettingsCacheConcurrency:
 
     def setup_method(self):
         import web.app as _mod
+
         self._mod = _mod
         self._orig_cache = _mod._user_settings_cache.copy()
         _mod._user_settings_cache.clear()
@@ -283,8 +298,9 @@ class TestUserSettingsCacheConcurrency:
         """All threads calling _load_user_settings get identical dict."""
         fake_data = {"theme": "dark", "lang": "en"}
 
-        with patch("builtins.open", create=True), \
-             patch("json.load", return_value=fake_data):
+        with patch("builtins.open", create=True), patch(
+            "json.load", return_value=fake_data
+        ):
             results = _run_concurrently(self._mod._load_user_settings)
 
         first = results[0]

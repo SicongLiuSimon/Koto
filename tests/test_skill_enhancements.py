@@ -19,15 +19,17 @@ import importlib
 import pytest
 
 # ─── 路径设置 ───────────────────────────────────────────────────────────────
-ROOT = pathlib.Path(__file__).resolve().parents[1]          # repo root
+ROOT = pathlib.Path(__file__).resolve().parents[1]  # repo root
 SKILLS_DIR = ROOT / "config" / "skills"
 sys.path.insert(0, str(ROOT))
+
 
 # ─── 辅助函数 ──────────────────────────────────────────────────────────────
 def _all_skill_files():
     """返回所有非模板 skill JSON 文件路径列表（排除 _TEMPLATE.json / test_custom.json）"""
     return [
-        p for p in SKILLS_DIR.glob("*.json")
+        p
+        for p in SKILLS_DIR.glob("*.json")
         if not p.name.startswith("_") and p.name != "test_custom.json"
     ]
 
@@ -40,6 +42,7 @@ def _load(name: str) -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 # LAYER 1 : JSON Schema 完整性检查
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class TestSkillJsonCompleteness:
     """所有 skill JSON 文件必须满足最低质量要求。"""
@@ -64,8 +67,7 @@ class TestSkillJsonCompleteness:
         data = json.loads(skill_path.read_text(encoding="utf-8"))
         prompt = data.get("prompt", "")
         assert len(prompt) > 300, (
-            f"{skill_path.name} prompt 太短 ({len(prompt)} chars)，"
-            f"预期 > 300 chars"
+            f"{skill_path.name} prompt 太短 ({len(prompt)} chars)，" f"预期 > 300 chars"
         )
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
@@ -73,51 +75,51 @@ class TestSkillJsonCompleteness:
         """trigger_keywords 必须是非空列表。"""
         data = json.loads(skill_path.read_text(encoding="utf-8"))
         kws = data.get("trigger_keywords", [])
-        assert isinstance(kws, list) and len(kws) > 0, (
-            f"{skill_path.name} 缺少 trigger_keywords（AutoMatcher 无法识别）"
-        )
+        assert (
+            isinstance(kws, list) and len(kws) > 0
+        ), f"{skill_path.name} 缺少 trigger_keywords（AutoMatcher 无法识别）"
         # 每个关键词都必须是非空字符串
         for kw in kws:
-            assert isinstance(kw, str) and kw.strip(), (
-                f"{skill_path.name} trigger_keywords 包含空字符串: {kw!r}"
-            )
+            assert (
+                isinstance(kw, str) and kw.strip()
+            ), f"{skill_path.name} trigger_keywords 包含空字符串: {kw!r}"
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
     def test_plan_template_non_empty(self, skill_path):
         """plan_template 必须是非空列表（执行步骤缺失则 inject_into_prompt 无法注入）。"""
         data = json.loads(skill_path.read_text(encoding="utf-8"))
         pt = data.get("plan_template", [])
-        assert isinstance(pt, list) and len(pt) > 0, (
-            f"{skill_path.name} 缺少 plan_template（执行步骤缺失）"
-        )
+        assert (
+            isinstance(pt, list) and len(pt) > 0
+        ), f"{skill_path.name} 缺少 plan_template（执行步骤缺失）"
         for step in pt:
-            assert isinstance(step, str) and step.strip(), (
-                f"{skill_path.name} plan_template 包含空步骤"
-            )
+            assert (
+                isinstance(step, str) and step.strip()
+            ), f"{skill_path.name} plan_template 包含空步骤"
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
     def test_examples_present(self, skill_path):
         """每个 skill 至少有 1 个示例（examples），用于 few-shot 质量保障。"""
         data = json.loads(skill_path.read_text(encoding="utf-8"))
         examples = data.get("examples", [])
-        assert isinstance(examples, list) and len(examples) > 0, (
-            f"{skill_path.name} 缺少 examples"
-        )
+        assert (
+            isinstance(examples, list) and len(examples) > 0
+        ), f"{skill_path.name} 缺少 examples"
         for ex in examples:
-            assert "input" in ex and ex["input"], (
-                f"{skill_path.name} 示例缺少 'input' 字段: {ex}"
-            )
-            assert "output" in ex and ex["output"], (
-                f"{skill_path.name} 示例缺少 'output' 字段: {ex}"
-            )
+            assert (
+                "input" in ex and ex["input"]
+            ), f"{skill_path.name} 示例缺少 'input' 字段: {ex}"
+            assert (
+                "output" in ex and ex["output"]
+            ), f"{skill_path.name} 示例缺少 'output' 字段: {ex}"
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
     def test_id_matches_filename(self, skill_path):
         """skill JSON 中的 id 字段必须和文件名（不含 .json）一致。"""
         data = json.loads(skill_path.read_text(encoding="utf-8"))
-        assert data.get("id") == skill_path.stem, (
-            f"{skill_path.name}: id='{data.get('id')}' 与文件名 '{skill_path.stem}' 不匹配"
-        )
+        assert (
+            data.get("id") == skill_path.stem
+        ), f"{skill_path.name}: id='{data.get('id')}' 与文件名 '{skill_path.stem}' 不匹配"
 
     def test_no_duplicate_ids(self):
         """所有 skill JSON 中的 id 字段必须全局唯一。"""
@@ -125,9 +127,9 @@ class TestSkillJsonCompleteness:
         for path in _all_skill_files():
             data = json.loads(path.read_text(encoding="utf-8"))
             sid = data.get("id")
-            assert sid not in seen, (
-                f"重复 skill id '{sid}': 出现在 {seen[sid]} 和 {path.name}"
-            )
+            assert (
+                sid not in seen
+            ), f"重复 skill id '{sid}': 出现在 {seen[sid]} 和 {path.name}"
             seen[sid] = path.name
 
     def test_trigger_keywords_count(self):
@@ -150,6 +152,7 @@ class TestSkillJsonCompleteness:
 # LAYER 2 : AutoMatcher trigger_keywords 路由检测
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestAutoMatcherTriggerKeywords:
     """
     验证 SkillAutoMatcher 的 trigger_keywords 路径可被真实调用，
@@ -163,6 +166,7 @@ class TestAutoMatcherTriggerKeywords:
     def isolate_registry(self, monkeypatch):
         """将 SkillManager 状态清零，并以本地 JSON 文件初始化。"""
         from app.core.skills import skill_manager as sm
+
         # 重置单例状态
         monkeypatch.setattr(sm.SkillManager, "_initialized", False)
         monkeypatch.setattr(sm.SkillManager, "_registry", {})
@@ -170,23 +174,26 @@ class TestAutoMatcherTriggerKeywords:
         sm.SkillManager._ensure_init()
         yield
 
-    @pytest.mark.parametrize("skill_name,test_input", [
-        ("debug_python",          "Python报错 AttributeError"),
-        ("debug_api",             "API接口返回500错误"),
-        ("debug_performance",     "程序运行很慢，性能问题"),
-        ("debug_web_frontend",    "React页面白屏 前端调试"),
-        ("work_report_generator", "帮我写今天的日报"),
-        ("excel_merge",           "合并多个Excel表格"),
-        ("excel_analyst",         "统计分析这份Excel数据"),
-        ("file_smart_rename",     "批量重命名文件"),
-        ("file_duplicate_hunter", "查找重复文件"),
-        ("git_commit_helper",     "生成git commit message"),
-        ("sql_assistant",         "写一条SQL查询语句"),
-        ("email_writer",          "帮我写一封邮件"),
-        ("regex_helper",          "写一个正则表达式匹配手机号"),
-        ("write_unit_tests",      "帮我写单元测试"),
-        ("brainstorm",            "头脑风暴一些创业想法"),
-    ])
+    @pytest.mark.parametrize(
+        "skill_name,test_input",
+        [
+            ("debug_python", "Python报错 AttributeError"),
+            ("debug_api", "API接口返回500错误"),
+            ("debug_performance", "程序运行很慢，性能问题"),
+            ("debug_web_frontend", "React页面白屏 前端调试"),
+            ("work_report_generator", "帮我写今天的日报"),
+            ("excel_merge", "合并多个Excel表格"),
+            ("excel_analyst", "统计分析这份Excel数据"),
+            ("file_smart_rename", "批量重命名文件"),
+            ("file_duplicate_hunter", "查找重复文件"),
+            ("git_commit_helper", "生成git commit message"),
+            ("sql_assistant", "写一条SQL查询语句"),
+            ("email_writer", "帮我写一封邮件"),
+            ("regex_helper", "写一个正则表达式匹配手机号"),
+            ("write_unit_tests", "帮我写单元测试"),
+            ("brainstorm", "头脑风暴一些创业想法"),
+        ],
+    )
     def test_keyword_in_trigger_json(self, skill_name, test_input):
         """输入字符串中的关键词必须存在于对应 skill 的 trigger_keywords 列表中（或前缀匹配）。"""
         skill_file = SKILLS_DIR / f"{skill_name}.json"
@@ -213,9 +220,9 @@ class TestAutoMatcherTriggerKeywords:
         from app.core.skills.skill_auto_matcher import SkillAutoMatcher
 
         # 确保 def_registry 已初始化且包含 debug_python
-        assert "debug_python" in SkillManager._def_registry, (
-            "SkillManager._def_registry 未加载 debug_python"
-        )
+        assert (
+            "debug_python" in SkillManager._def_registry
+        ), "SkillManager._def_registry 未加载 debug_python"
         debug_def = SkillManager._def_registry["debug_python"]
         kws = getattr(debug_def, "trigger_keywords", [])
         assert len(kws) > 0, "debug_python.trigger_keywords 在 SkillDefinition 中为空"
@@ -236,6 +243,7 @@ class TestAutoMatcherTriggerKeywords:
 # LAYER 3 : inject_into_prompt 注入质量验证
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestInjectIntoPrompt:
     """
     验证 SkillManager.inject_into_prompt 正确将 plan_template 追加到系统指令。
@@ -244,19 +252,23 @@ class TestInjectIntoPrompt:
     @pytest.fixture(autouse=True)
     def init_skill_manager(self, monkeypatch):
         from app.core.skills import skill_manager as sm
+
         monkeypatch.setattr(sm.SkillManager, "_initialized", False)
         monkeypatch.setattr(sm.SkillManager, "_registry", {})
         monkeypatch.setattr(sm.SkillManager, "_def_registry", {})
         sm.SkillManager._ensure_init()
         yield
 
-    @pytest.mark.parametrize("skill_id", [
-        "debug_python",
-        "excel_analyst",
-        "git_commit_helper",
-        "write_unit_tests",
-        "email_writer",
-    ])
+    @pytest.mark.parametrize(
+        "skill_id",
+        [
+            "debug_python",
+            "excel_analyst",
+            "git_commit_helper",
+            "write_unit_tests",
+            "email_writer",
+        ],
+    )
     def test_plan_template_injected_when_temp_skill(self, skill_id):
         """
         以 temp_skill_ids 方式注入 skill 时，skill 内容必须出现在返回文本中，
@@ -287,11 +299,14 @@ class TestInjectIntoPrompt:
             f"inject_into_prompt 返回（前600字）:\n{result[:600]}"
         )
 
-    @pytest.mark.parametrize("skill_id", [
-        "debug_python",
-        "excel_analyst",
-        "email_writer",
-    ])
+    @pytest.mark.parametrize(
+        "skill_id",
+        [
+            "debug_python",
+            "excel_analyst",
+            "email_writer",
+        ],
+    )
     def test_plan_template_contains_ordered_steps(self, skill_id):
         """返回的 prompt 中包含带序号的步骤列表或中文步骤标记（验证格式正确性）。"""
         from app.core.skills.skill_manager import SkillManager
@@ -320,7 +335,9 @@ class TestInjectIntoPrompt:
         # 在 enabled 和 temp_skill_ids 中同时传入同一 skill
         # 先把 debug_python 设为 enabled
         SkillManager._ensure_init()
-        orig_enabled = SkillManager._registry.get("debug_python", {}).get("enabled", False)
+        orig_enabled = SkillManager._registry.get("debug_python", {}).get(
+            "enabled", False
+        )
         if "debug_python" in SkillManager._registry:
             SkillManager._registry["debug_python"]["enabled"] = True
         try:
@@ -360,9 +377,7 @@ class TestInjectIntoPrompt:
             temp_skill_ids=["email_writer"],
         )
         # 注入后 prompt 应含有 skill 具体内容（验证 prompt 非空地被追加）
-        assert len(result) > len(base) + 50, (
-            "inject_into_prompt 几乎没有追加任何内容"
-        )
+        assert len(result) > len(base) + 50, "inject_into_prompt 几乎没有追加任何内容"
 
     def test_multiple_temp_skills_all_injected(self):
         """同时传入多个 temp_skill_ids，每个 skill 的步骤都应出现在结果中。"""
@@ -379,14 +394,15 @@ class TestInjectIntoPrompt:
             base_instruction=base,
             temp_skill_ids=["debug_python"],
         )
-        assert len(result) >= len(single), (
-            "多 skill 注入结果不应短于单个 skill 注入结果"
-        )
+        assert len(result) >= len(
+            single
+        ), "多 skill 注入结果不应短于单个 skill 注入结果"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LAYER 4 : 语义覆盖率验证（验证 trigger_keywords 覆盖典型用户输入）
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class TestSemanticCoverage:
     """
@@ -397,34 +413,38 @@ class TestSemanticCoverage:
     @pytest.fixture(autouse=True)
     def init_registry(self, monkeypatch):
         from app.core.skills import skill_manager as sm
+
         monkeypatch.setattr(sm.SkillManager, "_initialized", False)
         monkeypatch.setattr(sm.SkillManager, "_registry", {})
         monkeypatch.setattr(sm.SkillManager, "_def_registry", {})
         sm.SkillManager._ensure_init()
         yield
 
-    @pytest.mark.parametrize("user_input,expected_skill", [
-        ("Python 里 KeyError 怎么解决",       "debug_python"),
-        ("这段代码报 TypeError 了",            "debug_python"),
-        ("帮我改一下 commit message",          "git_commit_helper"),
-        ("用 git 提交代码，信息怎么写",        "git_commit_helper"),
-        ("帮我写邮件给客户解释延期",           "email_writer"),
-        ("给领导发一封说明邮件",               "email_writer"),
-        ("帮我写正则匹配邮箱格式",             "regex_helper"),
-        ("这个正则表达式什么意思",             "regex_helper"),
-        ("SQL查询按日期筛选数据",              "sql_assistant"),
-        ("写个查重复记录的SQL",                "sql_assistant"),
-        ("帮我写测试用例",                     "write_unit_tests"),
-        ("用pytest测试这个函数",               "write_unit_tests"),
-        ("数据分析这份Excel",                  "excel_analyst"),
-        ("合并两个Excel文件",                  "excel_merge"),
-        ("批量重命名文件加上日期",             "file_smart_rename"),
-        ("查找项目里的重复图片",               "file_duplicate_hunter"),
-        ("写日报", "work_report_generator"),
-        ("今天的工作总结",                     "work_report_generator"),
-        ("头脑风暴，给我10个产品创意",        "brainstorm"),
-        ("我想想有哪些可能的解决方案",         "brainstorm"),
-    ])
+    @pytest.mark.parametrize(
+        "user_input,expected_skill",
+        [
+            ("Python 里 KeyError 怎么解决", "debug_python"),
+            ("这段代码报 TypeError 了", "debug_python"),
+            ("帮我改一下 commit message", "git_commit_helper"),
+            ("用 git 提交代码，信息怎么写", "git_commit_helper"),
+            ("帮我写邮件给客户解释延期", "email_writer"),
+            ("给领导发一封说明邮件", "email_writer"),
+            ("帮我写正则匹配邮箱格式", "regex_helper"),
+            ("这个正则表达式什么意思", "regex_helper"),
+            ("SQL查询按日期筛选数据", "sql_assistant"),
+            ("写个查重复记录的SQL", "sql_assistant"),
+            ("帮我写测试用例", "write_unit_tests"),
+            ("用pytest测试这个函数", "write_unit_tests"),
+            ("数据分析这份Excel", "excel_analyst"),
+            ("合并两个Excel文件", "excel_merge"),
+            ("批量重命名文件加上日期", "file_smart_rename"),
+            ("查找项目里的重复图片", "file_duplicate_hunter"),
+            ("写日报", "work_report_generator"),
+            ("今天的工作总结", "work_report_generator"),
+            ("头脑风暴，给我10个产品创意", "brainstorm"),
+            ("我想想有哪些可能的解决方案", "brainstorm"),
+        ],
+    )
     def test_user_input_matches_expected_skill(self, user_input, expected_skill):
         """用户输入应至少被预期 skill 的 trigger_keywords 之一覆盖。"""
         skill_file = SKILLS_DIR / f"{expected_skill}.json"

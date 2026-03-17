@@ -343,5 +343,7 @@ class TestLoadEntryPoint:
         fake_module.FakeClass = FakeClass
         mock_import.return_value = fake_module
 
-        result = SkillCapabilityRegistry._load_entry_point("app.nested:FakeClass.method")
+        result = SkillCapabilityRegistry._load_entry_point(
+            "app.nested:FakeClass.method"
+        )
         assert result is inner_fn

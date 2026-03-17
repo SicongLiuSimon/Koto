@@ -176,10 +176,12 @@ def _make_nodes(
                 result_str = f"[工具错误] {t_name}: {exc}"
                 logger.warning(f"[LangGraphAgent] 工具 {t_name} 执行失败: {exc}")
 
-            tool_messages.append(ToolMessage(
-                tool_call_id=t_id,
-                content=result_str,
-            ))
+            tool_messages.append(
+                ToolMessage(
+                    tool_call_id=t_id,
+                    content=result_str,
+                )
+            )
 
         return {"messages": tool_messages}
 
@@ -510,8 +512,11 @@ class LangGraphAgent:
                         if isinstance(msg, AIMessage):
                             if msg.tool_calls:
                                 for tc in msg.tool_calls:
-                                    yield {"type": "tool_call", "content": tc["name"],
-                                           "args": tc.get("args", {})}
+                                    yield {
+                                        "type": "tool_call",
+                                        "content": tc["name"],
+                                        "args": tc.get("args", {}),
+                                    }
                             elif msg.content:
                                 yield {"type": "token", "content": msg.content}
                         elif isinstance(msg, ToolMessage):
