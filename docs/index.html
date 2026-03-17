@@ -1,24 +1,24 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Koto (言) — AI 桌面助手</title>
-  <meta name="description" content="Koto 是运行在你自己电脑上的 AI 桌面助手，支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能系统与工作流自动化。">
+  <title>Koto (言) — AI 桌面工作台</title>
+  <meta name="description" content="Koto 是运行在你自己电脑上的 AI 桌面助手，支持 Gemini 2.5 Flash 与 Ollama 本地模型协同工作，多智能体任务分解、文档分析、知识库 RAG 与技能自动化，数据完全本地。">
   <style>
     /* ── Reset & Base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg:      #05080f;
-      --bg2:     #0b111d;
-      --bg3:     #111a2a;
+      --bg:      #0f172a;
+      --bg2:     #1e293b;
+      --bg3:     #293548;
       --border:  rgba(255,255,255,.08);
-      --t1:      #e8eefc;
-      --t2:      #8896b3;
-      --t3:      #556076;
-      --cyan:    #63c6ff;
-      --teal:    #76f7d4;
-      --grad:    linear-gradient(135deg, #63c6ff, #76f7d4);
+      --t1:      #f1f5f9;
+      --t2:      #94a3b8;
+      --t3:      #64748b;
+      --cyan:    #38bdf8;
+      --teal:    #34d399;
+      --grad:    linear-gradient(135deg, #38bdf8, #34d399);
       --r1: 10px; --r2: 16px;
       --ease: all .25s ease;
     }
@@ -38,16 +38,16 @@
     .grid-bg {
       position: absolute; inset: 0;
       background-image:
-        linear-gradient(rgba(99,198,255,.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(99,198,255,.04) 1px, transparent 1px);
+        linear-gradient(rgba(56,189,248,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56,189,248,.04) 1px, transparent 1px);
       background-size: 48px 48px;
     }
     .bg-radial {
       position: absolute; border-radius: 50%;
       filter: blur(100px); opacity: .45;
     }
-    .bg-r1 { width: 600px; height: 600px; top: -180px; left: -100px; background: rgba(99,198,255,.08); }
-    .bg-r2 { width: 500px; height: 500px; bottom: -100px; right: -80px; background: rgba(118,247,212,.06); }
+    .bg-r1 { width: 600px; height: 600px; top: -180px; left: -100px; background: rgba(56,189,248,.08); }
+    .bg-r2 { width: 500px; height: 500px; bottom: -100px; right: -80px; background: rgba(52,211,153,.06); }
 
     /* ── Utilities ── */
     .wrap { max-width: 1120px; margin: 0 auto; padding: 0 36px; position: relative; z-index: 1; }
@@ -55,7 +55,7 @@
     .pill {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 500;
-      border: 1px solid rgba(99,198,255,.2); background: rgba(99,198,255,.07); color: var(--cyan);
+      border: 1px solid rgba(56,189,248,.2); background: rgba(56,189,248,.07); color: var(--cyan);
     }
     .btn {
       display: inline-flex; align-items: center; gap: 8px;
@@ -63,29 +63,29 @@
       cursor: pointer; transition: var(--ease); border: none;
     }
     .btn-prime {
-      background: var(--grad); color: #05080f;
-      box-shadow: 0 0 24px rgba(99,198,255,.25);
+      background: var(--grad); color: #0f172a;
+      box-shadow: 0 0 24px rgba(56,189,248,.25);
     }
-    .btn-prime:hover { transform: translateY(-2px); box-shadow: 0 4px 32px rgba(99,198,255,.38); }
+    .btn-prime:hover { transform: translateY(-2px); box-shadow: 0 4px 32px rgba(56,189,248,.38); }
     .btn-ghost {
       background: transparent; color: var(--t1);
       border: 1px solid var(--border);
     }
-    .btn-ghost:hover { border-color: rgba(99,198,255,.35); color: var(--cyan); }
+    .btn-ghost:hover { border-color: rgba(56,189,248,.35); color: var(--cyan); }
     .btn-dl {
       padding: 14px 32px; font-size: 15px; font-weight: 700;
-      background: var(--grad); color: #05080f;
-      box-shadow: 0 0 36px rgba(99,198,255,.4), 0 0 72px rgba(99,198,255,.15);
+      background: var(--grad); color: #0f172a;
+      box-shadow: 0 0 36px rgba(56,189,248,.4), 0 0 72px rgba(56,189,248,.15);
       border-radius: 12px;
     }
-    .btn-dl:hover { transform: translateY(-3px); box-shadow: 0 8px 52px rgba(99,198,255,.55); }
+    .btn-dl:hover { transform: translateY(-3px); box-shadow: 0 8px 52px rgba(56,189,248,.55); }
 
     /* ── Nav ── */
     .nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
       height: 60px;
       display: flex; align-items: center;
-      background: rgba(5,8,15,.75); backdrop-filter: blur(18px);
+      background: rgba(15,23,42,.75); backdrop-filter: blur(18px);
       border-bottom: 1px solid var(--border);
     }
     .nav .wrap { display: flex; align-items: center; width: 100%; }
@@ -97,7 +97,7 @@
       width: 34px; height: 34px; border-radius: 9px;
       background: var(--grad);
       display: flex; align-items: center; justify-content: center;
-      font-size: 16px; font-weight: 800; color: #05080f;
+      font-size: 16px; font-weight: 800; color: #0f172a;
     }
     .nav-links {
       display: flex; align-items: center; gap: 28px;
@@ -115,7 +115,7 @@
       padding: 4px 10px; font-size: 12px; font-family: inherit;
       transition: var(--ease);
     }
-    .lang-btn:hover { color: var(--t1); border-color: rgba(99,198,255,.3); }
+    .lang-btn:hover { color: var(--t1); border-color: rgba(56,189,248,.3); }
 
     /* ── Hero ── */
     .hero {
@@ -170,7 +170,7 @@
       padding: 7px 14px; font-size: 12px; color: var(--t2);
       cursor: default; border-radius: 0;
     }
-    .aw-s-item.active { background: rgba(99,198,255,.1); color: var(--cyan); }
+    .aw-s-item.active { background: rgba(56,189,248,.1); color: var(--cyan); }
     .aw-s-item .dot-sm {
       display: inline-block; width: 6px; height: 6px; border-radius: 50%;
       background: var(--teal); margin-right: 6px;
@@ -187,19 +187,19 @@
       display: flex; align-items: center; justify-content: center;
       font-size: 10px; font-weight: 700;
     }
-    .aw-av.ai  { background: var(--grad); color: #05080f; }
+    .aw-av.ai  { background: var(--grad); color: #0f172a; }
     .aw-av.usr { background: linear-gradient(135deg,#667eea,#764ba2); color: #fff; }
     .aw-bubble {
       padding: 8px 12px; border-radius: 12px; font-size: 12px; line-height: 1.5;
       max-width: 360px;
     }
     .aw-bubble.ai  { background: var(--bg3); color: var(--t1); border: 1px solid var(--border); }
-    .aw-bubble.usr { background: linear-gradient(135deg,rgba(99,198,255,.18),rgba(118,247,212,.12)); color: var(--t1); }
+    .aw-bubble.usr { background: linear-gradient(135deg,rgba(56,189,248,.18),rgba(52,211,153,.12)); color: var(--t1); }
     .aw-badge {
       display: inline-flex; align-items: center; gap: 4px;
       padding: 2px 8px; border-radius: 6px; font-size: 10px;
-      background: rgba(118,247,212,.12); color: var(--teal);
-      border: 1px solid rgba(118,247,212,.2); margin-top: 4px;
+      background: rgba(52,211,153,.12); color: var(--teal);
+      border: 1px solid rgba(52,211,153,.2); margin-top: 4px;
     }
     .aw-cursor {
       display: inline-block; width: 2px; height: 12px;
@@ -226,13 +226,13 @@
       transition: var(--ease);
     }
     .feat-card:hover {
-      border-color: rgba(99,198,255,.25);
+      border-color: rgba(56,189,248,.25);
       transform: translateY(-3px);
       box-shadow: 0 12px 40px rgba(0,0,0,.35);
     }
     .feat-icon {
       width: 44px; height: 44px; border-radius: 12px;
-      background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.15);
+      background: rgba(56,189,248,.1); border: 1px solid rgba(56,189,248,.15);
       display: flex; align-items: center; justify-content: center;
       font-size: 20px; margin-bottom: 16px;
     }
@@ -243,8 +243,8 @@
     }
     .tag {
       padding: 2px 9px; border-radius: 5px; font-size: 11px;
-      background: rgba(99,198,255,.07); color: var(--cyan);
-      border: 1px solid rgba(99,198,255,.15);
+      background: rgba(56,189,248,.07); color: var(--cyan);
+      border: 1px solid rgba(56,189,248,.15);
     }
 
     /* ── Setup ── */
@@ -258,7 +258,7 @@
     }
     .step-num {
       width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
-      background: var(--grad); color: #05080f;
+      background: var(--grad); color: #0f172a;
       display: flex; align-items: center; justify-content: center;
       font-size: 13px; font-weight: 800;
     }
@@ -266,7 +266,7 @@
     .step p  { font-size: 12.5px; color: var(--t2); line-height: 1.6; }
     .step code {
       display: inline-block; padding: 2px 7px; border-radius: 5px;
-      background: rgba(99,198,255,.08); color: var(--cyan);
+      background: rgba(56,189,248,.08); color: var(--cyan);
       font-family: 'Consolas', monospace; font-size: 11.5px;
     }
 
@@ -278,7 +278,7 @@
       background: transparent; color: var(--t2); font-family: inherit;
     }
     .setup-tab.active {
-      background: rgba(99,198,255,.12); border-color: rgba(99,198,255,.3); color: var(--cyan);
+      background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.3); color: var(--cyan);
     }
     .setup-panel { display: none; }
     .setup-panel.active { display: block; }
@@ -287,11 +287,11 @@
     .dl-banner {
       margin: 0 0 80px;
       padding: 32px 40px; border-radius: 20px;
-      background: linear-gradient(135deg, rgba(99,198,255,.07) 0%, rgba(118,247,212,.05) 100%);
-      border: 1px solid rgba(99,198,255,.22);
+      background: linear-gradient(135deg, rgba(56,189,248,.07) 0%, rgba(52,211,153,.05) 100%);
+      border: 1px solid rgba(56,189,248,.22);
       display: flex; align-items: center; justify-content: space-between;
       gap: 24px; flex-wrap: wrap;
-      box-shadow: 0 0 0 1px rgba(99,198,255,.05), inset 0 1px 0 rgba(99,198,255,.1);
+      box-shadow: 0 0 0 1px rgba(56,189,248,.05), inset 0 1px 0 rgba(56,189,248,.1);
       position: relative; z-index: 1;
     }
     .dl-banner-left h3 { font-size: 20px; font-weight: 800; margin-bottom: 6px; }
@@ -302,7 +302,7 @@
     .req-box {
       margin: 48px 0 0;
       padding: 18px 22px; border-radius: var(--r2);
-      background: rgba(99,198,255,.05); border: 1px solid rgba(99,198,255,.18);
+      background: rgba(56,189,248,.05); border: 1px solid rgba(56,189,248,.18);
     }
     .req-box h4 { font-size: 13px; font-weight: 700; color: var(--cyan); margin-bottom: 10px; }
     .req-list {
@@ -376,12 +376,12 @@
       <span class="gt" data-en="AI Desktop Workspace" data-zh="AI 桌面工作台">AI 桌面工作台</span>
     </h1>
 
-    <p class="hero-sub rv" data-en="Koto runs on your own machine — chat with Gemini cloud models or locally-running Ollama models, analyze documents, build a Knowledge Base, automate with Skills, and keep long-term memory. Your data stays local. Available in Web and Desktop modes." data-zh="Koto 运行在你的电脑上——支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能自动化与长期记忆。数据不离本地，Web 与桌面双模式运行。">
-      Koto 运行在你的电脑上——支持 Gemini 云端模型与 Ollama 本地模型对话、文档分析、知识库 RAG、技能自动化与长期记忆。数据不离本地，Web 与桌面双模式运行。
+    <p class="hero-sub rv" data-en="Koto runs on your own machine. Multiple AI agents collaborate — Gemini 2.5 Flash for cloud reasoning, Ollama for local privacy. Documents, memory, skills and automation, all offline." data-zh="Koto 运行在你的电脑上。多个 AI 智能体协同工作——Gemini 2.5 Flash 负责云端推理，Ollama 保障本地隐私。文档、记忆、技能与自动化，全部离线可用。">
+      Koto 运行在你的电脑上。多个 AI 智能体协同工作——Gemini 2.5 Flash 负责云端推理，Ollama 保障本地隐私。文档、记忆、技能与自动化，全部离线可用。
     </p>
 
     <div class="hero-btns rv">
-      <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener" class="btn btn-dl">
+      <a id="btn-download-hero" href="https://github.com/Loganwon/Koto/releases/latest/download/Koto_v1.1.0_Setup.exe" class="btn btn-dl">
         ⬇&nbsp;<span data-en="Download for Windows (.exe)" data-zh="下载 Windows 安装包（.exe）">下载 Windows 安装包（.exe）</span>
       </a>
       <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener" class="btn btn-ghost">
@@ -418,7 +418,7 @@
               <div class="aw-bubble ai">
                 <span data-en="Based on the document, I found 3 key risk points: ①…②…③…" data-zh="根据文档内容，我发现 3 个关键风险点：①…②…③…">根据文档内容，我发现 3 个关键风险点：①…②…③…</span><span class="aw-cursor"></span>
               </div>
-              <div class="aw-badge" data-en="⚡ Streaming · Gemini 2.0 Flash" data-zh="⚡ 流式输出 · Gemini 2.0 Flash">⚡ 流式输出 · Gemini 2.0 Flash</div>
+              <div class="aw-badge" data-en="⚡ Streaming · Gemini 2.5 Flash" data-zh="⚡ 流式输出 · Gemini 2.5 Flash">⚡ 流式输出 · Gemini 2.5 Flash</div>
             </div>
           </div>
         </div>
@@ -433,10 +433,10 @@
     <div class="dl-banner rv">
       <div class="dl-banner-left">
         <h3 data-en="🖥️ Koto v1.1.0 — Windows Installer" data-zh="🖥️ Koto v1.1.0 — Windows 安装包">🖥️ Koto v1.1.0 — Windows 安装包</h3>
-        <p data-en="One-click install · No Python required · All dependencies bundled · Auto-launch on startup (optional)" data-zh="一键安装 · 无需安装 Python · 包含全部依赖 · 支持开机自启（可选）">一键安装 · 无需安装 Python · 包含全部依赖 · 支持开机自启（可选）</p>
+        <p data-en="One-click install · No Python required · All dependencies bundled · No cloud account needed" data-zh="一键安装 · 无需安装 Python · 包含全部依赖 · 无需云端账号">一键安装 · 无需安装 Python · 包含全部依赖 · 无需云端账号</p>
       </div>
       <div class="dl-banner-right">
-        <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener" class="btn btn-dl">
+        <a href="https://github.com/Loganwon/Koto/releases/latest/download/Koto_v1.1.0_Setup.exe" class="btn btn-dl">
           ⬇&nbsp;<span data-en="Download Installer (.exe)" data-zh="下载安装包（.exe）">下载安装包（.exe）</span>
         </a>
         <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener" class="btn btn-ghost" style="font-size:13px;">
@@ -461,9 +461,9 @@
       <div class="feat-card rv">
         <div class="feat-icon">💬</div>
         <h3 data-en="Multi-model Chat" data-zh="多模型对话">多模型对话</h3>
-        <p data-en="Stream responses from Gemini Flash / Pro (cloud) or any locally-running Ollama model. Switch models per session — your API key, your choice." data-zh="流式调用 Gemini Flash / Pro 云端模型，或本机运行的任意 Ollama 模型。每会话独立切换，API Key 自己掌控。">流式调用 Gemini Flash / Pro 云端模型，或本机运行的任意 Ollama 模型。每会话独立切换，API Key 自己掌控。</p>
+        <p data-en="Stream responses from Gemini 2.5 Flash (cloud) or any locally-running Ollama model. Switch models per session — your API key, your choice." data-zh="流式调用 Gemini 2.5 Flash 云端模型，或本机运行的任意 Ollama 模型。每会话独立切换，API Key 自己掌控。">流式调用 Gemini 2.5 Flash 云端模型，或本机运行的任意 Ollama 模型。每会话独立切换，API Key 自己掌控。</p>
         <div class="feat-tags">
-          <span class="tag">Gemini</span>
+          <span class="tag">Gemini 2.5 Flash</span>
           <span class="tag">Ollama</span>
           <span class="tag" data-en="Streaming" data-zh="流式输出">流式输出</span>
         </div>
@@ -513,6 +513,17 @@
       </div>
 
       <div class="feat-card rv">
+        <div class="feat-icon">🤝</div>
+        <h3 data-en="Multi-Agent Collaboration" data-zh="多智能体协作">多智能体协作</h3>
+        <p data-en="Koto decomposes complex requests across a Planner, Executor, and Skill agents that share memory and hand off sub-tasks. More capable than a single-model chatbot." data-zh="Koto 将复杂请求分解给规划 Agent、执行 Agent 与技能 Agent 协同完成，共享记忆、交接子任务——远超单模型聊天机器人。">Koto 将复杂请求分解给规划 Agent、执行 Agent 与技能 Agent 协同完成，共享记忆、交接子任务——远超单模型聊天机器人。</p>
+        <div class="feat-tags">
+          <span class="tag" data-en="Planner Agent" data-zh="规划智能体">规划智能体</span>
+          <span class="tag" data-en="Task decomposition" data-zh="任务分解">任务分解</span>
+          <span class="tag" data-en="Result synthesis" data-zh="结果汇总">结果汇总</span>
+        </div>
+      </div>
+
+      <div class="feat-card rv">
         <div class="feat-icon">🔁</div>
         <h3 data-en="Automation &amp; Triggers" data-zh="自动化与触发器">自动化与触发器</h3>
         <p data-en="Schedule recurring tasks — daily summaries, file watchers, timed reminders, proactive check-ins. Background jobs run silently without interrupting your work." data-zh="设置定时任务——每日摘要、文件监控、定时提醒、主动问候。后台作业静默运行，不打断工作流。">设置定时任务——每日摘要、文件监控、定时提醒、主动问候。后台作业静默运行，不打断工作流。</p>
@@ -534,13 +545,13 @@
       </div>
 
       <div class="feat-card rv">
-        <div class="feat-icon">🌐</div>
-        <h3 data-en="Web + Desktop Modes" data-zh="Web 与桌面双模式">Web 与桌面双模式</h3>
-        <p data-en="Run as a local web app (browser at localhost:5000) or as a standalone desktop window via PyWebView. Docker Compose included for team or container deployments." data-zh="作为本地 Web 应用运行（浏览器访问 localhost:5000），或通过 PyWebView 以独立桌面窗口运行。内置 Docker Compose，支持容器化部署。">作为本地 Web 应用运行（浏览器访问 localhost:5000），或通过 PyWebView 以独立桌面窗口运行。内置 Docker Compose，支持容器化部署。</p>
+        <div class="feat-icon">🖥️</div>
+        <h3 data-en="Desktop App (Windows)" data-zh="桌面应用（Windows）">桌面应用（Windows）</h3>
+        <p data-en="Runs as a standalone desktop window via PyWebView — no browser needed. One-click Windows installer bundles all dependencies. No cloud account required." data-zh="通过 PyWebView 以独立桌面窗口运行，无需浏览器。Windows 一键安装包内含全部依赖，无需云端账号。">通过 PyWebView 以独立桌面窗口运行，无需浏览器。Windows 一键安装包内含全部依赖，无需云端账号。</p>
         <div class="feat-tags">
-          <span class="tag">Flask</span>
           <span class="tag">PyWebView</span>
-          <span class="tag">Docker</span>
+          <span class="tag">Windows</span>
+          <span class="tag" data-en="No cloud required" data-zh="无需云端">无需云端</span>
         </div>
       </div>
 
@@ -594,7 +605,7 @@
         </div>
       </div>
       <div style="margin-top:28px; text-align:center;">
-        <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener" class="btn btn-dl">
+        <a href="https://github.com/Loganwon/Koto/releases/latest/download/Koto_v1.1.0_Setup.exe" class="btn btn-dl">
           ⬇&nbsp;<span data-en="Download Installer (.exe)" data-zh="下载安装包（.exe）">下载安装包（.exe）</span>
         </a>
       </div>
