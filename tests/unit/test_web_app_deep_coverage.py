@@ -4,7 +4,7 @@
 Deep coverage tests for web/app.py internal classes and functions.
 
 Targets large, under-tested components: KotoBrain, TaskOrchestrator,
-_TrackedModels, _poll_interaction, run_with_timeout, run_with_heartbeat,
+_TrackedModels, run_with_timeout, run_with_heartbeat,
 stream_with_keepalive, LocalDispatcher, auto_save_files, and many more.
 """
 
@@ -199,22 +199,22 @@ class TestTrackedModels:
             resp = tm.generate_content(model="gemini-2.5-flash", contents="hi")
         assert resp.text == "ok"
 
-    def test_generate_content_interactions_only(self):
+    def test_generate_content_interactions_only_passthrough(self):
+        """After refactor, generate_content no longer pre-checks _is_interactions_only;
+        it always delegates to the real SDK's generate_content."""
         tm, real, app = self._make()
-        fake = app._FakeGenerateContentResponse("ia_result")
-        with patch.object(app, "_is_interactions_only", return_value=True), \
-             patch.object(app._TrackedModels, "_call_ia", return_value=fake):
-            resp = tm.generate_content(model="gemini-3-flash-preview", contents="hi")
-        assert resp.text == "ia_result"
+        real.generate_content.return_value = Mock(text="sdk_result", usage_metadata=None)
+        resp = tm.generate_content(model="gemini-3-flash-preview", contents="hi")
+        assert resp.text == "sdk_result"
+        real.generate_content.assert_called_once()
 
-    def test_generate_content_interactions_error_fallback(self):
+    def test_generate_content_error_propagates(self):
+        """After refactor, generate_content no longer catches 'Interactions API required'
+        errors internally; they propagate to the caller."""
         tm, real, app = self._make()
         real.generate_content.side_effect = Exception("Interactions API required")
-        fake = app._FakeGenerateContentResponse("fallback")
-        with patch.object(app, "_is_interactions_only", return_value=False), \
-             patch.object(app._TrackedModels, "_call_ia", return_value=fake):
-            resp = tm.generate_content(model="some-model", contents="hi")
-        assert resp.text == "fallback"
+        with pytest.raises(Exception, match="Interactions API required"):
+            tm.generate_content(model="some-model", contents="hi")
 
     def test_generate_content_non_interactions_error_raises(self):
         tm, real, app = self._make()
@@ -232,14 +232,14 @@ class TestTrackedModels:
         assert len(chunks) == 1
         assert chunks[0].text == "chunk1"
 
-    def test_generate_content_stream_interactions_only(self):
+    def test_generate_content_stream_passthrough(self):
+        """After refactor, generate_content_stream always delegates to the real SDK."""
         tm, real, app = self._make()
-        fake = app._FakeGenerateContentResponse("stream_ia")
-        with patch.object(app, "_is_interactions_only", return_value=True), \
-             patch.object(app._TrackedModels, "_call_ia", return_value=fake):
-            chunks = list(tm.generate_content_stream(model="gemini-3-flash-preview", contents="hi"))
+        chunk = Mock(text="stream_chunk", usage_metadata=None)
+        real.generate_content_stream.return_value = iter([chunk])
+        chunks = list(tm.generate_content_stream(model="gemini-3-flash-preview", contents="hi"))
         assert len(chunks) == 1
-        assert chunks[0].text == "stream_ia"
+        assert chunks[0].text == "stream_chunk"
 
     def test_generate_images_records_usage(self):
         tm, real, app = self._make()
@@ -294,13 +294,14 @@ class TestTrackedModels:
 
 
 # =====================================================================
-# 5. _is_interactions_only / _is_interactions_agent
+# 5. _is_interactions_only
 # =====================================================================
 @pytest.mark.unit
 class TestInteractionsChecks:
     def test_is_interactions_only_known(self):
         app = _import_app()
-        assert app._is_interactions_only("gemini-3-flash-preview") is True
+        # Only deep-research model is in the static default set
+        assert app._is_interactions_only("deep-research-pro-preview-12-2025") is True
 
     def test_is_interactions_only_unknown(self):
         app = _import_app()
@@ -310,25 +311,32 @@ class TestInteractionsChecks:
         app = _import_app()
         assert app._is_interactions_only("deep-research-pro-preview-99") is True
 
-    def test_is_interactions_agent_true(self):
+    def test_is_interactions_only_deep_research_exact(self):
         app = _import_app()
-        assert app._is_interactions_agent("deep-research-pro-preview-12-2025") is True
+        assert app._is_interactions_only("deep-research-pro-preview-12-2025") is True
 
-    def test_is_interactions_agent_prefix(self):
+    def test_is_interactions_only_gemini3_flash_not_static(self):
+        """gemini-3-flash-preview is NOT in the static default set; it may be
+        added dynamically by ModelManager at runtime."""
         app = _import_app()
-        assert app._is_interactions_agent("deep-research-pro-preview-99") is True
+        assert app._is_interactions_only("gemini-3-flash-preview") is False
 
-    def test_is_interactions_agent_false(self):
+    def test_is_interactions_only_gemini3_pro_not_static(self):
+        """gemini-3-pro-preview is NOT in the static default set."""
         app = _import_app()
-        assert app._is_interactions_agent("gemini-3-flash-preview") is False
+        assert app._is_interactions_only("gemini-3-pro-preview") is False
 
-    def test_is_interactions_agent_none(self):
+    def test_is_interactions_only_regular_model_false(self):
         app = _import_app()
-        assert app._is_interactions_agent(None) is False
+        assert app._is_interactions_only("gemini-2.0-flash") is False
 
     def test_is_interactions_only_none(self):
         app = _import_app()
         assert app._is_interactions_only(None) is False
+
+    def test_is_interactions_only_empty_string(self):
+        app = _import_app()
+        assert app._is_interactions_only("") is False
 
 
 # =====================================================================
@@ -473,141 +481,9 @@ class TestStreamWithKeepalive:
 
 
 # =====================================================================
-# 9. _poll_interaction
+# 9–10. _poll_interaction and _extract_interaction_text_global were
+# removed from module level in PR #45; tests removed accordingly.
 # =====================================================================
-@pytest.mark.unit
-class TestPollInteraction:
-    def test_empty_interaction_id(self):
-        app = _import_app()
-        with pytest.raises(RuntimeError):
-            app._poll_interaction(Mock(), "")
-
-    def test_immediate_completion(self):
-        app = _import_app()
-        ia_client = Mock()
-        interaction = Mock()
-        interaction.status = "completed"
-        ia_client.interactions.get.return_value = interaction
-        result = app._poll_interaction(
-            ia_client, "job-123", timeout=10, initial_sleep=0.01
-        )
-        assert result == interaction
-
-    def test_failed_status_raises(self):
-        app = _import_app()
-        ia_client = Mock()
-        interaction = Mock()
-        interaction.status = "failed"
-        interaction.error = "something broke"
-        ia_client.interactions.get.return_value = interaction
-        with pytest.raises(RuntimeError, match="失败"):
-            app._poll_interaction(
-                ia_client, "job-456", timeout=10, initial_sleep=0.01
-            )
-
-    def test_timeout_triggers_cancel(self):
-        app = _import_app()
-        ia_client = Mock()
-        interaction = Mock()
-        interaction.status = "running"
-        ia_client.interactions.get.return_value = interaction
-        with pytest.raises(TimeoutError):
-            app._poll_interaction(
-                ia_client, "job-789", timeout=0.01, initial_sleep=0.005
-            )
-        # Verify cancel was attempted
-        ia_client.interactions.cancel.assert_called_once_with("job-789")
-
-    def test_poll_error_retries(self):
-        app = _import_app()
-        ia_client = Mock()
-        call_count = [0]
-        def side_effect(iid):
-            call_count[0] += 1
-            if call_count[0] < 3:
-                raise ConnectionError("network")
-            m = Mock()
-            m.status = "completed"
-            return m
-        ia_client.interactions.get.side_effect = side_effect
-        with patch("time.sleep"):
-            result = app._poll_interaction(
-                ia_client, "job-retry", timeout=30, initial_sleep=0.01
-            )
-        assert result.status == "completed"
-
-
-# =====================================================================
-# 10. _extract_interaction_text_global
-# =====================================================================
-@pytest.mark.unit
-class TestExtractInteractionTextGlobal:
-    def test_simple_text_attr(self):
-        app = _import_app()
-        interaction = Mock()
-        interaction.outputs = None
-        interaction.text = "hello"
-        interaction.model_dump = None
-        # Remove model_dump
-        del interaction.model_dump
-        result = app._extract_interaction_text_global(interaction)
-        assert "hello" in result
-
-    def test_dict_outputs(self):
-        app = _import_app()
-        interaction = Mock(spec=[])
-        interaction.outputs = [{"output_text": "result from dict"}]
-        result = app._extract_interaction_text_global(interaction)
-        assert "result from dict" in result
-
-    def test_nested_parts(self):
-        app = _import_app()
-        part = Mock()
-        part.text = "nested_part"
-        part.model_dump = None
-        del part.model_dump
-        output = Mock()
-        output.text = None
-        output.parts = [part]
-        output.model_dump = None
-        del output.model_dump
-        interaction = Mock()
-        interaction.outputs = [output]
-        interaction.model_dump = None
-        del interaction.model_dump
-        result = app._extract_interaction_text_global(interaction)
-        assert "nested_part" in result
-
-    def test_dedup(self):
-        app = _import_app()
-        interaction = Mock(spec=[])
-        interaction.outputs = [{"output_text": "dup"}, {"output_text": "dup"}]
-        result = app._extract_interaction_text_global(interaction)
-        assert result.count("dup") == 1
-
-    def test_none_interaction(self):
-        app = _import_app()
-        interaction = Mock(spec=[])
-        interaction.outputs = None
-        result = app._extract_interaction_text_global(interaction)
-        assert result == ""
-
-    def test_pydantic_model_dump(self):
-        app = _import_app()
-        class FakePydantic:
-            outputs = None
-            def model_dump(self):
-                return {"output_text": "pydantic_result"}
-        result = app._extract_interaction_text_global(FakePydantic())
-        assert "pydantic_result" in result
-
-    def test_list_of_strings(self):
-        app = _import_app()
-        interaction = Mock(spec=[])
-        interaction.outputs = ["text_a", "text_b"]
-        result = app._extract_interaction_text_global(interaction)
-        assert "text_a" in result
-        assert "text_b" in result
 
 
 # =====================================================================
