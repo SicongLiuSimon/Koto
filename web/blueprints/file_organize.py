@@ -25,6 +25,7 @@ Routes:
   POST   /api/history/rollback/<op_id>  — Rollback an operation
   GET    /api/history/stats             — Get history statistics
 """
+
 import logging
 import os
 
@@ -39,29 +40,35 @@ file_organize_bp = Blueprint("file_organize", __name__)
 # Lazy helpers – break circular imports with web.app
 # ---------------------------------------------------------------------------
 
+
 def _get_file_organizer():
     from web.app import get_file_organizer
+
     return get_file_organizer()
 
 
 def _get_file_analyzer():
     from web.app import get_file_analyzer
+
     return get_file_analyzer()
 
 
 def _get_batch_ops_manager():
     from web.app import get_batch_ops_manager
+
     return get_batch_ops_manager()
 
 
 def _get_organize_root():
     from web.app import get_organize_root
+
     return get_organize_root()
 
 
 # ---------------------------------------------------------------------------
 # Batch processing API
 # ---------------------------------------------------------------------------
+
 
 @file_organize_bp.route("/api/batch/rename", methods=["POST"])
 def batch_rename():
@@ -103,6 +110,7 @@ def batch_convert():
 # ---------------------------------------------------------------------------
 # Template API
 # ---------------------------------------------------------------------------
+
 
 @file_organize_bp.route("/api/template/list", methods=["GET"])
 def template_list():
@@ -147,6 +155,7 @@ def template_generate():
 # Consistency check API
 # ---------------------------------------------------------------------------
 
+
 @file_organize_bp.route("/api/check/consistency", methods=["POST"])
 def check_consistency():
     """检查文档一致性"""
@@ -168,6 +177,7 @@ def check_consistency():
 # ---------------------------------------------------------------------------
 # Document comparison API
 # ---------------------------------------------------------------------------
+
 
 @file_organize_bp.route("/api/compare/documents", methods=["POST"])
 def compare_documents():
@@ -191,6 +201,7 @@ def compare_documents():
 # ---------------------------------------------------------------------------
 # OCR assistant API
 # ---------------------------------------------------------------------------
+
 
 @file_organize_bp.route("/api/ocr/screenshot", methods=["POST"])
 def ocr_screenshot():
@@ -237,6 +248,7 @@ def ocr_clipboard():
 # ---------------------------------------------------------------------------
 # Operation history API
 # ---------------------------------------------------------------------------
+
 
 @file_organize_bp.route("/api/history/list", methods=["GET"])
 def history_list():
@@ -287,6 +299,7 @@ def history_stats():
 # File download proxy
 # ---------------------------------------------------------------------------
 
+
 @file_organize_bp.route("/api/files/download", methods=["GET"])
 def download_file_proxy():
     """通用的文件下载代理"""
@@ -299,6 +312,7 @@ def download_file_proxy():
 # ---------------------------------------------------------------------------
 # Batch file operations (advanced)
 # ---------------------------------------------------------------------------
+
 
 @file_organize_bp.route("/api/batch/submit", methods=["POST"])
 def batch_submit():
@@ -376,6 +390,7 @@ def batch_stream_job(job_id):
 # ---------------------------------------------------------------------------
 # File organization API
 # ---------------------------------------------------------------------------
+
 
 @file_organize_bp.route("/api/organize/scan-file", methods=["POST"])
 def organize_scan_file():

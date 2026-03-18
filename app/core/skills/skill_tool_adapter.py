@@ -82,7 +82,11 @@ class SkillToolAdapter:
                 continue
 
             # task_type 过滤（空列表 = 所有类型，不过滤）
-            if task_type and skill_def.task_types and task_type not in skill_def.task_types:
+            if (
+                task_type
+                and skill_def.task_types
+                and task_type not in skill_def.task_types
+            ):
                 continue
 
             try:
@@ -96,9 +100,7 @@ class SkillToolAdapter:
                 count += 1
                 logger.debug("[SkillToolAdapter] 注册 Skill 工具: %s", tool_name)
             except Exception as e:
-                logger.debug(
-                    "[SkillToolAdapter] 跳过 Skill '%s': %s", skill_def.id, e
-                )
+                logger.debug("[SkillToolAdapter] 跳过 Skill '%s': %s", skill_def.id, e)
 
         logger.info("[SkillToolAdapter] 共注册 %d 个 Skill 工具", count)
         return count
@@ -125,11 +127,13 @@ class SkillToolAdapter:
         tool_name = cls.PREFIX + skill_id
 
         # ── 描述：组合 description + intent_description + when_not_to_use ────────────────────
-        icon = getattr(skill_def, 'icon', '') or ''
-        description = f"{icon} {skill_def.name}：{skill_def.description or skill_def.name}"
+        icon = getattr(skill_def, "icon", "") or ""
+        description = (
+            f"{icon} {skill_def.name}：{skill_def.description or skill_def.name}"
+        )
         if skill_def.intent_description:
             description += f"\n\n✅ 使用时机：{skill_def.intent_description}"
-        when_not = getattr(skill_def, 'when_not_to_use', '') or ''
+        when_not = getattr(skill_def, "when_not_to_use", "") or ""
         if when_not:
             description += f"\n\n❌ 不要在以下情况使用：{when_not}"
 
@@ -186,17 +190,21 @@ class SkillToolAdapter:
                         return result
                 except Exception as e:
                     import json as _json
+
                     logger.debug(
                         "[SkillToolAdapter] dispatch '%s' 失败，降级为 Prompt 指导: %s",
                         _s_id,
                         e,
                     )
-                    return _json.dumps({
-                        "status": "error",
-                        "skill": _s_id,
-                        "message": f"技能执行出错：{str(e)[:200]}",
-                        "retry_hint": "请检查参数格式是否正确，或补充更多上下文信息后重试",
-                    }, ensure_ascii=False)
+                    return _json.dumps(
+                        {
+                            "status": "error",
+                            "skill": _s_id,
+                            "message": f"技能执行出错：{str(e)[:200]}",
+                            "retry_hint": "请检查参数格式是否正确，或补充更多上下文信息后重试",
+                        },
+                        ensure_ascii=False,
+                    )
 
             # 2. Prompt 指导型：渲染 Skill 的 system prompt 片段并返回
             guidance = _s_def.render_prompt(

@@ -11,6 +11,7 @@ Routes:
   POST   /api/browser/screenshot         — Take a browser screenshot
   POST   /api/open-workspace             — Open the workspace folder in the OS file manager
 """
+
 import logging
 import os
 import subprocess
@@ -19,7 +20,7 @@ import time
 
 from flask import Blueprint, jsonify, request, send_from_directory
 
-from web.shared import WORKSPACE_DIR, PROJECT_ROOT, get_workspace_root
+from web.shared import PROJECT_ROOT, WORKSPACE_DIR, get_workspace_root
 
 _logger = logging.getLogger("koto.routes.workspace")
 

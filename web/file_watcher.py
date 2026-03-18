@@ -9,21 +9,23 @@
     watcher.stop_watch("C:/Users/xxx/Downloads")
     watcher.list_watches()          # 返回正在监控的目录列表
 """
+
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-import logging
 
 # watchdog import — 软依赖，不安装时以 None 标记
 
 logger = logging.getLogger(__name__)
 
 try:
+    from watchdog.events import FileCreatedEvent, FileSystemEventHandler
     from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler, FileCreatedEvent
+
     _WATCHDOG_OK = True
 except ImportError:
     _WATCHDOG_OK = False
@@ -36,9 +38,19 @@ _SETTLE_SECONDS = 2.0
 
 # 支持自动分析的扩展名
 _AUTO_EXTS = {
-    ".doc", ".docx", ".pdf", ".txt", ".csv",
-    ".xlsx", ".xls", ".pptx", ".ppt", ".md",
-    ".zip", ".rar", ".7z",
+    ".doc",
+    ".docx",
+    ".pdf",
+    ".txt",
+    ".csv",
+    ".xlsx",
+    ".xls",
+    ".pptx",
+    ".ppt",
+    ".md",
+    ".zip",
+    ".rar",
+    ".7z",
 }
 
 
@@ -100,8 +112,13 @@ class FileWatcher:
         self._organize_root: Optional[str] = None
         self._on_file_cataloged: Optional[Callable] = None
 
-    def configure(self, analyzer, organizer, organize_root: str,
-                  on_file_cataloged: Optional[Callable] = None):
+    def configure(
+        self,
+        analyzer,
+        organizer,
+        organize_root: str,
+        on_file_cataloged: Optional[Callable] = None,
+    ):
         """注入依赖（FileAnalyzer, FileOrganizer, organize_root 路径）。
         可选 on_file_cataloged(result: dict) 回调，用于 UI 推送通知。
         """
@@ -113,13 +130,20 @@ class FileWatcher:
     def start_watch(self, directory: str) -> Dict[str, Any]:
         """开始监控目录。已在监控则返回已监控状态。"""
         if not _WATCHDOG_OK:
-            return {"success": False, "error": "watchdog 未安装，请先 pip install watchdog"}
+            return {
+                "success": False,
+                "error": "watchdog 未安装，请先 pip install watchdog",
+            }
         directory = str(Path(directory).resolve())
         if not Path(directory).is_dir():
             return {"success": False, "error": f"目录不存在: {directory}"}
         with self._lock:
             if directory in self._watches:
-                return {"success": True, "status": "already_watching", "path": directory}
+                return {
+                    "success": True,
+                    "status": "already_watching",
+                    "path": directory,
+                }
             handler = _CatalogEventHandler(directory, self._handle_new_file)
             observer = Observer()
             observer.schedule(handler, directory, recursive=False)
@@ -156,8 +180,9 @@ class FileWatcher:
             return [
                 {
                     "path": e.path,
-                    "started_at": time.strftime("%Y-%m-%d %H:%M:%S",
-                                                time.localtime(e.started_at)),
+                    "started_at": time.strftime(
+                        "%Y-%m-%d %H:%M:%S", time.localtime(e.started_at)
+                    ),
                     "alive": e.observer.is_alive(),
                 }
                 for e in self._watches.values()

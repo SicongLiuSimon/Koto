@@ -19,6 +19,7 @@ Koto 语音引擎 v2 — 纯本地 Vosk 离线识别
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import struct
@@ -26,7 +27,6 @@ import sys
 import threading
 import time
 from typing import Any, Dict, Generator, Optional
-import logging
 
 # ── 全局单例 ───────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 _model: Any = None
 _model_lock = threading.Lock()
-_stop_flag = False        # 请求停止当前识别流
+_stop_flag = False  # 请求停止当前识别流
 _preload_started = False  # 避免重复后台预加载
 
 
@@ -50,8 +50,8 @@ _MODEL_NAMES = [
 def _find_model_path() -> Optional[str]:
     """在多个候选位置查找 Vosk 中文模型目录。"""
     # 候选根目录
-    here = os.path.dirname(os.path.abspath(__file__))      # web/
-    project_root = os.path.dirname(here)                   # Koto/
+    here = os.path.dirname(os.path.abspath(__file__))  # web/
+    project_root = os.path.dirname(here)  # Koto/
 
     base_dirs = [project_root, here]
 
@@ -85,16 +85,19 @@ def _load_model() -> Any:
             return _model
         try:
             from vosk import Model, SetLogLevel  # type: ignore
-            SetLogLevel(-1)           # 静默 Vosk 日志
+
+            SetLogLevel(-1)  # 静默 Vosk 日志
         except ImportError:
             logger.error("[VoiceEngine] ❌ vosk 包未安装，请运行: pip install vosk")
             return None
 
         path = _find_model_path()
         if not path:
-            logger.error("[VoiceEngine] ❌ 未找到 Vosk 中文模型\n"
+            logger.error(
+                "[VoiceEngine] ❌ 未找到 Vosk 中文模型\n"
                 "  请将 vosk-model-small-cn-0.22 目录放入 models/ 文件夹。\n"
-                "  下载地址: https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip")
+                "  下载地址: https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip"
+            )
             return None
 
         logger.info(f"[VoiceEngine] 正在加载 Vosk 模型: {path}")
@@ -175,7 +178,10 @@ def recognize_stream(
     try:
         import pyaudio  # type: ignore
     except ImportError:
-        yield {"type": "error", "message": "pyaudio 未安装，请运行: pip install pyaudio"}
+        yield {
+            "type": "error",
+            "message": "pyaudio 未安装，请运行: pip install pyaudio",
+        }
         return
 
     model = _load_model()
@@ -198,13 +204,13 @@ def recognize_stream(
 
     # ── 常量 ────────────────────────────────────────────────────────────────
     RATE = 16000
-    CHUNK = 1600            # 100ms 每块（保持循环可中断）
-    SILENCE_LIMIT = 12      # 静音帧数 → 1.2 秒后自动结束
+    CHUNK = 1600  # 100ms 每块（保持循环可中断）
+    SILENCE_LIMIT = 12  # 静音帧数 → 1.2 秒后自动结束
     MAX_WAIT_CHUNKS = int(max_wait * RATE / CHUNK)
     MAX_TOTAL_CHUNKS = int(max_speech * RATE / CHUNK)
 
     rec = KaldiRecognizer(model, RATE)
-    rec.SetWords(False)     # 不需要词级时间戳，节省计算
+    rec.SetWords(False)  # 不需要词级时间戳，节省计算
 
     p: Any = None
     stream: Any = None
@@ -242,7 +248,9 @@ def recognize_stream(
             # 校准噪音基线
             if len(noise_samples) < 20:
                 noise_samples.append(rms)
-                noise_baseline = max(120.0, (sum(noise_samples) / len(noise_samples)) * 1.8)
+                noise_baseline = max(
+                    120.0, (sum(noise_samples) / len(noise_samples)) * 1.8
+                )
 
             is_speech_frame = rms > noise_baseline
 
@@ -298,7 +306,10 @@ def recognize_stream(
         yield {"type": "final", "text": _clean(text), "engine": "vosk"}
 
     except OSError as e:
-        yield {"type": "error", "message": f"麦克风错误: {e}。请确认麦克风已连接并授权访问。"}
+        yield {
+            "type": "error",
+            "message": f"麦克风错误: {e}。请确认麦克风已连接并授权访问。",
+        }
     except Exception as e:
         yield {"type": "error", "message": str(e)}
     finally:

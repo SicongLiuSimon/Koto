@@ -30,15 +30,18 @@ voice_bp = Blueprint("voice_routes", __name__)
 
 # ── lazy imports for app-level globals ────────────────────────────────────────
 
+
 def _get_client():
     """Lazy import to avoid circular dependency with app.py."""
     from web.app import client
+
     return client
 
 
 def _get_types():
     """Lazy import to avoid circular dependency with app.py."""
     from web.app import types
+
     return types
 
 

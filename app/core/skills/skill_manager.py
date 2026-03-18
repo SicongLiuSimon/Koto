@@ -1095,7 +1095,12 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要读取或查看各种类型的文件，需要解析文件内容",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT", "DOC_ANNOTATE"],
         "priority": 61,
-        "executor_tools": ["read_file_snippet", "find_file", "summarize_file", "list_directory"],
+        "executor_tools": [
+            "read_file_snippet",
+            "find_file",
+            "summarize_file",
+            "list_directory",
+        ],
         "plan_template": [
             "识别文件扩展名确定读取策略",
             "路径不确定时用 find_file 定位文件",
@@ -1943,7 +1948,8 @@ class SkillManager:
             if _inject_skill_count >= cls._MAX_ACTIVE_INJECT:
                 logger.debug(
                     "[SkillManager] 注入上限 (%d) 已达，跳过低优先级 Skill: %s",
-                    cls._MAX_ACTIVE_INJECT, skill_id,
+                    cls._MAX_ACTIVE_INJECT,
+                    skill_id,
                 )
                 continue
 
@@ -1963,9 +1969,8 @@ class SkillManager:
             if p:
                 # 注入 plan_template（仅在 prompt 中尚未包含执行步骤时追加，避免重复）
                 pt = (
-                    (getattr(skill_def, "plan_template", None) if skill_def else None)
-                    or s.get("plan_template", [])
-                )
+                    getattr(skill_def, "plan_template", None) if skill_def else None
+                ) or s.get("plan_template", [])
                 if pt and "执行步骤" not in p:
                     p = p + (
                         "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
@@ -2090,8 +2095,7 @@ class SkillManager:
         if synergy_lines:
             separator = "\n\n─────────────────────────────────────────"
             synergy_block = (
-                separator
-                + "\n## 🔗 协同工作说明\n"
+                separator + "\n## 🔗 协同工作说明\n"
                 "以下技能正在协同发挥作用，请在回答中体现它们的互补关系，"
                 "不要重复描述各自的工作流程，而是以整体视角输出统一的结果：\n"
                 + "\n".join(synergy_lines)
@@ -2318,7 +2322,9 @@ class SkillManager:
                             if reg_entry:
                                 reg_entry["prompt"] = skill_def.render_prompt()
                                 reg_entry["plan_template"] = skill_def.plan_template
-                        logger.debug(f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}")
+                        logger.debug(
+                            f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}"
+                        )
                     else:
                         cls._def_registry[skill_def.id] = skill_def
                         entry = {

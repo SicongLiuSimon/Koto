@@ -9,13 +9,16 @@ knowledge_bp = Blueprint("knowledge", __name__)
 # Lazy helpers – avoid circular imports by deferring to web.app at call time
 # ---------------------------------------------------------------------------
 
+
 def _get_kb():
     from web.knowledge_base import KnowledgeBase
+
     return KnowledgeBase()
 
 
 def _get_knowledge_graph():
     from web.app import get_knowledge_graph
+
     return get_knowledge_graph()
 
 

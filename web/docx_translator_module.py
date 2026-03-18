@@ -5,40 +5,82 @@ Word 文档翻译模块 - 格式保留翻译
 读取 .docx 文件，通过 LLM 翻译所有文本，保留原始样式（字体/加粗/颜色/表格/页眉页脚）
 """
 
+import json
+import logging
 import os
 import re
-import json
-from typing import Optional, Callable, Generator
-import logging
-
+from typing import Callable, Generator, Optional
 
 # 语言代码映射（用于文件名后缀和提示语）
 
 logger = logging.getLogger(__name__)
 
 LANG_MAP = {
-    "en": "English", "english": "English", "英文": "English", "英语": "English",
-    "ja": "Japanese", "japanese": "Japanese", "日文": "Japanese", "日语": "Japanese",
-    "ko": "Korean", "korean": "Korean", "韩文": "Korean", "韩语": "Korean",
-    "fr": "French", "french": "French", "法文": "French", "法语": "French",
-    "de": "German", "german": "German", "德文": "German", "德语": "German",
-    "es": "Spanish", "spanish": "Spanish", "西班牙语": "Spanish",
-    "ru": "Russian", "russian": "Russian", "俄文": "Russian", "俄语": "Russian",
-    "ar": "Arabic", "arabic": "Arabic", "阿拉伯语": "Arabic",
-    "zh-cn": "Chinese (Simplified)", "简体中文": "Chinese (Simplified)", "中文": "Chinese (Simplified)",
-    "zh-tw": "Chinese (Traditional)", "繁体中文": "Chinese (Traditional)",
-    "pt": "Portuguese", "portuguese": "Portuguese", "葡萄牙语": "Portuguese",
-    "it": "Italian", "italian": "Italian", "意大利语": "Italian",
-    "vi": "Vietnamese", "vietnamese": "Vietnamese", "越南语": "Vietnamese",
-    "th": "Thai", "thai": "Thai", "泰语": "Thai",
+    "en": "English",
+    "english": "English",
+    "英文": "English",
+    "英语": "English",
+    "ja": "Japanese",
+    "japanese": "Japanese",
+    "日文": "Japanese",
+    "日语": "Japanese",
+    "ko": "Korean",
+    "korean": "Korean",
+    "韩文": "Korean",
+    "韩语": "Korean",
+    "fr": "French",
+    "french": "French",
+    "法文": "French",
+    "法语": "French",
+    "de": "German",
+    "german": "German",
+    "德文": "German",
+    "德语": "German",
+    "es": "Spanish",
+    "spanish": "Spanish",
+    "西班牙语": "Spanish",
+    "ru": "Russian",
+    "russian": "Russian",
+    "俄文": "Russian",
+    "俄语": "Russian",
+    "ar": "Arabic",
+    "arabic": "Arabic",
+    "阿拉伯语": "Arabic",
+    "zh-cn": "Chinese (Simplified)",
+    "简体中文": "Chinese (Simplified)",
+    "中文": "Chinese (Simplified)",
+    "zh-tw": "Chinese (Traditional)",
+    "繁体中文": "Chinese (Traditional)",
+    "pt": "Portuguese",
+    "portuguese": "Portuguese",
+    "葡萄牙语": "Portuguese",
+    "it": "Italian",
+    "italian": "Italian",
+    "意大利语": "Italian",
+    "vi": "Vietnamese",
+    "vietnamese": "Vietnamese",
+    "越南语": "Vietnamese",
+    "th": "Thai",
+    "thai": "Thai",
+    "泰语": "Thai",
 }
 
 # 文件名后缀
 LANG_SUFFIX = {
-    "English": "en", "Japanese": "ja", "Korean": "ko", "French": "fr",
-    "German": "de", "Spanish": "es", "Russian": "ru", "Arabic": "ar",
-    "Chinese (Simplified)": "zh-CN", "Chinese (Traditional)": "zh-TW",
-    "Portuguese": "pt", "Italian": "it", "Vietnamese": "vi", "Thai": "th",
+    "English": "en",
+    "Japanese": "ja",
+    "Korean": "ko",
+    "French": "fr",
+    "German": "de",
+    "Spanish": "es",
+    "Russian": "ru",
+    "Arabic": "ar",
+    "Chinese (Simplified)": "zh-CN",
+    "Chinese (Traditional)": "zh-TW",
+    "Portuguese": "pt",
+    "Italian": "it",
+    "Vietnamese": "vi",
+    "Thai": "th",
 }
 
 
@@ -79,7 +121,8 @@ def _collect_paragraphs(doc):
             first_text_run.text = translated
             for r in runs:
                 if r is not first_text_run and r.text.strip():
-                    r.text = ''
+                    r.text = ""
+
         return setter
 
     def _add(para):
@@ -137,19 +180,20 @@ def _translate_batch_llm(texts: list, target_language: str, llm_client) -> list:
 
     try:
         from google.genai import types as gtypes
+
         resp = llm_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=gtypes.GenerateContentConfig(
                 temperature=0.1,
                 max_output_tokens=8192,
-            )
+            ),
         )
         raw = (resp.text or "").strip()
 
         # 去掉可能的 markdown 代码块包裹
-        raw = re.sub(r'^```[\w]*\n?', '', raw)
-        raw = re.sub(r'```$', '', raw.strip()).strip()
+        raw = re.sub(r"^```[\w]*\n?", "", raw)
+        raw = re.sub(r"```$", "", raw.strip()).strip()
 
         parts = [p.strip() for p in raw.split(_SEP)]
 
@@ -158,7 +202,9 @@ def _translate_batch_llm(texts: list, target_language: str, llm_client) -> list:
             return parts
 
         # 长度不匹配 → 逐条翻译作为兜底
-        logger.warning(f"[DocxTranslator] ⚠️ 长度不匹配 (返回{len(parts)}，期望{len(texts)})，改为逐条翻译")
+        logger.warning(
+            f"[DocxTranslator] ⚠️ 长度不匹配 (返回{len(parts)}，期望{len(texts)})，改为逐条翻译"
+        )
         return _translate_one_by_one(texts, target_language, llm_client)
 
     except Exception as e:
@@ -172,6 +218,7 @@ def _translate_one_by_one(texts: list, target_language: str, llm_client) -> list
     for text in texts:
         try:
             from google.genai import types as gtypes
+
             prompt = (
                 f"Translate the following text to {target_language}.\n"
                 "Return ONLY the translation, nothing else.\n\n"
@@ -180,7 +227,9 @@ def _translate_one_by_one(texts: list, target_language: str, llm_client) -> list
             resp = llm_client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
-                config=gtypes.GenerateContentConfig(temperature=0.1, max_output_tokens=512)
+                config=gtypes.GenerateContentConfig(
+                    temperature=0.1, max_output_tokens=512
+                ),
             )
             translated = (resp.text or "").strip()
             results.append(translated if translated else text)
@@ -210,7 +259,11 @@ def translate_docx_streaming(
     try:
         from docx import Document
     except ImportError:
-        yield {"stage": "error", "message": "缺少 python-docx，请运行 pip install python-docx", "progress": 0}
+        yield {
+            "stage": "error",
+            "message": "缺少 python-docx，请运行 pip install python-docx",
+            "progress": 0,
+        }
         return
 
     # ── 读取文档 ──────────────────────────────────────────────────────────────
@@ -226,7 +279,11 @@ def translate_docx_streaming(
     total = len(items)
 
     if total == 0:
-        yield {"stage": "error", "message": "❌ 文档中没有可翻译的文本内容", "progress": 0}
+        yield {
+            "stage": "error",
+            "message": "❌ 文档中没有可翻译的文本内容",
+            "progress": 0,
+        }
         return
 
     yield {
@@ -238,7 +295,7 @@ def translate_docx_streaming(
     # ── 分批翻译 ──────────────────────────────────────────────────────────────
     translated_count = 0
     for batch_start in range(0, total, batch_size):
-        batch = items[batch_start: batch_start + batch_size]
+        batch = items[batch_start : batch_start + batch_size]
         texts = [item[0] for item in batch]
         setters = [item[1] for item in batch]
 

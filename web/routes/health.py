@@ -69,9 +69,7 @@ def _overall_status(checks: dict) -> str:
     """
     critical = ["disk"]
     any_fail = any(v.get("status") != "ok" for v in checks.values())
-    critical_fail = any(
-        checks.get(k, {}).get("status") != "ok" for k in critical
-    )
+    critical_fail = any(checks.get(k, {}).get("status") != "ok" for k in critical)
     if critical_fail:
         return "unhealthy"
     if any_fail:
@@ -163,8 +161,33 @@ def ping_cloud():
         t0 = time.monotonic()
         requests.head(target_url, timeout=5, allow_redirects=False)
         latency_ms = round((time.monotonic() - t0) * 1000)
-        return jsonify({"reachable": True, "latency_ms": latency_ms, "target": target_url}), 200
+        return (
+            jsonify(
+                {"reachable": True, "latency_ms": latency_ms, "target": target_url}
+            ),
+            200,
+        )
     except requests.exceptions.Timeout:
-        return jsonify({"reachable": False, "latency_ms": None, "error": "timeout", "target": target_url}), 200
+        return (
+            jsonify(
+                {
+                    "reachable": False,
+                    "latency_ms": None,
+                    "error": "timeout",
+                    "target": target_url,
+                }
+            ),
+            200,
+        )
     except Exception as exc:
-        return jsonify({"reachable": False, "latency_ms": None, "error": str(exc), "target": target_url}), 200
+        return (
+            jsonify(
+                {
+                    "reachable": False,
+                    "latency_ms": None,
+                    "error": str(exc),
+                    "target": target_url,
+                }
+            ),
+            200,
+        )

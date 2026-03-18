@@ -1,11 +1,11 @@
+import concurrent.futures
 import logging
 import os
-import time
-import logging
 import queue
 import threading
-import concurrent.futures
+import time
 from typing import Any, Dict, Generator, List, Optional, Union
+
 from .base import LLMProvider
 
 try:
@@ -21,9 +21,11 @@ logger = logging.getLogger(__name__)
 # Must be routed through rc.interactions.create(agent=...) instead.
 # NOTE: gemini-3-flash-preview and gemini-3-pro-preview are regular models
 # (use generate_content). Only deep-research-* are actual Interactions API agents.
-_INTERACTIONS_ONLY_MODELS: frozenset = frozenset({
-    "deep-research-pro-preview-12-2025",  # Research agent: Interactions API only
-})
+_INTERACTIONS_ONLY_MODELS: frozenset = frozenset(
+    {
+        "deep-research-pro-preview-12-2025",  # Research agent: Interactions API only
+    }
+)
 # No background=True restriction needed for current interactions models
 _NO_BACKGROUND_MODELS: frozenset = frozenset()
 
@@ -109,7 +111,7 @@ class GeminiProvider(LLMProvider):
 
     def _call_with_retry(self, model: str, contents, config):
         """Call generate_content with exponential backoff retry on 429/503.
-        
+
         每次调用在独立线程中执行，若超过 CALL_TIMEOUT 秒无响应则抛出
         TimeoutError（消息含 "timed out"），触发上层本地模型兜底逻辑。
         """
@@ -366,12 +368,15 @@ class GeminiProvider(LLMProvider):
         try:
             import httpx
             from google.genai._api_client import HttpOptions as _HttpOptions
+
             http_client = httpx.Client(
                 timeout=httpx.Timeout(300.0, connect=30.0), verify=True
             )
             rc = genai.Client(
                 api_key=self.api_key,
-                http_options=_HttpOptions(api_version="v1beta", httpx_client=http_client),
+                http_options=_HttpOptions(
+                    api_version="v1beta", httpx_client=http_client
+                ),
             )
         except Exception:
             rc = self.client
@@ -415,6 +420,7 @@ class GeminiProvider(LLMProvider):
             # Interactions API has no token-level streaming; emit as a single chunk
             def _single_chunk():
                 yield {"content": text, "finish_reason": "stop"}
+
             return _single_chunk()
 
         return {"content": text, "tool_calls": [], "usage": {}}
@@ -430,14 +436,11 @@ class GeminiProvider(LLMProvider):
             return str(obj.text)
         if hasattr(obj, "parts"):
             return " ".join(
-                str(p.text)
-                for p in (obj.parts or [])
-                if hasattr(p, "text") and p.text
+                str(p.text) for p in (obj.parts or []) if hasattr(p, "text") and p.text
             )
         if hasattr(obj, "outputs"):
             texts = [
-                GeminiProvider._get_interactions_text(o)
-                for o in (obj.outputs or [])
+                GeminiProvider._get_interactions_text(o) for o in (obj.outputs or [])
             ]
             return "\n".join(t for t in texts if t)
         return ""
@@ -454,6 +457,8 @@ class GeminiProvider(LLMProvider):
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if content:
-                label = "\u52a9\u624b" if role in ("assistant", "model") else "\u7528\u6237"
+                label = (
+                    "\u52a9\u624b" if role in ("assistant", "model") else "\u7528\u6237"
+                )
                 lines.append(f"{label}: {content}")
         return "\n".join(lines)

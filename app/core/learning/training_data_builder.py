@@ -728,6 +728,7 @@ class TrainingDataBuilder:
         base_model = None
         try:
             from app.core.routing.local_model_router import LocalModelRouter
+
             base_model = LocalModelRouter.pick_best_chat_model(models)
         except Exception:
             pass

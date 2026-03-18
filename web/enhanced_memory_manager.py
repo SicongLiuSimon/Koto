@@ -6,21 +6,20 @@
 """
 
 import json
+import logging
 import math
 import os
-import time
 import threading
-from typing import List, Dict, Optional, Tuple
-from datetime import datetime, timedelta
+import time
 from collections import defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import logging
-
 
 logger = logging.getLogger(__name__)
+
 
 class UserProfile:
     """用户画像：综合理解用户特征"""
@@ -200,6 +199,7 @@ class UserProfile:
 # 持续在后台通过 LLM + ShadowWatcher 观察数据自动更新，无感知、零延迟。
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class PersonalityMatrix:
     """
     动态个人记忆矩阵 — 四维度持续学习用户个性：
@@ -218,18 +218,18 @@ class PersonalityMatrix:
 
     _DEFAULT_DATA: Dict = {
         "cognitive": {
-            "exploratory": 0.5,   # 探索型：喜欢发散思维、追问机制
-            "executor":    0.5,   # 执行型：聚焦动手完成任务
-            "analytical":  0.5,   # 分析型：偏好逻辑推导和比较
-            "creative":    0.5,   # 创意型：喜欢头脑风暴和想象
+            "exploratory": 0.5,  # 探索型：喜欢发散思维、追问机制
+            "executor": 0.5,  # 执行型：聚焦动手完成任务
+            "analytical": 0.5,  # 分析型：偏好逻辑推导和比较
+            "creative": 0.5,  # 创意型：喜欢头脑风暴和想象
         },
-        "expertise":      {},     # {域名: 分值 0–1}，如 "编程开发": 0.82
-        "goals":          [],     # 近期目标（最多 10 条）
-        "recent_themes":  [],     # 近期高频话题（最多 10 条）
+        "expertise": {},  # {域名: 分值 0–1}，如 "编程开发": 0.82
+        "goals": [],  # 近期目标（最多 10 条）
+        "recent_themes": [],  # 近期高频话题（最多 10 条）
         "values": {
-            "efficiency": 0.5,    # 效率倾向（vs. 质量/深度）
-            "depth":      0.5,    # 深度倾向（vs. 宽度/速度）
-            "formality":  0.5,    # 正式程度偏好
+            "efficiency": 0.5,  # 效率倾向（vs. 质量/深度）
+            "depth": 0.5,  # 深度倾向（vs. 宽度/速度）
+            "formality": 0.5,  # 正式程度偏好
         },
         "last_updated": None,
     }
@@ -256,6 +256,7 @@ class PersonalityMatrix:
 
     def _load(self) -> Dict:
         import copy
+
         default = copy.deepcopy(self._DEFAULT_DATA)
         if os.path.exists(self._path):
             try:
@@ -297,8 +298,10 @@ class PersonalityMatrix:
             dominant = max(cog, key=lambda k: cog[k])
             if cog[dominant] > 0.55:
                 labels = {
-                    "exploratory": "探索", "executor": "执行",
-                    "analytical": "分析", "creative": "创意",
+                    "exploratory": "探索",
+                    "executor": "执行",
+                    "analytical": "分析",
+                    "creative": "创意",
                 }
                 parts.append(f"思维风格：{labels.get(dominant, dominant)}")
 
@@ -306,7 +309,8 @@ class PersonalityMatrix:
         expertise = self.data.get("expertise", {})
         if expertise:
             top3 = [
-                t[0] for t in sorted(expertise.items(), key=lambda x: -x[1])[:3]
+                t[0]
+                for t in sorted(expertise.items(), key=lambda x: -x[1])[:3]
                 if t[1] > 0.2
             ]
             if top3:
@@ -375,6 +379,7 @@ class PersonalityMatrix:
         """
         try:
             from app.core.monitoring.shadow_watcher import ShadowWatcher
+
             obs = ShadowWatcher.get().get_observations()
         except Exception:
             return
@@ -395,9 +400,7 @@ class PersonalityMatrix:
         # ── recent_themes: 7 天窗口高频话题 ──────────────────────────────
         recent_7d: Dict[str, int] = obs.get("recent_topics_7d", {})
         if recent_7d:
-            top5 = [
-                t for t, _ in sorted(recent_7d.items(), key=lambda x: -x[1])[:5]
-            ]
+            top5 = [t for t, _ in sorted(recent_7d.items(), key=lambda x: -x[1])[:5]]
             self.data["recent_themes"] = top5
 
         # ── cognitive: 任务风格分布 → 风格维度 EMA ──────────────────────
@@ -406,9 +409,9 @@ class PersonalityMatrix:
         if task_types:
             total = sum(task_types.values()) or 1
             mapping = {
-                "executor":    task_types.get("执行", 0) / total,
-                "analytical":  task_types.get("分析", 0) / total,
-                "creative":    task_types.get("创作", 0) / total,
+                "executor": task_types.get("执行", 0) / total,
+                "analytical": task_types.get("分析", 0) / total,
+                "creative": task_types.get("创作", 0) / total,
                 "exploratory": task_types.get("问答", 0) / total,
             }
             alpha = 0.10
@@ -423,11 +426,15 @@ class PersonalityMatrix:
             vals = self.data["values"]
             # polite_ratio 高 → formality 偏高
             polite = conv_style.get("polite_ratio", 0.5)
-            vals["formality"] = round(vals.get("formality", 0.5) * (1 - alpha) + polite * alpha, 3)
+            vals["formality"] = round(
+                vals.get("formality", 0.5) * (1 - alpha) + polite * alpha, 3
+            )
             # avg_query_len > 80 字 → 深度倾向
             avg_len = conv_style.get("avg_query_len", 50)
             depth_signal = min(1.0, avg_len / 160)
-            vals["depth"] = round(vals.get("depth", 0.5) * (1 - alpha) + depth_signal * alpha, 3)
+            vals["depth"] = round(
+                vals.get("depth", 0.5) * (1 - alpha) + depth_signal * alpha, 3
+            )
 
     def _llm_update(self, user_msg: str, ai_msg: str, llm_fn):
         """用 LLM 分析单轮对话，提取 cognitive_hint / goal / interest。"""
@@ -462,7 +469,9 @@ class PersonalityMatrix:
                         cog[k] = round(cog[k] * (1 - alpha) + 0.9 * alpha, 3)
                     else:
                         # 其他维度温和回归中值
-                        cog[k] = round(cog[k] * (1 - alpha * 0.3) + 0.45 * alpha * 0.3, 3)
+                        cog[k] = round(
+                            cog[k] * (1 - alpha * 0.3) + 0.45 * alpha * 0.3, 3
+                        )
 
             # goal → 追加至目标列表（去重，最多 10 条）
             goal = (parsed.get("goal") or "").strip()
@@ -485,7 +494,7 @@ class PersonalityMatrix:
 
 
 # ── 记忆生命周期管理（GC）常量 ──────────────────────────────────────────────────
-_GC_STALE_DAYS: int = 90        # 未被访问的自动提取记忆超过此天数将被清理
+_GC_STALE_DAYS: int = 90  # 未被访问的自动提取记忆超过此天数将被清理
 _GC_MAX_PER_CATEGORY: int = 150  # 单类别记忆条数上限（超出时保留最新 + 用户手动）
 
 _PERSONALITY_MATRIX_PATH = "config/personality_matrix.json"
@@ -521,7 +530,10 @@ class PersonalityMatrix:
                     saved = json.load(f)
                 # 补全缺失键，保证结构完整
                 return {
-                    "cognitive": {**self._DEFAULT_COGNITIVE, **saved.get("cognitive", {})},
+                    "cognitive": {
+                        **self._DEFAULT_COGNITIVE,
+                        **saved.get("cognitive", {}),
+                    },
                     "expertise": saved.get("expertise", {}),
                     "goals": saved.get("goals", []),
                     "recent_themes": saved.get("recent_themes", []),
@@ -594,7 +606,7 @@ class PersonalityMatrix:
                 prompt = (
                     "请根据以下对话片段，提取用户的个人特征，以 JSON 格式返回，"
                     "不要包含任何其他文字：\n"
-                    f'用户: {user_msg[:400]}\nAI: {ai_msg[:400]}\n\n'
+                    f"用户: {user_msg[:400]}\nAI: {ai_msg[:400]}\n\n"
                     "返回格式（所有字段可选，无法判断时留空/省略）：\n"
                     '{"cognitive":{"exploratory":0.0-1.0,"executor":0.0-1.0,'
                     '"analytical":0.0-1.0,"creative":0.0-1.0},'
@@ -608,6 +620,7 @@ class PersonalityMatrix:
 
                 # 提取 JSON 块
                 import re
+
                 m = re.search(r"\{.*\}", raw, re.DOTALL)
                 if not m:
                     return
@@ -618,17 +631,23 @@ class PersonalityMatrix:
                 for k, v in new_cog.items():
                     if isinstance(v, (int, float)):
                         old = instance.data["cognitive"].get(k, 0.5)
-                        instance.data["cognitive"][k] = round(0.85 * old + 0.15 * float(v), 4)
+                        instance.data["cognitive"][k] = round(
+                            0.85 * old + 0.15 * float(v), 4
+                        )
 
                 # ── 软更新专长（α=0.2）──
                 new_exp = extracted.get("expertise", {})
                 for topic, score in new_exp.items():
                     if isinstance(score, (int, float)) and topic:
                         old = instance.data["expertise"].get(topic, 0.0)
-                        instance.data["expertise"][topic] = round(0.80 * old + 0.20 * float(score), 4)
+                        instance.data["expertise"][topic] = round(
+                            0.80 * old + 0.20 * float(score), 4
+                        )
                 # 专长超过 30 条时删最低分
                 if len(instance.data["expertise"]) > 30:
-                    sorted_exp = sorted(instance.data["expertise"].items(), key=lambda x: x[1])
+                    sorted_exp = sorted(
+                        instance.data["expertise"].items(), key=lambda x: x[1]
+                    )
                     instance.data["expertise"] = dict(sorted_exp[5:])  # 删最低 5 条
 
                 # ── 滚动追加目标（最多保留 10 条）──
@@ -648,7 +667,9 @@ class PersonalityMatrix:
             except Exception as e:
                 logger.warning(f"[PersonalityMatrix] ⚠️ 后台更新失败: {e}")
 
-        t = threading.Thread(target=_worker, daemon=True, name="PersonalityMatrix-update")
+        t = threading.Thread(
+            target=_worker, daemon=True, name="PersonalityMatrix-update"
+        )
         t.start()
 
 
@@ -669,7 +690,7 @@ class EnhancedMemoryManager:
         self.summaries: Dict[str, Dict] = {}
         self.vector_memories: List[Dict] = []
         self.user_profile = UserProfile(profile_path)
-        self.personality_matrix = PersonalityMatrix()   # 动态个人记忆矩阵
+        self.personality_matrix = PersonalityMatrix()  # 动态个人记忆矩阵
         self._embedding_fn = None
         self._generate_fn = None
         self._memory_rag = None  # 专用 FAISS 记庆索引（懒加载）
@@ -681,7 +702,9 @@ class EnhancedMemoryManager:
         logger.info(f"[EnhancedMemory] ✅ 记庆系统已启动")
         logger.info(f"[EnhancedMemory] 📊 当前记庆数：{len(self.memories)}")
         logger.info(f"[EnhancedMemory] 🧠 向量记庆数：{len(self.vector_memories)}")
-        logger.info(f"[EnhancedMemory] 👤 用户画像：{self.user_profile.get_brief_summary()}")
+        logger.info(
+            f"[EnhancedMemory] 👤 用户画像：{self.user_profile.get_brief_summary()}"
+        )
         # 首次启动时如果 FAISS 记庆索引为空，自动从 memories.json 迁移建索
         self._rebuild_memory_rag_if_needed()
         # 异步执行记忆生命周期 GC（不阻塞启动）
@@ -766,8 +789,10 @@ class EnhancedMemoryManager:
                     index_dir="config/memory_rag_index",
                     auto_load=True,
                 )
-                logger.info(f"[EnhancedMemory] 🧠 记庆 FAISS 索引已加载 "
-                    f"({self._memory_rag.stats().get('doc_count', 0)} chunks)")
+                logger.info(
+                    f"[EnhancedMemory] 🧠 记庆 FAISS 索引已加载 "
+                    f"({self._memory_rag.stats().get('doc_count', 0)} chunks)"
+                )
             except Exception as e:
                 logger.warning(f"[EnhancedMemory] ⚠️  FAISS 记庆索引初始化失败: {e}")
                 self._memory_rag = False  # 哨兵局量：不再重试
@@ -791,7 +816,9 @@ class EnhancedMemoryManager:
                 stats = rag.stats()
                 if stats.get("initialized") and stats.get("doc_count", 0) > 0:
                     return  # 已有索引，无需重建
-                logger.info(f"[EnhancedMemory] 🔨 首次构建记庆向量索引（{len(self.memories)} 条）...")
+                logger.info(
+                    f"[EnhancedMemory] 🔨 首次构建记庆向量索引（{len(self.memories)} 条）..."
+                )
                 for m in self.memories:
                     content = (m.get("content") or "").strip()
                     mem_id = m.get("id", 0)
@@ -827,6 +854,7 @@ class EnhancedMemoryManager:
     def run_gc(self) -> None:
         """异步启动记忆生命周期 GC（不阻塞主线程）。"""
         import threading
+
         threading.Thread(target=self._gc_stale, daemon=True).start()
 
     def _gc_stale(self) -> int:
@@ -892,8 +920,13 @@ class EnhancedMemoryManager:
             )
         return total
 
-    def add_memory(self, content: str, category: str = "user_preference",
-                   source: str = "user", metadata: Optional[Dict] = None) -> Optional[Dict]:
+    def add_memory(
+        self,
+        content: str,
+        category: str = "user_preference",
+        source: str = "user",
+        metadata: Optional[Dict] = None,
+    ) -> Optional[Dict]:
         """添加记忆（含去重检查）"""
         content = (content or "").strip()
         if not content:
@@ -992,7 +1025,9 @@ class EnhancedMemoryManager:
 
         if extracted["profile_updates"]:
             self.user_profile.update_from_extraction(extracted["profile_updates"])
-            logger.info(f"[EnhancedMemory] 🔄 关键词学习：{list(extracted['profile_updates'].keys())}")
+            logger.info(
+                f"[EnhancedMemory] 🔄 关键词学习：{list(extracted['profile_updates'].keys())}"
+            )
 
     def auto_extract_from_conversation(
         self, user_msg: str, ai_msg: str, history: Optional[List] = None
@@ -1038,7 +1073,9 @@ class EnhancedMemoryManager:
                     self.user_profile.update_from_extraction(
                         extracted["profile_updates"]
                     )
-                    logger.info(f"[EnhancedMemory] 🔄 LLM学习：{list(extracted['profile_updates'].keys())}")
+                    logger.info(
+                        f"[EnhancedMemory] 🔄 LLM学习：{list(extracted['profile_updates'].keys())}"
+                    )
 
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning(f"[EnhancedMemory] ⚠️  LLM提取失败，降级关键词: {e}")
@@ -1212,9 +1249,10 @@ class EnhancedMemoryManager:
         except Exception as e:
             logger.info(f"[EnhancedMemory] 向量检索失败: {e}")
             return []
-    
-    def search_memories(self, query: str, limit: int = 5,
-                        boost_categories: Optional[List[str]] = None) -> List[Dict]:
+
+    def search_memories(
+        self, query: str, limit: int = 5, boost_categories: Optional[List[str]] = None
+    ) -> List[Dict]:
         """搜索相关记忆（置信度感知 + 类别优先 + 关键词匹配）"""
         if not query:
             return []
@@ -1344,7 +1382,9 @@ class EnhancedMemoryManager:
 
     def update_personality_async(self, user_msg: str, ai_msg: str, llm_fn):
         """非阻塞触发 PersonalityMatrix 更新，在 _start_memory_extraction 中调用。"""
-        PersonalityMatrix.update_async(user_msg, ai_msg, llm_fn, self.personality_matrix)
+        PersonalityMatrix.update_async(
+            user_msg, ai_msg, llm_fn, self.personality_matrix
+        )
 
     def get_compact_memory_snapshot(self, max_chars: int = 200) -> str:
         """返回适合注入本地模型（Ollama）上下文的精简记忆摘要（≤max_chars字符）。
@@ -1358,8 +1398,10 @@ class EnhancedMemoryManager:
             dominant = max(cog, key=lambda k: cog[k])
             if cog[dominant] > 0.55:
                 labels = {
-                    "exploratory": "探索", "executor": "执行",
-                    "analytical": "分析", "creative": "创意",
+                    "exploratory": "探索",
+                    "executor": "执行",
+                    "analytical": "分析",
+                    "creative": "创意",
                 }
                 parts.append(f"风格:{labels.get(dominant, dominant)}")
 

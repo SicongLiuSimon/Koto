@@ -1,19 +1,20 @@
 """
 指定路径文件夹自动归纳 + 归纳清单生成（含发送者/来源人线索）
 """
+
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import logging
-
 
 logger = logging.getLogger(__name__)
+
 
 class FolderCatalogOrganizer:
     """对指定文件夹执行批量归纳，并输出带发送者线索的清单。"""
@@ -23,7 +24,9 @@ class FolderCatalogOrganizer:
         self.analyzer = analyzer
         self.organizer = organizer
 
-    def organize_folder(self, source_dir: str, recursive: bool = True, ext_filters: list = None) -> Dict[str, Any]:
+    def organize_folder(
+        self, source_dir: str, recursive: bool = True, ext_filters: list = None
+    ) -> Dict[str, Any]:
         source_path = Path(source_dir)
         if not source_path.exists() or not source_path.is_dir():
             return {
@@ -31,7 +34,9 @@ class FolderCatalogOrganizer:
                 "error": f"目录不存在: {source_dir}",
             }
 
-        files = list(source_path.rglob("*")) if recursive else list(source_path.glob("*"))
+        files = (
+            list(source_path.rglob("*")) if recursive else list(source_path.glob("*"))
+        )
         files = [f for f in files if f.is_file()]
         # Skip Word temp files
         files = [f for f in files if not f.name.startswith("~$")]
@@ -54,14 +59,18 @@ class FolderCatalogOrganizer:
         for file_path in files:
             try:
                 analysis = self.analyzer.analyze_file(str(file_path))
-                suggested_folder = analysis.get("suggested_folder") or "other/uncategorized"
+                suggested_folder = (
+                    analysis.get("suggested_folder") or "other/uncategorized"
+                )
 
                 sender_info = self._extract_sender_info(file_path)
                 metadata = {
                     "sender": sender_info.get("sender"),
                     "sender_source": sender_info.get("sender_source"),
                     "office_creator": sender_info.get("office_creator"),
-                    "office_last_modified_by": sender_info.get("office_last_modified_by"),
+                    "office_last_modified_by": sender_info.get(
+                        "office_last_modified_by"
+                    ),
                 }
 
                 result = self.organizer.organize_file(
@@ -80,7 +89,9 @@ class FolderCatalogOrganizer:
                             from web.file_fields_extractor import extract_fields as _ef
                         except ImportError:
                             from file_fields_extractor import extract_fields as _ef
-                        key_fields = _ef(file_path.name, _content_preview, file_path.suffix.lower())
+                        key_fields = _ef(
+                            file_path.name, _content_preview, file_path.suffix.lower()
+                        )
                     except Exception:
                         pass
 
@@ -91,6 +102,7 @@ class FolderCatalogOrganizer:
                     if dest_file:
                         try:
                             from app.core.file.file_registry import get_file_registry
+
                             _reg = get_file_registry()
                             _reg.delete(str(file_path))
                             _reg.register(
@@ -110,37 +122,42 @@ class FolderCatalogOrganizer:
                         file_path.name, key_fields
                     )
 
-                entries.append({
-                    "file_name": file_path.name,
-                    "source_path": str(file_path),
-                    "suggested_folder": suggested_folder,
-                    "sender": sender_info.get("sender") or "未知",
-                    "sender_source": sender_info.get("sender_source") or "unknown",
-                    "organized": bool(result.get("success")),
-                    "organized_path": result.get("dest_file") or "",
-                    "error": result.get("error") or "",
-                    "summary": (key_fields or {}).get("summary", ""),
-                    "amounts": (key_fields or {}).get("amounts", []),
-                    "deadline_reminders": deadline_reminders,
-                })
+                entries.append(
+                    {
+                        "file_name": file_path.name,
+                        "source_path": str(file_path),
+                        "suggested_folder": suggested_folder,
+                        "sender": sender_info.get("sender") or "未知",
+                        "sender_source": sender_info.get("sender_source") or "unknown",
+                        "organized": bool(result.get("success")),
+                        "organized_path": result.get("dest_file") or "",
+                        "error": result.get("error") or "",
+                        "summary": (key_fields or {}).get("summary", ""),
+                        "amounts": (key_fields or {}).get("amounts", []),
+                        "deadline_reminders": deadline_reminders,
+                    }
+                )
             except Exception as e:
                 failed_count += 1
-                entries.append({
-                    "file_name": file_path.name,
-                    "source_path": str(file_path),
-                    "suggested_folder": "other/uncategorized",
-                    "sender": "未知",
-                    "sender_source": "unknown",
-                    "organized": False,
-                    "organized_path": "",
-                    "error": str(e),
-                })
+                entries.append(
+                    {
+                        "file_name": file_path.name,
+                        "source_path": str(file_path),
+                        "suggested_folder": "other/uncategorized",
+                        "sender": "未知",
+                        "sender_source": "unknown",
+                        "organized": False,
+                        "organized_path": "",
+                        "error": str(e),
+                    }
+                )
 
         report_paths = self._write_reports(str(source_path), entries)
 
         # ── 归纳完成后：异步将新训练样本纳入 TrainingDataBuilder 并推送 Ollama ──
         # 用 daemon 线程，不阻塞主流程和 UI 响应
         import threading as _threading
+
         _threading.Thread(
             target=self._flush_training_samples_to_ollama,
             kwargs={"verbose": True},
@@ -162,11 +179,21 @@ class FolderCatalogOrganizer:
     @staticmethod
     def _register_deadline_reminders(file_name: str, key_fields: dict) -> list:
         """解析 key_fields 中的日期，为未来日期创建系统提醒。返回创建的提醒 id 列表。"""
-        from datetime import datetime as _dt
         import re as _re
+        from datetime import datetime as _dt
+
         created = []
         # 到期/截止/付款相关关键词才注册提醒
-        _DEADLINE_LABELS = {"到期", "截止", "付款", "交货", "汇款", "合同期", "履行", "deadline"}
+        _DEADLINE_LABELS = {
+            "到期",
+            "截止",
+            "付款",
+            "交货",
+            "汇款",
+            "合同期",
+            "履行",
+            "deadline",
+        }
         for d in key_fields.get("dates", []):
             label = d.get("label", "")
             value = d.get("value", "")
@@ -199,7 +226,13 @@ class FolderCatalogOrganizer:
         """归纳结束后，将 file_classify_samples.jsonl 合入全量训练集并推送到 Ollama。"""
         try:
             from pathlib import Path as _P
-            _sample_file = _P(__file__).parent.parent / "config" / "training_data" / "file_classify_samples.jsonl"
+
+            _sample_file = (
+                _P(__file__).parent.parent
+                / "config"
+                / "training_data"
+                / "file_classify_samples.jsonl"
+            )
             if not _sample_file.exists() or _sample_file.stat().st_size == 0:
                 if verbose:
                     logger.warning("[CatalogOrganizer] ⚠️ 无新分类训练样本，跳过推送")
@@ -208,12 +241,17 @@ class FolderCatalogOrganizer:
                 from app.core.learning.training_data_builder import TrainingDataBuilder
             except ImportError:
                 if verbose:
-                    logger.warning("[CatalogOrganizer] ⚠️ TrainingDataBuilder 不可用，跳过推送")
+                    logger.warning(
+                        "[CatalogOrganizer] ⚠️ TrainingDataBuilder 不可用，跳过推送"
+                    )
                 return
             if verbose:
                 import os
+
                 n = sum(1 for _ in open(_sample_file, encoding="utf-8"))
-                logger.info(f"[CatalogOrganizer] 🧠 构建训练集（含 {n} 条新分类样本）并推送 Ollama...")
+                logger.info(
+                    f"[CatalogOrganizer] 🧠 构建训练集（含 {n} 条新分类样本）并推送 Ollama..."
+                )
             result = TrainingDataBuilder.build_all(
                 include_routing=False,
                 include_chat=False,
@@ -225,10 +263,14 @@ class FolderCatalogOrganizer:
             )
             if verbose:
                 stats = result.get("stats", {})
-                logger.info(f"[CatalogOrganizer] ✅ 训练集已更新: {stats.get('total', 0)} 条样本，文件: {result.get('full_file', '')}")
+                logger.info(
+                    f"[CatalogOrganizer] ✅ 训练集已更新: {stats.get('total', 0)} 条样本，文件: {result.get('full_file', '')}"
+                )
         except Exception as _e:
             if verbose:
-                logger.warning(f"[CatalogOrganizer] ⚠️ 训练集推送失败（不影响归纳）: {_e}")
+                logger.warning(
+                    f"[CatalogOrganizer] ⚠️ 训练集推送失败（不影响归纳）: {_e}"
+                )
 
     def _extract_sender_info(self, file_path: Path) -> Dict[str, Optional[str]]:
         ext = file_path.suffix.lower()
@@ -281,7 +323,9 @@ class FolderCatalogOrganizer:
                 return value
         return None
 
-    def _extract_office_author(self, file_path: Path) -> tuple[Optional[str], Optional[str]]:
+    def _extract_office_author(
+        self, file_path: Path
+    ) -> tuple[Optional[str], Optional[str]]:
         creator = None
         last_modified_by = None
         try:
@@ -290,9 +334,13 @@ class FolderCatalogOrganizer:
                     return None, None
                 xml = zf.read("docProps/core.xml").decode("utf-8", errors="ignore")
                 m_creator = re.search(r"<dc:creator>(.*?)</dc:creator>", xml)
-                m_modified = re.search(r"<cp:lastModifiedBy>(.*?)</cp:lastModifiedBy>", xml)
+                m_modified = re.search(
+                    r"<cp:lastModifiedBy>(.*?)</cp:lastModifiedBy>", xml
+                )
                 creator = (m_creator.group(1).strip() if m_creator else None) or None
-                last_modified_by = (m_modified.group(1).strip() if m_modified else None) or None
+                last_modified_by = (
+                    m_modified.group(1).strip() if m_modified else None
+                ) or None
         except Exception:
             return None, None
         return creator, last_modified_by
@@ -309,7 +357,9 @@ class FolderCatalogOrganizer:
             return None
         return None
 
-    def _write_reports(self, source_dir: str, entries: List[Dict[str, Any]]) -> Dict[str, str]:
+    def _write_reports(
+        self, source_dir: str, entries: List[Dict[str, Any]]
+    ) -> Dict[str, str]:
         report_dir = self.organize_root / "_reports"
         report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -347,8 +397,14 @@ class FolderCatalogOrganizer:
             sender = self._md_escape(item.get("sender", "未知"))
             sender_source = self._md_escape(item.get("sender_source", "unknown"))
             folder = self._md_escape(item.get("suggested_folder", ""))
-            status = "✅" if item.get("organized") else f"❌ {self._md_escape(item.get('error', ''))}"
-            lines.append(f"| {file_name} | {sender} | {sender_source} | {folder} | {status} |")
+            status = (
+                "✅"
+                if item.get("organized")
+                else f"❌ {self._md_escape(item.get('error', ''))}"
+            )
+            lines.append(
+                f"| {file_name} | {sender} | {sender_source} | {folder} | {status} |"
+            )
 
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))

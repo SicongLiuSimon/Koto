@@ -6,13 +6,13 @@
 """
 
 import base64
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import requests
-import logging
 
 # 尝试导入 web_searcher，如果失败则在方法内部导入
 
@@ -220,7 +220,9 @@ class ImageManager:
             filepath = os.path.join(self.images_dir, filename)
             with open(filepath, "wb") as f:
                 f.write(image_bytes)
-            logger.info(f"[ImageManager] ✅ 图像已保存: {filepath} ({len(image_bytes)} bytes)")
+            logger.info(
+                f"[ImageManager] ✅ 图像已保存: {filepath} ({len(image_bytes)} bytes)"
+            )
             return filepath
         except Exception as e:
             logger.error(f"[ImageManager] ❌ 保存图像失败: {e}")
@@ -256,7 +258,9 @@ class ImageManager:
             # 鉴于环境限制，我们先打印日志，然后返回 None，让它回退到生成。
 
             # 除非... 我们有 Wikipedia API 或类似的？
-            logger.warning("[ImageManager] ⚠️ 当前搜索接口仅支持文本，尝试回退到生成模式实现可视化...")
+            logger.warning(
+                "[ImageManager] ⚠️ 当前搜索接口仅支持文本，尝试回退到生成模式实现可视化..."
+            )
             return None
 
         except Exception as e:

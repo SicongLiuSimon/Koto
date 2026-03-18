@@ -17,32 +17,33 @@ local_stt.py — 本地语音识别模块（离线 Whisper）
 """
 
 from __future__ import annotations
+
 import io
-import os
-import time
-import threading
-import tempfile
 import logging
+import os
+import tempfile
+import threading
+import time
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # ── 全局模型缓存（进程内单例，加载一次复用）────────────────────────────────────
-_model        = None
-_model_lock   = threading.Lock()
-_model_size   = os.environ.get("KOTO_WHISPER_MODEL", "small")  # 可通过环境变量调整
-_engine_name  = "unavailable"   # faster-whisper | openai-whisper | unavailable
-_load_error   = None
-_initialized  = False
+_model = None
+_model_lock = threading.Lock()
+_model_size = os.environ.get("KOTO_WHISPER_MODEL", "small")  # 可通过环境变量调整
+_engine_name = "unavailable"  # faster-whisper | openai-whisper | unavailable
+_load_error = None
+_initialized = False
 
 
 def get_status() -> dict:
     """返回本地 STT 状态，供前端展示引擎选择器使用"""
     return {
         "available": _engine_name != "unavailable",
-        "engine":    _engine_name,
-        "model":     _model_size,
-        "error":     str(_load_error) if _load_error else None,
+        "engine": _engine_name,
+        "model": _model_size,
+        "error": str(_load_error) if _load_error else None,
     }
 
 
@@ -65,6 +66,7 @@ def _try_load_model():
         # ── 方案1：faster-whisper（推荐，4-8x 加速）────────────────────────────
         try:
             from faster_whisper import WhisperModel
+
             t0 = time.time()
             device = "cuda" if _cuda_available() else "cpu"
             compute = "float16" if device == "cuda" else "int8"
@@ -74,10 +76,12 @@ def _try_load_model():
                 device=device,
                 compute_type=compute,
                 download_root=_get_model_cache_dir(),
-                local_files_only=False,      # 若缓存中不存在则自动下载
+                local_files_only=False,  # 若缓存中不存在则自动下载
             )
             _engine_name = f"faster-whisper/{_model_size}"
-            logger.info(f"[LocalSTT] ✅ 模型加载完成（{time.time()-t0:.1f}s）→ {_engine_name}")
+            logger.info(
+                f"[LocalSTT] ✅ 模型加载完成（{time.time()-t0:.1f}s）→ {_engine_name}"
+            )
             return
         except ImportError:
             pass  # 未安装，尝试下一方案
@@ -88,11 +92,14 @@ def _try_load_model():
         # ── 方案2：openai-whisper（原版备用）───────────────────────────────────
         try:
             import whisper as _ow
+
             t0 = time.time()
             logger.info(f"[LocalSTT] 加载 openai-whisper/{_model_size}...")
             _model = _ow.load_model(_model_size, download_root=_get_model_cache_dir())
             _engine_name = f"openai-whisper/{_model_size}"
-            logger.info(f"[LocalSTT] ✅ 模型加载完成（{time.time()-t0:.1f}s）→ {_engine_name}")
+            logger.info(
+                f"[LocalSTT] ✅ 模型加载完成（{time.time()-t0:.1f}s）→ {_engine_name}"
+            )
             return
         except ImportError:
             pass
@@ -104,7 +111,9 @@ def _try_load_model():
         _engine_name = "unavailable"
 
 
-def transcribe(audio_bytes: bytes, mime_type: str = "audio/webm") -> Tuple[bool, str, str]:
+def transcribe(
+    audio_bytes: bytes, mime_type: str = "audio/webm"
+) -> Tuple[bool, str, str]:
     """
     转写音频字节流为文字。
 
@@ -153,8 +162,8 @@ def _do_transcribe(audio_path: str) -> str:
         # faster-whisper API
         segments, info = _model.transcribe(
             audio_path,
-            language="zh",          # 强制中文，减少判断耗时；也可 None 自动检测
-            vad_filter=True,        # VAD 过滤静音，提高准确率
+            language="zh",  # 强制中文，减少判断耗时；也可 None 自动检测
+            vad_filter=True,  # VAD 过滤静音，提高准确率
             vad_parameters={"min_silence_duration_ms": 300},
         )
         return "".join(seg.text for seg in segments)
@@ -171,11 +180,13 @@ def _do_transcribe(audio_path: str) -> str:
 def _cuda_available() -> bool:
     try:
         import torch
+
         return torch.cuda.is_available()
     except ImportError:
         pass
     try:
         import ctypes
+
         ctypes.cdll.LoadLibrary("cublas64_12.dll")
         return True
     except Exception:
@@ -187,7 +198,9 @@ def _get_model_cache_dir() -> str:
     # 尝试放在 exe/脚本同级目录下的 models/whisper/
     candidates = [
         os.path.join(os.environ.get("KOTO_APP_ROOT", ""), "models", "whisper"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "models", "whisper"),
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "..", "models", "whisper"
+        ),
         os.path.expanduser("~/.cache/koto/whisper"),
     ]
     for c in candidates:
@@ -201,12 +214,12 @@ def _get_model_cache_dir() -> str:
 
 def _mime_to_ext(mime: str) -> str:
     m = {
-        "audio/webm":             ".webm",
+        "audio/webm": ".webm",
         "audio/webm;codecs=opus": ".webm",
-        "audio/ogg":              ".ogg",
-        "audio/ogg;codecs=opus":  ".ogg",
-        "audio/wav":              ".wav",
-        "audio/mp4":              ".mp4",
-        "audio/mpeg":             ".mp3",
+        "audio/ogg": ".ogg",
+        "audio/ogg;codecs=opus": ".ogg",
+        "audio/wav": ".wav",
+        "audio/mp4": ".mp4",
+        "audio/mpeg": ".mp3",
     }
     return m.get(mime.split(";")[0].strip(), ".webm")

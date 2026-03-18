@@ -29,39 +29,52 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # ── 支持的转换矩阵 ────────────────────────────────────────────────────────────
 CONVERSION_MATRIX: Dict[str, List[str]] = {
-    ".docx":     [".pdf", ".txt", ".md"],
-    ".doc":      [".docx", ".pdf", ".txt", ".md"],
-    ".pdf":      [".docx", ".txt"],
-    ".txt":      [".docx", ".pdf", ".md"],
-    ".md":       [".docx", ".pdf", ".html", ".txt"],
+    ".docx": [".pdf", ".txt", ".md"],
+    ".doc": [".docx", ".pdf", ".txt", ".md"],
+    ".pdf": [".docx", ".txt"],
+    ".txt": [".docx", ".pdf", ".md"],
+    ".md": [".docx", ".pdf", ".html", ".txt"],
     ".markdown": [".docx", ".pdf", ".html", ".txt"],
-    ".xlsx":     [".csv", ".txt"],
-    ".xls":      [".xlsx", ".csv", ".txt"],
-    ".csv":      [".xlsx"],
-    ".pptx":     [".txt", ".pdf"],
-    ".ppt":      [".txt", ".pdf"],
+    ".xlsx": [".csv", ".txt"],
+    ".xls": [".xlsx", ".csv", ".txt"],
+    ".csv": [".xlsx"],
+    ".pptx": [".txt", ".pdf"],
+    ".ppt": [".txt", ".pdf"],
     # images
-    ".jpg":  [".png", ".webp", ".bmp", ".jpeg"],
+    ".jpg": [".png", ".webp", ".bmp", ".jpeg"],
     ".jpeg": [".png", ".webp", ".bmp", ".jpg"],
-    ".png":  [".jpg", ".jpeg", ".webp", ".bmp"],
+    ".png": [".jpg", ".jpeg", ".webp", ".bmp"],
     ".webp": [".png", ".jpg", ".jpeg"],
-    ".bmp":  [".png", ".jpg", ".jpeg"],
-    ".gif":  [".png", ".jpg"],
+    ".bmp": [".png", ".jpg", ".jpeg"],
+    ".gif": [".png", ".jpg"],
 }
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tiff", ".tif"}
 
 # 用户自然语言 → 扩展名 映射
 FORMAT_ALIASES: Dict[str, str] = {
-    "word": ".docx",   "doc": ".docx",   "docx": ".docx",
+    "word": ".docx",
+    "doc": ".docx",
+    "docx": ".docx",
     "pdf": ".pdf",
-    "txt": ".txt",     "text": ".txt",   "纯文本": ".txt",
-    "md": ".md",       "markdown": ".md",
-    "ppt": ".pptx",    "pptx": ".pptx",  "powerpoint": ".pptx", "幻灯片": ".pptx",
-    "xls": ".xlsx",    "xlsx": ".xlsx",  "excel": ".xlsx",      "表格": ".xlsx",
+    "txt": ".txt",
+    "text": ".txt",
+    "纯文本": ".txt",
+    "md": ".md",
+    "markdown": ".md",
+    "ppt": ".pptx",
+    "pptx": ".pptx",
+    "powerpoint": ".pptx",
+    "幻灯片": ".pptx",
+    "xls": ".xlsx",
+    "xlsx": ".xlsx",
+    "excel": ".xlsx",
+    "表格": ".xlsx",
     "csv": ".csv",
-    "html": ".html",   "htm": ".html",
-    "jpg": ".jpg",     "jpeg": ".jpg",
+    "html": ".html",
+    "htm": ".html",
+    "jpg": ".jpg",
+    "jpeg": ".jpg",
     "png": ".png",
     "webp": ".webp",
     "bmp": ".bmp",
@@ -85,6 +98,7 @@ CN_FORMAT_PATTERNS: List[Tuple[re.Pattern, str]] = [
 
 
 # ── 公开接口 ──────────────────────────────────────────────────────────────────
+
 
 def get_supported_conversions() -> Dict[str, List[str]]:
     """返回所有支持的转换对（src_ext → [tgt_ext, ...]）。"""
@@ -147,7 +161,9 @@ def convert(
 
     # 计算输出路径
     if not output_path:
-        out_dir = os.path.abspath(output_dir) if output_dir else str(Path(source_path).parent)
+        out_dir = (
+            os.path.abspath(output_dir) if output_dir else str(Path(source_path).parent)
+        )
         # sandbox: output_dir must be inside workspace, uploads, or dist
         if output_dir:
             _cwd = os.path.abspath(os.getcwd())
@@ -165,19 +181,20 @@ def convert(
     try:
         out, warning = _dispatch(source_path, src_ext, tgt_ext, output_path)
         return {
-            "success":     True,
+            "success": True,
             "output_path": out,
             "from_format": src_ext.lstrip("."),
-            "to_format":   tgt_ext.lstrip("."),
-            "message":     f"✅ 转换成功：{Path(source_path).name} → {Path(out).name}",
-            "warning":     warning,
-            "error":       "",
+            "to_format": tgt_ext.lstrip("."),
+            "message": f"✅ 转换成功：{Path(source_path).name} → {Path(out).name}",
+            "warning": warning,
+            "error": "",
         }
     except Exception as exc:
         return _err(f"转换失败（{src_ext} → {tgt_ext}）: {exc}")
 
 
 # ── Skill entry_point ─────────────────────────────────────────────────────────
+
 
 def skill_entry(user_input: str, context: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -213,6 +230,7 @@ def skill_entry(user_input: str, context: Dict[str, Any]) -> Dict[str, Any]:
 
 # ── 内部调度 ──────────────────────────────────────────────────────────────────
 
+
 def _dispatch(src: str, src_ext: str, tgt_ext: str, out: str) -> Tuple[str, str]:
     """根据 (src_ext, tgt_ext) 调用对应的转换函数。"""
     # 图片
@@ -221,36 +239,36 @@ def _dispatch(src: str, src_ext: str, tgt_ext: str, out: str) -> Tuple[str, str]
 
     key = (src_ext, tgt_ext)
     dispatch_table = {
-        (".docx", ".pdf"):  _docx_to_pdf,
-        (".doc",  ".pdf"):  _docx_to_pdf,
-        (".docx", ".txt"):  _docx_to_txt,
-        (".doc",  ".txt"):  _docx_to_txt,
-        (".docx", ".md"):   _docx_to_md,
-        (".doc",  ".md"):   _docx_to_md,
-        (".doc",  ".docx"): _doc_to_docx,
-        (".pdf",  ".docx"): _pdf_to_docx,
-        (".pdf",  ".txt"):  _pdf_to_txt,
-        (".txt",  ".docx"): _txt_to_docx,
-        (".txt",  ".pdf"):  _txt_to_pdf,
-        (".txt",  ".md"):   _text_copy,
-        (".md",   ".docx"): _md_to_docx,
-        (".md",   ".pdf"):  _md_to_pdf,
-        (".md",   ".html"): _md_to_html,
-        (".md",   ".txt"):  _text_copy,
+        (".docx", ".pdf"): _docx_to_pdf,
+        (".doc", ".pdf"): _docx_to_pdf,
+        (".docx", ".txt"): _docx_to_txt,
+        (".doc", ".txt"): _docx_to_txt,
+        (".docx", ".md"): _docx_to_md,
+        (".doc", ".md"): _docx_to_md,
+        (".doc", ".docx"): _doc_to_docx,
+        (".pdf", ".docx"): _pdf_to_docx,
+        (".pdf", ".txt"): _pdf_to_txt,
+        (".txt", ".docx"): _txt_to_docx,
+        (".txt", ".pdf"): _txt_to_pdf,
+        (".txt", ".md"): _text_copy,
+        (".md", ".docx"): _md_to_docx,
+        (".md", ".pdf"): _md_to_pdf,
+        (".md", ".html"): _md_to_html,
+        (".md", ".txt"): _text_copy,
         (".markdown", ".docx"): _md_to_docx,
-        (".markdown", ".pdf"):  _md_to_pdf,
+        (".markdown", ".pdf"): _md_to_pdf,
         (".markdown", ".html"): _md_to_html,
-        (".markdown", ".txt"):  _text_copy,
-        (".xlsx", ".csv"):  _xlsx_to_csv,
-        (".xlsx", ".txt"):  _xlsx_to_txt,
-        (".xls",  ".xlsx"): _xls_to_xlsx,
-        (".xls",  ".csv"):  _xlsx_to_csv,
-        (".xls",  ".txt"):  _xlsx_to_txt,
-        (".csv",  ".xlsx"): _csv_to_xlsx,
-        (".pptx", ".txt"):  _pptx_to_txt,
-        (".ppt",  ".txt"):  _pptx_to_txt,
-        (".pptx", ".pdf"):  _pptx_to_pdf,
-        (".ppt",  ".pdf"):  _pptx_to_pdf,
+        (".markdown", ".txt"): _text_copy,
+        (".xlsx", ".csv"): _xlsx_to_csv,
+        (".xlsx", ".txt"): _xlsx_to_txt,
+        (".xls", ".xlsx"): _xls_to_xlsx,
+        (".xls", ".csv"): _xlsx_to_csv,
+        (".xls", ".txt"): _xlsx_to_txt,
+        (".csv", ".xlsx"): _csv_to_xlsx,
+        (".pptx", ".txt"): _pptx_to_txt,
+        (".ppt", ".txt"): _pptx_to_txt,
+        (".pptx", ".pdf"): _pptx_to_pdf,
+        (".ppt", ".pdf"): _pptx_to_pdf,
     }
     fn = dispatch_table.get(key)
     if fn is None:
@@ -260,11 +278,17 @@ def _dispatch(src: str, src_ext: str, tgt_ext: str, out: str) -> Tuple[str, str]
 
 # ── 图片 → 图片 ───────────────────────────────────────────────────────────────
 
+
 def _img_to_img(src: str, out: str, tgt_ext: str) -> Tuple[str, str]:
     from PIL import Image
+
     fmt_map = {
-        ".jpg": "JPEG", ".jpeg": "JPEG", ".png": "PNG",
-        ".webp": "WEBP", ".bmp": "BMP", ".gif": "GIF",
+        ".jpg": "JPEG",
+        ".jpeg": "JPEG",
+        ".png": "PNG",
+        ".webp": "WEBP",
+        ".bmp": "BMP",
+        ".gif": "GIF",
     }
     fmt = fmt_map.get(tgt_ext, tgt_ext.lstrip(".").upper())
     with Image.open(src) as img:
@@ -276,10 +300,12 @@ def _img_to_img(src: str, out: str, tgt_ext: str) -> Tuple[str, str]:
 
 # ── DOCX/DOC → PDF ───────────────────────────────────────────────────────────
 
+
 def _docx_to_pdf(src: str, out: str) -> Tuple[str, str]:
     # 优先: Word COM（Windows, 精确还原）
     try:
         import win32com.client
+
         word = win32com.client.Dispatch("Word.Application")
         word.Visible = False
         doc = word.Documents.Open(os.path.abspath(src))
@@ -299,6 +325,7 @@ def _docx_to_pdf(src: str, out: str) -> Tuple[str, str]:
 
     # 最后手段: reportlab 文本重建
     from docx import Document as DocxDoc
+
     doc = DocxDoc(src)
     text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
     _text_to_pdf_reportlab(text, out, title=Path(src).stem)
@@ -310,8 +337,10 @@ def _docx_to_pdf(src: str, out: str) -> Tuple[str, str]:
 
 # ── DOCX/DOC → TXT ───────────────────────────────────────────────────────────
 
+
 def _docx_to_txt(src: str, out: str) -> Tuple[str, str]:
     from docx import Document as DocxDoc
+
     doc = DocxDoc(src)
     lines = [p.text for p in doc.paragraphs if p.text.strip()]
     for table in doc.tables:
@@ -323,8 +352,10 @@ def _docx_to_txt(src: str, out: str) -> Tuple[str, str]:
 
 # ── DOCX/DOC → MD ────────────────────────────────────────────────────────────
 
+
 def _docx_to_md(src: str, out: str) -> Tuple[str, str]:
     from docx import Document as DocxDoc
+
     doc = DocxDoc(src)
     lines = []
     for para in doc.paragraphs:
@@ -349,9 +380,11 @@ def _docx_to_md(src: str, out: str) -> Tuple[str, str]:
 
 # ── DOC → DOCX ───────────────────────────────────────────────────────────────
 
+
 def _doc_to_docx(src: str, out: str) -> Tuple[str, str]:
     try:
         import win32com.client
+
         word = win32com.client.Dispatch("Word.Application")
         word.Visible = False
         doc = word.Documents.Open(os.path.abspath(src))
@@ -364,6 +397,7 @@ def _doc_to_docx(src: str, out: str) -> Tuple[str, str]:
 
     try:
         from docx import Document as DocxDoc
+
         d = DocxDoc(src)
         d.save(out)
         return out, ""
@@ -381,10 +415,12 @@ def _doc_to_docx(src: str, out: str) -> Tuple[str, str]:
 
 # ── PDF → DOCX ───────────────────────────────────────────────────────────────
 
+
 def _pdf_to_docx(src: str, out: str) -> Tuple[str, str]:
     # 优先: pdf2docx（版式还原最好）
     try:
         from pdf2docx import Converter
+
         cv = Converter(src)
         cv.convert(out, start=0, end=None)
         cv.close()
@@ -396,6 +432,7 @@ def _pdf_to_docx(src: str, out: str) -> Tuple[str, str]:
 
     # 回退: 文本提取 → 重建 DOCX
     from docx import Document as DocxDoc
+
     text = _extract_pdf_text(src)
     doc = DocxDoc()
     doc.add_heading(Path(src).stem, 0)
@@ -410,6 +447,7 @@ def _pdf_to_docx(src: str, out: str) -> Tuple[str, str]:
 
 
 # ── PDF → TXT ────────────────────────────────────────────────────────────────
+
 
 def _pdf_to_txt(src: str, out: str) -> Tuple[str, str]:
     text = _extract_pdf_text(src)
@@ -431,6 +469,7 @@ def _extract_pdf_text(src: str) -> str:
             break
     try:
         import pdfplumber
+
         with pdfplumber.open(src) as pdf:
             return "\n".join(p.extract_text() or "" for p in pdf.pages)
     except Exception:
@@ -440,13 +479,15 @@ def _extract_pdf_text(src: str) -> str:
 
 # ── TXT → DOCX ───────────────────────────────────────────────────────────────
 
+
 def _txt_to_docx(src: str, out: str) -> Tuple[str, str]:
     text = Path(src).read_text(encoding="utf-8", errors="replace")
     from docx import Document as DocxDoc
+
     doc = DocxDoc()
     doc.add_heading(Path(src).stem, 0)
     for line in text.split("\n"):
-        m = re.match(r'^(#{1,6})\s+(.*)', line)
+        m = re.match(r"^(#{1,6})\s+(.*)", line)
         if m:
             doc.add_heading(m.group(2), min(len(m.group(1)), 4))
         elif line.strip():
@@ -459,6 +500,7 @@ def _txt_to_docx(src: str, out: str) -> Tuple[str, str]:
 
 # ── TXT → PDF ────────────────────────────────────────────────────────────────
 
+
 def _txt_to_pdf(src: str, out: str) -> Tuple[str, str]:
     text = Path(src).read_text(encoding="utf-8", errors="replace")
     _text_to_pdf_reportlab(text, out, title=Path(src).stem)
@@ -467,6 +509,7 @@ def _txt_to_pdf(src: str, out: str) -> Tuple[str, str]:
 
 # ── TXT ↔ MD（纯文本复制）────────────────────────────────────────────────────
 
+
 def _text_copy(src: str, out: str) -> Tuple[str, str]:
     shutil.copy2(src, out)
     return out, ""
@@ -474,9 +517,11 @@ def _text_copy(src: str, out: str) -> Tuple[str, str]:
 
 # ── MD → DOCX ────────────────────────────────────────────────────────────────
 
+
 def _md_to_docx(src: str, out: str) -> Tuple[str, str]:
     text = Path(src).read_text(encoding="utf-8", errors="replace")
     from docx import Document as DocxDoc
+
     doc = DocxDoc()
     doc.add_heading(Path(src).stem, 0)
     for line in text.split("\n"):
@@ -484,24 +529,25 @@ def _md_to_docx(src: str, out: str) -> Tuple[str, str]:
         if not stripped:
             doc.add_paragraph("")
             continue
-        m = re.match(r'^(#{1,6})\s+(.*)', stripped)
+        m = re.match(r"^(#{1,6})\s+(.*)", stripped)
         if m:
             doc.add_heading(m.group(2), min(len(m.group(1)), 4))
             continue
-        if re.match(r'^[-*+]\s+', stripped):
-            doc.add_paragraph(re.sub(r'^[-*+]\s+', '', stripped), style="List Bullet")
+        if re.match(r"^[-*+]\s+", stripped):
+            doc.add_paragraph(re.sub(r"^[-*+]\s+", "", stripped), style="List Bullet")
             continue
-        if re.match(r'^\d+\.\s+', stripped):
-            doc.add_paragraph(re.sub(r'^\d+\.\s+', '', stripped), style="List Number")
+        if re.match(r"^\d+\.\s+", stripped):
+            doc.add_paragraph(re.sub(r"^\d+\.\s+", "", stripped), style="List Number")
             continue
-        clean = re.sub(r'\*\*?(.*?)\*\*?', r'\1', stripped)
-        clean = re.sub(r'`(.*?)`', r'\1', clean)
+        clean = re.sub(r"\*\*?(.*?)\*\*?", r"\1", stripped)
+        clean = re.sub(r"`(.*?)`", r"\1", clean)
         doc.add_paragraph(clean)
     doc.save(out)
     return out, "⚠️ 图片链接、HTML 块未包含在 DOCX 输出中"
 
 
 # ── MD → PDF ─────────────────────────────────────────────────────────────────
+
 
 def _md_to_pdf(src: str, out: str) -> Tuple[str, str]:
     text = Path(src).read_text(encoding="utf-8", errors="replace")
@@ -511,26 +557,28 @@ def _md_to_pdf(src: str, out: str) -> Tuple[str, str]:
 
 # ── MD → HTML ────────────────────────────────────────────────────────────────
 
+
 def _md_to_html(src: str, out: str) -> Tuple[str, str]:
     text = Path(src).read_text(encoding="utf-8", errors="replace")
     try:
         import markdown as md_lib
+
         html_body = md_lib.markdown(text, extensions=["tables", "fenced_code"])
     except ImportError:
         escaped = _html_mod.escape(text, quote=True)
-        html_body = re.sub(r'^# (.+)$', r'<h1>\1</h1>', escaped, flags=re.M)
-        html_body = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html_body, flags=re.M)
-        html_body = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html_body, flags=re.M)
+        html_body = re.sub(r"^# (.+)$", r"<h1>\1</h1>", escaped, flags=re.M)
+        html_body = re.sub(r"^## (.+)$", r"<h2>\1</h2>", html_body, flags=re.M)
+        html_body = re.sub(r"^### (.+)$", r"<h3>\1</h3>", html_body, flags=re.M)
         html_body = html_body.replace("\n", "<br>\n")
 
-    title_safe = re.sub(r'[<>&"\'\\]', '', Path(src).stem)
+    title_safe = re.sub(r'[<>&"\'\\]', "", Path(src).stem)
     html = (
         f'<!DOCTYPE html>\n<html lang="zh">\n<head>\n<meta charset="UTF-8">\n'
-        f'<title>{title_safe}</title>\n'
-        '<style>body{font-family:sans-serif;max-width:840px;margin:40px auto;'
-        'line-height:1.7;color:#333}h1,h2,h3{color:#222}code{background:#f4f4f4;'
-        'padding:2px 4px;border-radius:3px}</style>\n'
-        f'</head>\n<body>\n{html_body}\n</body>\n</html>\n'
+        f"<title>{title_safe}</title>\n"
+        "<style>body{font-family:sans-serif;max-width:840px;margin:40px auto;"
+        "line-height:1.7;color:#333}h1,h2,h3{color:#222}code{background:#f4f4f4;"
+        "padding:2px 4px;border-radius:3px}</style>\n"
+        f"</head>\n<body>\n{html_body}\n</body>\n</html>\n"
     )
     Path(out).write_text(html, encoding="utf-8")
     return out, ""
@@ -538,8 +586,10 @@ def _md_to_html(src: str, out: str) -> Tuple[str, str]:
 
 # ── XLSX/XLS ↔ CSV ───────────────────────────────────────────────────────────
 
+
 def _xlsx_to_csv(src: str, out: str) -> Tuple[str, str]:
     import pandas as pd
+
     xls = pd.ExcelFile(src)
     sheets = xls.sheet_names
 
@@ -554,7 +604,7 @@ def _xlsx_to_csv(src: str, out: str) -> Tuple[str, str]:
     extra_paths = []
     for sheet in sheets:
         df = pd.read_excel(src, sheet_name=sheet)
-        safe = re.sub(r'[\\/:*?"<>|]', '_', sheet)
+        safe = re.sub(r'[\\/:*?"<>|]', "_", sheet)
         p = str(base_dir / f"{stem}_{safe}.csv")
         df.to_csv(p, index=False, encoding="utf-8-sig")
         extra_paths.append(p)
@@ -565,6 +615,7 @@ def _xlsx_to_csv(src: str, out: str) -> Tuple[str, str]:
 
 def _xlsx_to_txt(src: str, out: str) -> Tuple[str, str]:
     import pandas as pd
+
     xls = pd.ExcelFile(src)
     parts = []
     for sheet in xls.sheet_names[:5]:
@@ -576,6 +627,7 @@ def _xlsx_to_txt(src: str, out: str) -> Tuple[str, str]:
 
 def _xls_to_xlsx(src: str, out: str) -> Tuple[str, str]:
     import pandas as pd
+
     xls = pd.ExcelFile(src)
     with pd.ExcelWriter(out, engine="openpyxl") as writer:
         for sheet in xls.sheet_names:
@@ -586,6 +638,7 @@ def _xls_to_xlsx(src: str, out: str) -> Tuple[str, str]:
 
 def _csv_to_xlsx(src: str, out: str) -> Tuple[str, str]:
     import pandas as pd
+
     for enc in ("utf-8-sig", "utf-8", "gbk", "gb18030", "latin-1"):
         try:
             df = pd.read_csv(src, encoding=enc)
@@ -598,8 +651,10 @@ def _csv_to_xlsx(src: str, out: str) -> Tuple[str, str]:
 
 # ── PPTX → TXT / PDF ─────────────────────────────────────────────────────────
 
+
 def _pptx_to_txt(src: str, out: str) -> Tuple[str, str]:
     from pptx import Presentation
+
     prs = Presentation(src)
     lines = []
     for i, slide in enumerate(prs.slides, 1):
@@ -619,6 +674,7 @@ def _pptx_to_pdf(src: str, out: str) -> Tuple[str, str]:
     # 优先: PowerPoint COM
     try:
         import win32com.client
+
         ppts = win32com.client.Dispatch("PowerPoint.Application")
         ppts.Visible = False
         ppt = ppts.Presentations.Open(
@@ -652,8 +708,12 @@ def _pptx_to_pdf(src: str, out: str) -> Tuple[str, str]:
 
 # ── LibreOffice CLI helper ────────────────────────────────────────────────────
 
-def _try_libreoffice(source_path: str, out_dir: str, target_fmt: str = "pdf") -> Optional[str]:
+
+def _try_libreoffice(
+    source_path: str, out_dir: str, target_fmt: str = "pdf"
+) -> Optional[str]:
     import subprocess
+
     candidates = (
         "soffice",
         "libreoffice",
@@ -665,11 +725,23 @@ def _try_libreoffice(source_path: str, out_dir: str, target_fmt: str = "pdf") ->
             continue
         try:
             result = subprocess.run(
-                [soffice, "--headless", "--convert-to", target_fmt, "--outdir", out_dir, source_path],
-                capture_output=True, text=True, timeout=90,
+                [
+                    soffice,
+                    "--headless",
+                    "--convert-to",
+                    target_fmt,
+                    "--outdir",
+                    out_dir,
+                    source_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=90,
             )
             if result.returncode == 0:
-                expected = os.path.join(out_dir, Path(source_path).stem + f".{target_fmt}")
+                expected = os.path.join(
+                    out_dir, Path(source_path).stem + f".{target_fmt}"
+                )
                 if os.path.exists(expected):
                     return expected
         except Exception:
@@ -679,6 +751,7 @@ def _try_libreoffice(source_path: str, out_dir: str, target_fmt: str = "pdf") ->
 
 # ── reportlab 文本 → PDF ──────────────────────────────────────────────────────
 
+
 def _text_to_pdf_reportlab(
     text: str,
     out: str,
@@ -687,18 +760,18 @@ def _text_to_pdf_reportlab(
 ) -> None:
     """用 reportlab 将文本（可含 Markdown 标题）写入 A4 PDF，支持中文字体。"""
     from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
     # 注册中文字体（Windows 系统字体）
     cjk_font = "Helvetica"
     for fname, fpath in [
         ("MicrosoftYaHei", r"C:\Windows\Fonts\msyh.ttc"),
-        ("SimHei",         r"C:\Windows\Fonts\simhei.ttf"),
-        ("SimSun",         r"C:\Windows\Fonts\simsun.ttc"),
+        ("SimHei", r"C:\Windows\Fonts\simhei.ttf"),
+        ("SimSun", r"C:\Windows\Fonts\simsun.ttc"),
     ]:
         if os.path.exists(fpath):
             try:
@@ -710,22 +783,35 @@ def _text_to_pdf_reportlab(
 
     styles = getSampleStyleSheet()
     body = ParagraphStyle(
-        "CJKBody", parent=styles["Normal"],
-        fontName=cjk_font, fontSize=11, leading=17, wordWrap="CJK",
+        "CJKBody",
+        parent=styles["Normal"],
+        fontName=cjk_font,
+        fontSize=11,
+        leading=17,
+        wordWrap="CJK",
     )
     h1 = ParagraphStyle(
-        "CJKH1", parent=styles["Heading1"],
-        fontName=cjk_font, fontSize=17, spaceAfter=6,
+        "CJKH1",
+        parent=styles["Heading1"],
+        fontName=cjk_font,
+        fontSize=17,
+        spaceAfter=6,
     )
     h2 = ParagraphStyle(
-        "CJKH2", parent=styles["Heading2"],
-        fontName=cjk_font, fontSize=13, spaceAfter=4,
+        "CJKH2",
+        parent=styles["Heading2"],
+        fontName=cjk_font,
+        fontSize=13,
+        spaceAfter=4,
     )
 
     doc = SimpleDocTemplate(
-        out, pagesize=A4,
-        leftMargin=22 * mm, rightMargin=22 * mm,
-        topMargin=22 * mm, bottomMargin=22 * mm,
+        out,
+        pagesize=A4,
+        leftMargin=22 * mm,
+        rightMargin=22 * mm,
+        topMargin=22 * mm,
+        bottomMargin=22 * mm,
     )
     story = []
     if title:
@@ -738,7 +824,7 @@ def _text_to_pdf_reportlab(
             story.append(Spacer(1, 3 * mm))
             continue
         if is_markdown:
-            m = re.match(r'^(#{1,6})\s+(.*)', stripped)
+            m = re.match(r"^(#{1,6})\s+(.*)", stripped)
             if m:
                 style = h1 if len(m.group(1)) == 1 else h2
                 story.append(Paragraph(_safe_rl(m.group(2)), style))
@@ -755,6 +841,7 @@ def _safe_rl(text: str) -> str:
 
 # ── 自然语言格式提取 ──────────────────────────────────────────────────────────
 
+
 def _extract_target_format(text: str) -> Optional[str]:
     """从用户输入中提取目标格式别名，返回 FORMAT_ALIASES 的键或 None。"""
     tl = text.lower()
@@ -770,11 +857,11 @@ def _extract_target_format(text: str) -> Optional[str]:
     # 再按长度倒序匹配英文 alias
     for alias in sorted(FORMAT_ALIASES.keys(), key=len, reverse=True):
         patterns = [
-            rf'转(?:换|成|为|出|化)\s*(?:为|成|到|作)?\s*{re.escape(alias)}',
-            rf'(?:导出|保存|另存|生成|变成)\s*(?:为|成|到|作|成)?\s*{re.escape(alias)}',
-            rf'(?:to|into|as)\s+{re.escape(alias)}\b',
-            rf'convert\s+(?:to\s+)?{re.escape(alias)}\b',
-            rf'\b{re.escape(alias)}\b',
+            rf"转(?:换|成|为|出|化)\s*(?:为|成|到|作)?\s*{re.escape(alias)}",
+            rf"(?:导出|保存|另存|生成|变成)\s*(?:为|成|到|作|成)?\s*{re.escape(alias)}",
+            rf"(?:to|into|as)\s+{re.escape(alias)}\b",
+            rf"convert\s+(?:to\s+)?{re.escape(alias)}\b",
+            rf"\b{re.escape(alias)}\b",
         ]
         for pat in patterns:
             if re.search(pat, tl, re.IGNORECASE):
@@ -784,13 +871,14 @@ def _extract_target_format(text: str) -> Optional[str]:
 
 # ── 公用错误构造 ──────────────────────────────────────────────────────────────
 
+
 def _err(msg: str) -> Dict[str, Any]:
     return {
-        "success":     False,
+        "success": False,
         "output_path": "",
         "from_format": "",
-        "to_format":   "",
-        "message":     f"❌ {msg}",
-        "warning":     "",
-        "error":       msg,
+        "to_format": "",
+        "message": f"❌ {msg}",
+        "warning": "",
+        "error": msg,
     }

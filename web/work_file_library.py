@@ -7,8 +7,10 @@ work_file_library.py — Koto 工作文件库
 - 支持用户自定义监控文件夹
 - 搜索结果按文件类型分组（Word文档 / Excel表格 / PPT演示 / PDF文档）
 """
+
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sqlite3
@@ -16,36 +18,48 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import logging
 
 # ── 工作文件扩展名 → 分类 ─────────────────────────────────────────────────────
 
 logger = logging.getLogger(__name__)
 
 WORK_FILE_TYPES: Dict[str, str] = {
-    ".doc":  "Word文档",
+    ".doc": "Word文档",
     ".docx": "Word文档",
-    ".xls":  "Excel表格",
+    ".xls": "Excel表格",
     ".xlsx": "Excel表格",
-    ".ppt":  "PPT演示",
+    ".ppt": "PPT演示",
     ".pptx": "PPT演示",
-    ".pdf":  "PDF文档",
+    ".pdf": "PDF文档",
 }
 
 _CATEGORY_ICONS: Dict[str, str] = {
-    "Word文档":  "📝",
+    "Word文档": "📝",
     "Excel表格": "📊",
-    "PPT演示":   "📑",
-    "PDF文档":   "📄",
+    "PPT演示": "📑",
+    "PDF文档": "📄",
 }
 
 # 扫描时跳过的目录名（小写）
 _SKIP_DIRS = {
-    "__pycache__", ".git", ".svn", "node_modules",
-    ".venv", "venv", "env", "site-packages",
-    "$recycle.bin", "recycler", "system volume information",
-    "temp", "tmp", "cache", "appdata",
-    "windows", "program files", "program files (x86)",
+    "__pycache__",
+    ".git",
+    ".svn",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "site-packages",
+    "$recycle.bin",
+    "recycler",
+    "system volume information",
+    "temp",
+    "tmp",
+    "cache",
+    "appdata",
+    "windows",
+    "program files",
+    "program files (x86)",
 }
 
 
@@ -80,13 +94,18 @@ def _get_common_locations() -> List[str]:
 
 # ── WorkFileLibrary ───────────────────────────────────────────────────────────
 
+
 class WorkFileLibrary:
     """工作文件库（单例，线程安全）"""
 
     _lock: threading.RLock = threading.RLock()
     _scan_thread: Optional[threading.Thread] = None
     _scan_status: Dict[str, Any] = {
-        "running": False, "scanned": 0, "indexed": 0, "done": False, "error": None
+        "running": False,
+        "scanned": 0,
+        "indexed": 0,
+        "done": False,
+        "error": None,
     }
 
     def __init__(self):
@@ -166,7 +185,9 @@ class WorkFileLibrary:
     def get_stats(self) -> Dict[str, Any]:
         try:
             with self._conn() as conn:
-                total = conn.execute("SELECT COUNT(*) AS cnt FROM work_files").fetchone()["cnt"]
+                total = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM work_files"
+                ).fetchone()["cnt"]
                 cats = conn.execute(
                     "SELECT category, COUNT(*) AS cnt FROM work_files GROUP BY category ORDER BY cnt DESC"
                 ).fetchall()
@@ -176,7 +197,9 @@ class WorkFileLibrary:
                 return {
                     "total": total or 0,
                     "categories": {r["category"]: r["cnt"] for r in cats},
-                    "last_scan": float(last_scan_row["value"]) if last_scan_row else None,
+                    "last_scan": (
+                        float(last_scan_row["value"]) if last_scan_row else None
+                    ),
                     "scan_status": self.get_scan_status(),
                 }
         except Exception:
@@ -192,7 +215,7 @@ class WorkFileLibrary:
             with self._conn() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO watch_folders (path, added_at) VALUES (?, ?)",
-                    (resolved, time.time())
+                    (resolved, time.time()),
                 )
             return True
         except Exception:
@@ -210,7 +233,9 @@ class WorkFileLibrary:
     def list_watch_folders(self) -> List[Dict]:
         try:
             with self._conn() as conn:
-                rows = conn.execute("SELECT * FROM watch_folders ORDER BY added_at DESC").fetchall()
+                rows = conn.execute(
+                    "SELECT * FROM watch_folders ORDER BY added_at DESC"
+                ).fetchall()
                 return [dict(r) for r in rows]
         except Exception:
             return []
@@ -244,7 +269,11 @@ class WorkFileLibrary:
             if self._scan_status.get("running"):
                 return {"started": False, "reason": "扫描已在运行中"}
             self._scan_status = {
-                "running": True, "scanned": 0, "indexed": 0, "done": False, "error": None
+                "running": True,
+                "scanned": 0,
+                "indexed": 0,
+                "done": False,
+                "error": None,
             }
 
         scan_locs = locations if locations is not None else self.get_scan_locations()
@@ -263,12 +292,14 @@ class WorkFileLibrary:
                 for loc in scan_locs:
                     if not os.path.isdir(loc):
                         continue
-                    for root_dir, dirs, files in os.walk(loc, topdown=True, followlinks=False):
+                    for root_dir, dirs, files in os.walk(
+                        loc, topdown=True, followlinks=False
+                    ):
                         # 过滤无关子目录
                         dirs[:] = [
-                            d for d in dirs
-                            if not d.startswith(".")
-                            and d.lower() not in _SKIP_DIRS
+                            d
+                            for d in dirs
+                            if not d.startswith(".") and d.lower() not in _SKIP_DIRS
                         ]
                         for fname in files:
                             scanned += 1
@@ -284,16 +315,18 @@ class WorkFileLibrary:
                                 stat = os.stat(full_path)
                             except OSError:
                                 continue
-                            batch.append((
-                                full_path,
-                                fname,
-                                fname.lower(),
-                                ext_lower,
-                                WORK_FILE_TYPES[ext_lower],
-                                stat.st_size,
-                                stat.st_mtime,
-                                now,
-                            ))
+                            batch.append(
+                                (
+                                    full_path,
+                                    fname,
+                                    fname.lower(),
+                                    ext_lower,
+                                    WORK_FILE_TYPES[ext_lower],
+                                    stat.st_size,
+                                    stat.st_mtime,
+                                    now,
+                                )
+                            )
                             indexed += 1
                             if len(batch) >= 200:
                                 self._batch_upsert(batch)
@@ -309,26 +342,32 @@ class WorkFileLibrary:
                 with self._conn() as conn:
                     conn.execute(
                         "INSERT OR REPLACE INTO meta (key, value) VALUES ('last_scan', ?)",
-                        (str(now),)
+                        (str(now),),
                     )
                     for loc in scan_locs:
                         conn.execute(
                             "UPDATE watch_folders SET last_scanned = ? WHERE path = ?",
-                            (now, loc)
+                            (now, loc),
                         )
 
                 with self._lock:
-                    self._scan_status.update({
-                        "running": False, "scanned": scanned,
-                        "indexed": indexed, "done": True
-                    })
-                logger.info(f"[WorkFileLibrary] ✅ 扫描完成: 检查 {scanned} 文件，收录 {indexed} 个工作文件")
+                    self._scan_status.update(
+                        {
+                            "running": False,
+                            "scanned": scanned,
+                            "indexed": indexed,
+                            "done": True,
+                        }
+                    )
+                logger.info(
+                    f"[WorkFileLibrary] ✅ 扫描完成: 检查 {scanned} 文件，收录 {indexed} 个工作文件"
+                )
 
             except Exception as exc:
                 with self._lock:
-                    self._scan_status.update({
-                        "running": False, "done": True, "error": str(exc)
-                    })
+                    self._scan_status.update(
+                        {"running": False, "done": True, "error": str(exc)}
+                    )
                 logger.error(f"[WorkFileLibrary] ❌ 扫描出错: {exc}")
 
         t = threading.Thread(target=_worker, name="WorkFileLibraryScan", daemon=True)
@@ -353,7 +392,7 @@ class WorkFileLibrary:
                     """INSERT OR REPLACE INTO work_files
                        (path, name, name_lower, ext, category, size, mtime, indexed_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    rows
+                    rows,
                 )
         except Exception as exc:
             logger.warning(f"[WorkFileLibrary] ⚠️ 批量写入出错: {exc}")
@@ -393,7 +432,7 @@ class WorkFileLibrary:
 
                 rows = conn.execute(
                     f"SELECT * FROM work_files WHERE {clauses} ORDER BY mtime DESC LIMIT ?",
-                    params + [limit * 2]
+                    params + [limit * 2],
                 ).fetchall()
         except Exception as exc:
             logger.info(f"[WorkFileLibrary] 搜索出错: {exc}")
@@ -415,17 +454,19 @@ class WorkFileLibrary:
                 matched = sum(1 for t in tokens if t in nl)
                 score = 0.6 * (matched / len(tokens)) if tokens else 0.5
 
-            results.append({
-                "path":       path,
-                "name":       row["name"],
-                "ext":        row["ext"],
-                "category":   row["category"],
-                "size":       row["size"],
-                "size_str":   _human_size(row["size"]),
-                "mtime":      row["mtime"],
-                "mtime_str":  _human_time(row["mtime"]),
-                "score":      round(score, 3),
-            })
+            results.append(
+                {
+                    "path": path,
+                    "name": row["name"],
+                    "ext": row["ext"],
+                    "category": row["category"],
+                    "size": row["size"],
+                    "size_str": _human_size(row["size"]),
+                    "mtime": row["mtime"],
+                    "mtime_str": _human_time(row["mtime"]),
+                    "score": round(score, 3),
+                }
+            )
 
         results.sort(key=lambda x: (-x["score"], -x["mtime"]))
         return results[:limit]
@@ -436,20 +477,21 @@ class WorkFileLibrary:
             with self._conn() as conn:
                 rows = conn.execute(
                     "SELECT * FROM work_files WHERE category = ? ORDER BY mtime DESC LIMIT ?",
-                    (category, limit)
+                    (category, limit),
                 ).fetchall()
             return [
                 {
-                    "path":     r["path"],
-                    "name":     r["name"],
-                    "ext":      r["ext"],
+                    "path": r["path"],
+                    "name": r["name"],
+                    "ext": r["ext"],
                     "category": r["category"],
-                    "size":     r["size"],
+                    "size": r["size"],
                     "size_str": _human_size(r["size"]),
-                    "mtime":    r["mtime"],
+                    "mtime": r["mtime"],
                     "mtime_str": _human_time(r["mtime"]),
                 }
-                for r in rows if os.path.exists(r["path"])
+                for r in rows
+                if os.path.exists(r["path"])
             ]
         except Exception:
             return []
@@ -472,6 +514,7 @@ class WorkFileLibrary:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _human_size(size: int) -> str:
     if size < 1024:
         return f"{size} B"
@@ -485,6 +528,7 @@ def _human_time(ts: float) -> str:
 
 
 # ── Category detection from user input ───────────────────────────────────────
+
 
 def detect_category_from_input(text: str) -> Optional[str]:
     """从用户输入中检测意图文件类型，返回分类名或 None"""

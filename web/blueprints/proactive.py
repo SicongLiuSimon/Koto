@@ -17,6 +17,7 @@ Routes:
   GET    /api/context/statistics          — Get context statistics
   GET    /api/context/predict             — Predict next context
 """
+
 import logging
 
 from flask import Blueprint, jsonify, request
@@ -30,23 +31,28 @@ proactive_bp = Blueprint("proactive", __name__)
 # Lazy imports — avoid circular dependency with app.py
 # ---------------------------------------------------------------------------
 
+
 def _get_notification_manager():
     from web.app import get_notification_manager
+
     return get_notification_manager()
 
 
 def _get_proactive_dialogue():
     from web.app import get_proactive_dialogue
+
     return get_proactive_dialogue()
 
 
 def _get_context_awareness():
     from web.app import get_context_awareness
+
     return get_context_awareness()
 
 
 def _get_trigger_system():
     from web.app import get_trigger_system
+
     return get_trigger_system()
 
 

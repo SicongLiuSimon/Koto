@@ -34,31 +34,31 @@ _QUEUE_FILE = _BASE / "proactive_queue.json"
 _MAX_QUEUE = 20
 # 同类消息最小冷却（小时）
 _COOLDOWN_HOURS = {
-    "greeting":        4,
-    "follow_up":       3,
-    "suggestion":      12,
-    "reminder":        1,
-    "failed_retry":    24,
-    "context_carry":   0.25,
+    "greeting": 4,
+    "follow_up": 3,
+    "suggestion": 12,
+    "reminder": 1,
+    "failed_retry": 24,
+    "context_carry": 0.25,
     "session_summary": 1,
-    "insight":         8,
-    "correction_hint": 48,   # 48h — 相当低频，避免打扰
+    "insight": 8,
+    "correction_hint": 48,  # 48h — 相当低频，避免打扰
 }
 # 这些类型入队新消息时自动淘汰同类旧消息（时效性单槽）
 _SINGLE_SLOT_TYPES = {"greeting", "session_summary", "insight", "correction_hint"}
 
 # 任务类型 → 接续建议（用于 context_carry）
 _TASK_CARRY_HINTS: Dict[str, str] = {
-    "翻译":  "需要我再润色一下，或者翻译其他段落吗？",
-    "写":    "要不要让我帮你检查一遍，或者生成一个大纲？",
-    "代码":  "要不要我帮你写测试用例，或者添加注释？",
-    "总结":  "要不要我再提炼出几个关键行动点？",
-    "分析":  "需要我把分析结果整理成报告格式吗？",
-    "邮件":  "要不要我帮你想一个更好的主题行？",
-    "数据":  "要不要我帮你生成一张可视化图表？",
-    "报告":  "要不要我帮你生成一份简洁的执行摘要？",
-    "表格":  "要不要我帮你分析一下数据规律？",
-    "图片":  "需要我帮你调整描述或生成更多变体吗？",
+    "翻译": "需要我再润色一下，或者翻译其他段落吗？",
+    "写": "要不要让我帮你检查一遍，或者生成一个大纲？",
+    "代码": "要不要我帮你写测试用例，或者添加注释？",
+    "总结": "要不要我再提炼出几个关键行动点？",
+    "分析": "需要我把分析结果整理成报告格式吗？",
+    "邮件": "要不要我帮你想一个更好的主题行？",
+    "数据": "要不要我帮你生成一张可视化图表？",
+    "报告": "要不要我帮你生成一份简洁的执行摘要？",
+    "表格": "要不要我帮你分析一下数据规律？",
+    "图片": "需要我帮你调整描述或生成更多变体吗？",
 }
 
 
@@ -204,6 +204,7 @@ class ProactiveAgent:
           failed_retry → 4h
         """
         from app.core.monitoring.shadow_watcher import get_shadow_watcher
+
         watcher = get_shadow_watcher()
         if not watcher.enabled:
             return
@@ -232,6 +233,7 @@ class ProactiveAgent:
         obs                  — 当前影子观察数据快照
         """
         from app.core.monitoring.shadow_watcher import get_shadow_watcher
+
         if not get_shadow_watcher().enabled:
             return
 
@@ -431,12 +433,15 @@ class ProactiveAgent:
             return None
 
         self._last_suggestion_topic = picked
-        return _make_msg("suggestion", content, priority="low",
-                         triggered_by=f"topic:{picked}", ttl_hours=48)
+        return _make_msg(
+            "suggestion",
+            content,
+            priority="low",
+            triggered_by=f"topic:{picked}",
+            ttl_hours=48,
+        )
 
-    def _build_context_carry(
-        self, completed_task_text: str
-    ) -> Optional[Dict]:
+    def _build_context_carry(self, completed_task_text: str) -> Optional[Dict]:
         """任务刚完成后，主动推断并提出可能的后续动作。"""
         hint = "还有什么我可以继续帮你的吗？"
         for kw, suggestion in _TASK_CARRY_HINTS.items():
@@ -445,7 +450,8 @@ class ProactiveAgent:
                 break
         content = f"✅ 「{completed_task_text[:40]}」完成了！{hint}"
         return _make_msg(
-            "context_carry", content,
+            "context_carry",
+            content,
             priority="medium",
             triggered_by=f"task_done:{completed_task_text[:20]}",
             ttl_hours=2,
@@ -463,15 +469,14 @@ class ProactiveAgent:
             "要不要我整理一份对话摘要，方便你保存或下次继续？"
         )
         return _make_msg(
-            "session_summary", content,
+            "session_summary",
+            content,
             priority="low",
             triggered_by="session_length",
             ttl_hours=4,
         )
 
-    def _build_insight(
-        self, obs: Dict
-    ) -> Optional[Dict]:
+    def _build_insight(self, obs: Dict) -> Optional[Dict]:
         """基于高频话题 / 短语，主动提出效率优化建议（创建 Skill、工作流等）。"""
         recent_topics = obs.get("recent_topics_7d") or {}
         phrases = obs.get("recurring_phrases", {})
@@ -484,7 +489,8 @@ class ProactiveAgent:
                     "要不要让我帮你建一个专属工作流，下次一键搞定？"
                 )
                 return _make_msg(
-                    "insight", content,
+                    "insight",
+                    content,
                     priority="low",
                     triggered_by=f"insight_topic:{topic}",
                     ttl_hours=12,
@@ -498,7 +504,8 @@ class ProactiveAgent:
                     "要不要我把它做成一个快捷 Skill，以后触发更高效？"
                 )
                 return _make_msg(
-                    "insight", content,
+                    "insight",
+                    content,
                     priority="low",
                     triggered_by=f"insight_phrase:{phrase}",
                     ttl_hours=12,
@@ -513,17 +520,20 @@ class ProactiveAgent:
             top_count = current_slot[top_task_type]
             if top_count >= 4:
                 _TASK_TYPE_LABELS = {
-                    "分析": "分析工作", "创作": "写作",
-                    "执行": "系统操作", "问答": "学习研究",
-                    "修改": "内容优化", "搜索": "资料查找",
-                    "翻译": "翻译任务", "讨论": "探讨",
+                    "分析": "分析工作",
+                    "创作": "写作",
+                    "执行": "系统操作",
+                    "问答": "学习研究",
+                    "修改": "内容优化",
+                    "搜索": "资料查找",
+                    "翻译": "翻译任务",
+                    "讨论": "探讨",
                 }
                 label = _TASK_TYPE_LABELS.get(top_task_type, top_task_type)
-                content = (
-                    f"⏰ 这个时间段你通常在做「{label}」——今天也有需要处理的吗？"
-                )
+                content = f"⏰ 这个时间段你通常在做「{label}」——今天也有需要处理的吗？"
                 return _make_msg(
-                    "insight", content,
+                    "insight",
+                    content,
                     priority="low",
                     triggered_by=f"hourly_habit:{current_hour}:{top_task_type}",
                     ttl_hours=6,
@@ -542,7 +552,8 @@ class ProactiveAgent:
             "如果我经常误解你的意图，可以试试在问题前加一句背景说明，效果会更好哦。"
         )
         return _make_msg(
-            "correction_hint", content,
+            "correction_hint",
+            content,
             priority="low",
             triggered_by=f"corrections:{corrections}",
             ttl_hours=48,
@@ -590,7 +601,11 @@ class ProactiveAgent:
 
     def _can_fire(self, msg_type: str, min_cooldown_h: Optional[float] = None) -> bool:
         """检查该类型消息是否脱离冷却期。min_cooldown_h 可覆盖默认冷却时长（用于紧急触发）。"""
-        cooldown_h = min_cooldown_h if min_cooldown_h is not None else _COOLDOWN_HOURS.get(msg_type, 6)
+        cooldown_h = (
+            min_cooldown_h
+            if min_cooldown_h is not None
+            else _COOLDOWN_HOURS.get(msg_type, 6)
+        )
         last = self._last_type_time.get(msg_type)
         if last and (datetime.now() - last).total_seconds() < cooldown_h * 3600:
             return False
@@ -617,7 +632,9 @@ class ProactiveAgent:
             self._queue.append(msg)
             self._last_type_time[msg["type"]] = datetime.now()
         self._save_queue()
-        logger.info("[ProactiveAgent] 新消息入队: [%s] %s", msg["type"], msg["content"][:40])
+        logger.info(
+            "[ProactiveAgent] 新消息入队: [%s] %s", msg["type"], msg["content"][:40]
+        )
         # 实时推送给所有 SSE 订阅者
         with self.__class__._sse_lock:
             dead: List["queue.Queue[Dict]"] = []
@@ -670,7 +687,8 @@ class ProactiveAgent:
                     queue_raw = []
                 # 过滤过期/已关闭条目
                 self._queue = [
-                    m for m in queue_raw
+                    m
+                    for m in queue_raw
                     if not m.get("dismissed")
                     and datetime.fromisoformat(m.get("expires_at", "2000-01-01")) > now
                 ]

@@ -6,7 +6,7 @@ Prompt Adapter - 将用户请求解析为结构化 Markdown
 """
 
 import re
-from typing import List, Dict, Optional, Callable
+from typing import Callable, Dict, List, Optional
 
 
 class PromptAdapter:
@@ -76,7 +76,9 @@ class PromptAdapter:
             candidates["输出"].append(text)
 
         # 规则：约束/要求
-        if any(k in text for k in ["要求", "必须", "不要", "限制", "格式", "风格", "规范"]):
+        if any(
+            k in text for k in ["要求", "必须", "不要", "限制", "格式", "风格", "规范"]
+        ):
             candidates["约束"].append(text)
 
         # 规则：注意事项
@@ -113,7 +115,15 @@ class PromptAdapter:
     ) -> str:
         task_hint = PromptAdapter.TASK_HINT_MAP.get(task_type, "通用任务")
 
-        lines = [f"# 任务解析", "", f"## 任务类型", f"- {task_hint}", "", "## 用户原始请求", user_input]
+        lines = [
+            f"# 任务解析",
+            "",
+            f"## 任务类型",
+            f"- {task_hint}",
+            "",
+            "## 用户原始请求",
+            user_input,
+        ]
 
         if history_summary:
             lines += ["", "## 上下文摘要", history_summary]
@@ -146,7 +156,9 @@ class PromptAdapter:
 
         candidates = PromptAdapter._extract_candidates(user_input)
         history_summary = PromptAdapter._summarize_history(history)
-        base_md = PromptAdapter._build_markdown(task_type, user_input, candidates, history_summary)
+        base_md = PromptAdapter._build_markdown(
+            task_type, user_input, candidates, history_summary
+        )
 
         if not model_generate:
             return base_md

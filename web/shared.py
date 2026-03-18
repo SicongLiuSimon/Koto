@@ -8,6 +8,7 @@ source of truth for application state.
 Usage:
     from web.shared import get_app, settings_manager, session_manager, ...
 """
+
 import json
 import logging
 import os
@@ -112,6 +113,7 @@ settings_manager = SettingsManager()
 def _error_response(message: str, status_code: int = 500, error_type: str = None):
     """Create a standardized JSON error response."""
     from flask import jsonify
+
     payload = {"error": message, "success": False}
     if error_type:
         payload["type"] = error_type

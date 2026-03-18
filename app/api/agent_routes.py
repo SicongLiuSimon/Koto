@@ -525,12 +525,12 @@ def _run_agent_collect(
 @agent_bp.route("/chat", methods=["POST"])
 def chat():
     data = request.json
-    message = data.get('message')
-    session_id = data.get('session_id') or data.get('session', '')
-    history = data.get('history') or _load_history(session_id)
-    model_id = data.get('model', 'gemini-3-flash-preview')
-    skill_id = data.get('skill_id')          # v2: 关联的 Skill ID
-    task_type = data.get('task_type')         # v2: 任务分类
+    message = data.get("message")
+    session_id = data.get("session_id") or data.get("session", "")
+    history = data.get("history") or _load_history(session_id)
+    model_id = data.get("model", "gemini-3-flash-preview")
+    skill_id = data.get("skill_id")  # v2: 关联的 Skill ID
+    task_type = data.get("task_type")  # v2: 任务分类
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -540,6 +540,7 @@ def chat():
     _tracker_path = ""
     try:
         from app.core.memory.conversation_tracker import ConversationTracker
+
         _tracker_path = _get_tracker_path(session_id)
         _tracker = ConversationTracker.load(_tracker_path)
     except Exception as _te:
@@ -549,6 +550,7 @@ def chat():
     _rewritten_message = message
     try:
         from app.core.routing.intent_analyzer import IntentAnalyzer
+
         if IntentAnalyzer.should_analyze(message):
             _rw = IntentAnalyzer.rewrite_intent(message, history, _tracker)
             if _rw and _rw != message:
@@ -561,6 +563,7 @@ def chat():
     _cw_paged_context = ""
     try:
         from app.core.memory.context_window_manager import ContextWindowManager
+
         _cw_out = ContextWindowManager.manage(
             history=history,
             query=_rewritten_message,
@@ -587,9 +590,10 @@ def chat():
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
-    
 
-    skill_id, auto_skill_ids = _resolve_runtime_skill(_rewritten_message, skill_id, task_type)
+    skill_id, auto_skill_ids = _resolve_runtime_skill(
+        _rewritten_message, skill_id, task_type
+    )
 
     agent = get_agent()
     if agent.model_id != model_id:
@@ -699,6 +703,7 @@ def chat():
             if display_answer and not used_local_fallback:
                 try:
                     from app.core.skills.skill_suggester import SkillSuggester
+
                     _suggestions = SkillSuggester.suggest(
                         user_input=message or "",
                         task_type=task_type or "CHAT",
@@ -708,8 +713,12 @@ def chat():
                     if _suggestions:
                         display_answer += SkillSuggester.format_hint(_suggestions)
                     # ── chains_to：基于本轮激活 Skill 推荐下一步 ──────────────
-                    _all_active = list(set((auto_skill_ids or []) + ([skill_id] if skill_id else [])))
-                    _already_ids = [s["id"] for s in _suggestions] if _suggestions else []
+                    _all_active = list(
+                        set((auto_skill_ids or []) + ([skill_id] if skill_id else []))
+                    )
+                    _already_ids = (
+                        [s["id"] for s in _suggestions] if _suggestions else []
+                    )
                     _chains = SkillSuggester.suggest_chains(
                         active_skill_ids=_all_active,
                         already_suggested_ids=_already_ids,

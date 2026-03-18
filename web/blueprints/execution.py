@@ -20,6 +20,7 @@ Routes:
   POST   /api/triggers/params/<id>       — Update trigger parameters
   POST   /api/triggers/feedback          — Submit trigger feedback
 """
+
 import logging
 
 from flask import Blueprint, jsonify, request
@@ -33,13 +34,16 @@ execution_bp = Blueprint("execution", __name__)
 # Lazy helpers – break circular imports with web.app
 # ---------------------------------------------------------------------------
 
+
 def _get_auto_execution():
     from web.app import get_auto_execution
+
     return get_auto_execution()
 
 
 def _get_trigger_system():
     from web.app import get_trigger_system
+
     return get_trigger_system()
 
 

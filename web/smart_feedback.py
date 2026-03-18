@@ -9,14 +9,14 @@ Smart Feedback System — 智能反馈系统
 - 任务感知：PPT/文档/搜索/图像等不同任务有不同风格
 """
 
-import time
+import logging
 import re
 import threading
-from typing import Optional, Callable, Dict, Any, List
-import logging
-
+import time
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
 
 class SmartFeedback:
     """
@@ -39,18 +39,18 @@ class SmartFeedback:
 
     # 任务类型到中文名的映射
     TASK_LABELS = {
-        'PPT': '演示文稿',
-        'WORD': 'Word 文档',
-        'PDF': 'PDF 文档',
-        'EXCEL': 'Excel 表格',
-        'DOC': '文档',
-        'FILE_GEN': '文件',
-        'WEB_SEARCH': '搜索',
-        'RESEARCH': '深度研究',
-        'PAINTER': '图像',
-        'MULTI_STEP': '多步任务',
-        'AGENT': '智能助手',
-        'CHAT': '对话',
+        "PPT": "演示文稿",
+        "WORD": "Word 文档",
+        "PDF": "PDF 文档",
+        "EXCEL": "Excel 表格",
+        "DOC": "文档",
+        "FILE_GEN": "文件",
+        "WEB_SEARCH": "搜索",
+        "RESEARCH": "深度研究",
+        "PAINTER": "图像",
+        "MULTI_STEP": "多步任务",
+        "AGENT": "智能助手",
+        "CHAT": "对话",
     }
 
     def __init__(
@@ -74,7 +74,7 @@ class SmartFeedback:
         self.current_step = 0
         self.start_time = time.time()
         self._topic = self._extract_topic(user_request)
-        self._task_label = self.TASK_LABELS.get(self.task_type, '任务')
+        self._task_label = self.TASK_LABELS.get(self.task_type, "任务")
         self._history: List[str] = []
         self._heartbeat_thread: Optional[threading.Thread] = None
         self._heartbeat_active = False
@@ -85,12 +85,14 @@ class SmartFeedback:
         """从用户请求中提取主题关键词"""
         # 移除动作词，提取主题
         cleaned = re.sub(
-            r'(帮我|请|给我|做一个|生成|制作|创建|写一个|关于|的PPT|的演示|的文档|的报告|ppt|word|excel|pdf)',
-            '', text, flags=re.IGNORECASE
+            r"(帮我|请|给我|做一个|生成|制作|创建|写一个|关于|的PPT|的演示|的文档|的报告|ppt|word|excel|pdf)",
+            "",
+            text,
+            flags=re.IGNORECASE,
         ).strip()
         # 取前30字作为主题摘要
         if len(cleaned) > 30:
-            cleaned = cleaned[:30] + '...'
+            cleaned = cleaned[:30] + "..."
         return cleaned or text[:30]
 
     def _elapsed(self) -> str:
@@ -147,7 +149,9 @@ class SmartFeedback:
         """发送警告消息。返回 (msg, detail)。"""
         return self._send(f"⚠️ {message}", detail)
 
-    def quality_report(self, score: int, issues: List[str] = None, fixes: List[str] = None):
+    def quality_report(
+        self, score: int, issues: List[str] = None, fixes: List[str] = None
+    ):
         """发送质量检查报告"""
         if score >= 80:
             emoji = "✅"
@@ -232,7 +236,9 @@ class SmartFeedback:
         else:
             return self.step(f"正在分析主题并规划演示文稿结构")
 
-    def ppt_outline_ready(self, slide_count: int, title: str = "", type_summary: str = ""):
+    def ppt_outline_ready(
+        self, slide_count: int, title: str = "", type_summary: str = ""
+    ):
         """PPT: 大纲就绪。返回 (msg, detail)。"""
         detail_parts = []
         if title:
@@ -242,7 +248,7 @@ class SmartFeedback:
         return self.step(
             f"内容规划完成，共 {slide_count} 页幻灯片",
             " | ".join(detail_parts) if detail_parts else "",
-            important=True
+            important=True,
         )
 
     def ppt_enriching(self, count: int):
@@ -267,7 +273,9 @@ class SmartFeedback:
     def ppt_rendering(self, slide_count: int = 0):
         """PPT: 开始渲染。返回 (msg, detail)。"""
         if slide_count:
-            return self.step(f"正在渲染 {slide_count} 页 PPT 文件", "应用主题样式和排版")
+            return self.step(
+                f"正在渲染 {slide_count} 页 PPT 文件", "应用主题样式和排版"
+            )
         else:
             return self.step("正在渲染 PPT 文件")
 
@@ -275,7 +283,9 @@ class SmartFeedback:
         """PPT: 逐页渲染进度。返回 (msg, detail)。"""
         return self.substep(f"渲染 {current}/{total}: {title}", stype)
 
-    def ppt_quality_check(self, score: int, issues: List[str] = None, fixes: List[str] = None):
+    def ppt_quality_check(
+        self, score: int, issues: List[str] = None, fixes: List[str] = None
+    ):
         """PPT 质量检查结果。返回 (msg, detail)。"""
         return self.quality_report(score, issues, fixes)
 
@@ -309,7 +319,10 @@ class SmartFeedback:
         detail = ""
         if char_count:
             detail = f"获取 {char_count} 字符参考资料"
-        return self.substep(f"搜索完成" + (f"，获取 {result_count} 条结果" if result_count else ""), detail)
+        return self.substep(
+            f"搜索完成" + (f"，获取 {result_count} 条结果" if result_count else ""),
+            detail,
+        )
 
     # ─── 研究专用方法 ───
 
@@ -325,16 +338,34 @@ class SmartFeedback:
     # ─── 通用工厂方法 ───
 
     @classmethod
-    def for_ppt(cls, user_request: str, emit: Callable, total_steps: int = 7) -> 'SmartFeedback':
+    def for_ppt(
+        cls, user_request: str, emit: Callable, total_steps: int = 7
+    ) -> "SmartFeedback":
         """创建 PPT 任务的反馈器"""
-        return cls(user_request=user_request, task_type="PPT", emit=emit, total_steps=total_steps)
+        return cls(
+            user_request=user_request,
+            task_type="PPT",
+            emit=emit,
+            total_steps=total_steps,
+        )
 
     @classmethod
-    def for_document(cls, user_request: str, emit: Callable, doc_type: str = "WORD") -> 'SmartFeedback':
+    def for_document(
+        cls, user_request: str, emit: Callable, doc_type: str = "WORD"
+    ) -> "SmartFeedback":
         """创建文档任务的反馈器"""
-        return cls(user_request=user_request, task_type=doc_type, emit=emit, total_steps=4)
+        return cls(
+            user_request=user_request, task_type=doc_type, emit=emit, total_steps=4
+        )
 
     @classmethod
-    def for_multi_step(cls, user_request: str, emit: Callable, total_steps: int = 3) -> 'SmartFeedback':
+    def for_multi_step(
+        cls, user_request: str, emit: Callable, total_steps: int = 3
+    ) -> "SmartFeedback":
         """创建多步任务的反馈器"""
-        return cls(user_request=user_request, task_type="MULTI_STEP", emit=emit, total_steps=total_steps)
+        return cls(
+            user_request=user_request,
+            task_type="MULTI_STEP",
+            emit=emit,
+            total_steps=total_steps,
+        )

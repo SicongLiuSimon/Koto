@@ -14,6 +14,7 @@
         top_k=5,
     )
 """
+
 from __future__ import annotations
 
 import json
@@ -87,7 +88,18 @@ def _search_files_in_dirs(
         pass
 
     # 2. Fallback: glob scan
-    _SUPPORTED = {".doc", ".docx", ".pdf", ".txt", ".xlsx", ".xls", ".pptx", ".ppt", ".csv", ".md"}
+    _SUPPORTED = {
+        ".doc",
+        ".docx",
+        ".pdf",
+        ".txt",
+        ".xlsx",
+        ".xls",
+        ".pptx",
+        ".ppt",
+        ".csv",
+        ".md",
+    }
     _exts = set(ext_filters) if ext_filters else _SUPPORTED
     seen: set = set()
     for d in search_dirs:
@@ -114,7 +126,11 @@ def _search_files_in_dirs(
             if not dp.is_dir():
                 continue
             for p in dp.iterdir():
-                if p.is_file() and p.suffix.lower() in _exts and not p.name.startswith("~$"):
+                if (
+                    p.is_file()
+                    and p.suffix.lower() in _exts
+                    and not p.name.startswith("~$")
+                ):
                     if str(p) not in seen:
                         seen.add(str(p))
                         found.append(str(p))
@@ -200,6 +216,7 @@ def answer_file_question(
     )
     try:
         import requests as _req
+
         resp = _req.post(
             f"{_OLLAMA_URL}/api/generate",
             json={
@@ -210,7 +227,11 @@ def answer_file_question(
             },
             timeout=60,
         )
-        answer = resp.json().get("response", "").strip() if resp.status_code == 200 else "（模型无响应）"
+        answer = (
+            resp.json().get("response", "").strip()
+            if resp.status_code == 200
+            else "（模型无响应）"
+        )
     except Exception as e:
         return {"success": False, "error": str(e), "answer": "", "sources": sources}
 
@@ -270,20 +291,34 @@ def filter_files_by_criterion(
             "total_scanned": 0,
         }
 
-    _SUPPORTED = {".doc", ".docx", ".pdf", ".txt", ".xlsx", ".xls",
-                  ".pptx", ".ppt", ".csv", ".md", ".rtf"}
+    _SUPPORTED = {
+        ".doc",
+        ".docx",
+        ".pdf",
+        ".txt",
+        ".xlsx",
+        ".xls",
+        ".pptx",
+        ".ppt",
+        ".csv",
+        ".md",
+        ".rtf",
+    }
     _exts = set(ext_filters) if ext_filters else _SUPPORTED
 
     dp = Path(directory)
     if not dp.is_dir():
-        return {"success": False, "error": f"目录不存在: {directory}",
-                "matches": [], "total_scanned": 0}
+        return {
+            "success": False,
+            "error": f"目录不存在: {directory}",
+            "matches": [],
+            "total_scanned": 0,
+        }
 
     all_files = [
-        p for p in dp.iterdir()
-        if p.is_file()
-        and p.suffix.lower() in _exts
-        and not p.name.startswith("~$")
+        p
+        for p in dp.iterdir()
+        if p.is_file() and p.suffix.lower() in _exts and not p.name.startswith("~$")
     ]
 
     if not all_files:
@@ -295,7 +330,7 @@ def filter_files_by_criterion(
 
     # Process in batches to keep prompt size reasonable
     for batch_start in range(0, len(all_files), batch_size):
-        batch = all_files[batch_start: batch_start + batch_size]
+        batch = all_files[batch_start : batch_start + batch_size]
         file_entries = []
         for local_idx, fp in enumerate(batch, 1):
             content = _extract_content_local(str(fp))
@@ -329,11 +364,13 @@ def filter_files_by_criterion(
             for hit in data.get("matches", []):
                 idx = hit.get("index", 1) - 1  # convert to 0-based
                 if 0 <= idx < len(batch):
-                    all_matches.append({
-                        "file_name": batch[idx].name,
-                        "file_path": str(batch[idx]),
-                        "reason": hit.get("reason", ""),
-                    })
+                    all_matches.append(
+                        {
+                            "file_name": batch[idx].name,
+                            "file_path": str(batch[idx]),
+                            "reason": hit.get("reason", ""),
+                        }
+                    )
         except Exception:
             continue
 

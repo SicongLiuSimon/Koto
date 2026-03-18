@@ -1,5 +1,6 @@
-import threading
 import hashlib
+import threading
+
 # google.genai.types 延迟到 classify() 内部加载，避免启动时加载 (~4.7s)
 
 
@@ -14,24 +15,29 @@ class AIRouter:
 
     # 路由模型降级链（所有模型必须支持 generate_content，不能是 interactions_only）
     _ROUTER_MODEL_CHAIN: list = [
-        "gemini-3-flash-preview",   # 首选：当前最快可用的 Flash 模型
-        "gemini-3-pro-preview",     # 备选1：当前 Pro 模型（路由任务也可用）
-        "gemini-2.5-flash",         # 备选2：旧版 Flash 兜底
-        "gemini-2.0-flash",         # 备选3
-        "gemini-2.0-flash-lite",    # 备选4：极端兜底
+        "gemini-3-flash-preview",  # 首选：当前最快可用的 Flash 模型
+        "gemini-3-pro-preview",  # 备选1：当前 Pro 模型（路由任务也可用）
+        "gemini-2.5-flash",  # 备选2：旧版 Flash 兜底
+        "gemini-2.0-flash",  # 备选3
+        "gemini-2.0-flash-lite",  # 备选4：极端兜底
     ]
 
     # 已知 Interactions-only 模型前缀（不能用 generate_content，拒绝设为路由模型）
     # 注意：gemini-3-flash-preview / gemini-3-pro-preview 是普通模型，不在此列
-    _INTERACTIONS_ONLY_PREFIXES: tuple = (
-        "deep-research-",
-    )
+    _INTERACTIONS_ONLY_PREFIXES: tuple = ("deep-research-",)
 
     # 判定模型不可用的错误信号词
     _MODEL_UNAVAILABLE_KEYWORDS: tuple = (
-        "404", "not found", "not supported", "unavailable", "deprecated",
-        "invalid_argument", "is not supported", "does not exist",
-        "interactions api only", "interactions only",
+        "404",
+        "not found",
+        "not supported",
+        "unavailable",
+        "deprecated",
+        "invalid_argument",
+        "is not supported",
+        "does not exist",
+        "interactions api only",
+        "interactions only",
     )
 
     @classmethod
@@ -95,7 +101,7 @@ class AIRouter:
         """Set a cache entry, evicting oldest half when full."""
         if len(cls._cache) >= cls._CACHE_MAX_SIZE:
             keys = list(cls._cache.keys())
-            for k in keys[:len(keys) // 2]:
+            for k in keys[: len(keys) // 2]:
                 del cls._cache[k]
         cls._cache[key] = value
 
@@ -114,12 +120,13 @@ class AIRouter:
         - confidence: 置信度描述
         - source: "AI" 或 "Cache"
         """
-        
+
         # 动态构建技能路由提示（根据当前启用的 skill）
         _dynamic_instruction = cls.ROUTER_INSTRUCTION
         _skill_hint_hash = ""
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
             _hints = []
             for s in SkillManager._registry.values():
@@ -128,13 +135,11 @@ class AIRouter:
                 _intent = s.get("intent_description", "")
                 _tts = s.get("task_types", [])
                 if _intent and _tts:
-                    _hints.append(
-                        f"- 若用户意图是「{_intent}」→ 优先路由到 {_tts[0]}"
-                    )
+                    _hints.append(f"- 若用户意图是「{_intent}」→ 优先路由到 {_tts[0]}")
             if _hints:
-                _skill_hint_hash = hashlib.md5(
-                    "\n".join(_hints).encode()
-                ).hexdigest()[:8]
+                _skill_hint_hash = hashlib.md5("\n".join(_hints).encode()).hexdigest()[
+                    :8
+                ]
                 _dynamic_instruction = (
                     cls.ROUTER_INSTRUCTION
                     + "\n\n当前用户启用的 Skill 路由提示（优先参考）:\n"
@@ -144,21 +149,32 @@ class AIRouter:
             pass
 
         # 检查缓存（加入 skill 状态哈希，技能启用变化时自动失效）
-        cache_key = hashlib.md5(
-            (user_input + _skill_hint_hash).encode()
-        ).hexdigest()[:16]
+        cache_key = hashlib.md5((user_input + _skill_hint_hash).encode()).hexdigest()[
+            :16
+        ]
         if cache_key in cls._cache:
             cached = cls._cache[cache_key]
             print(f"[AIRouter] Cache hit: {cached}")
             return cached[0], cached[1], "Cache"
-        
+
         try:
             result_holder = {"task": None, "error": None}
-            valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
-                           "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+            valid_tasks = [
+                "PAINTER",
+                "FILE_GEN",
+                "DOC_ANNOTATE",
+                "RESEARCH",
+                "CODER",
+                "FILE_SEARCH",
+                "SYSTEM",
+                "AGENT",
+                "WEB_SEARCH",
+                "CHAT",
+            ]
 
             def call_model():
                 from google.genai import types
+
                 # 构建尝试顺序：当前模型优先，再按降级链补全
                 models_to_try = [cls._router_model]
                 for m in cls._ROUTER_MODEL_CHAIN:
@@ -173,30 +189,37 @@ class AIRouter:
                                 system_instruction=_dynamic_instruction,
                                 max_output_tokens=20,  # 只需要一个词
                                 temperature=0.1,  # 低温度，更确定性
-                            )
+                            ),
                         )
                         if response.candidates and response.candidates[0].content.parts:
-                            text = response.candidates[0].content.parts[0].text.strip().upper()
+                            text = (
+                                response.candidates[0]
+                                .content.parts[0]
+                                .text.strip()
+                                .upper()
+                            )
                             for task in valid_tasks:
                                 if task in text:
-                                    result_holder['task'] = task
+                                    result_holder["task"] = task
                                     break
                             else:
-                                result_holder['task'] = "CHAT"
+                                result_holder["task"] = "CHAT"
                         else:
-                            result_holder['task'] = "CHAT"
+                            result_holder["task"] = "CHAT"
                         if model_id != cls._router_model:
-                            print(f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}")
+                            print(
+                                f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}"
+                            )
                             cls._router_model = model_id
                         return
                     except Exception as e:
                         if cls._is_model_unavailable(str(e)):
                             print(f"[AIRouter] 模型 {model_id} 不可用，尝试下一个: {e}")
                             continue
-                        result_holder['error'] = str(e)
+                        result_holder["error"] = str(e)
                         return
-                result_holder['error'] = "所有路由模型均不可用"
-            
+                result_holder["error"] = "所有路由模型均不可用"
+
             # 带超时的调用
             thread = threading.Thread(target=call_model, daemon=True)
             thread.start()
@@ -268,10 +291,22 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             result_holder = {"task": None, "hint": None, "error": None}
 
             def call_model():
-                from google.genai import types
                 import json as _json
-                valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
-                               "CODER", "FILE_SEARCH", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT"]
+
+                from google.genai import types
+
+                valid_tasks = [
+                    "PAINTER",
+                    "FILE_GEN",
+                    "DOC_ANNOTATE",
+                    "RESEARCH",
+                    "CODER",
+                    "FILE_SEARCH",
+                    "SYSTEM",
+                    "AGENT",
+                    "WEB_SEARCH",
+                    "CHAT",
+                ]
                 # 构建尝试顺序：当前模型优先，再按降级链补全
                 models_to_try = [cls._router_model]
                 for m in cls._ROUTER_MODEL_CHAIN:
@@ -287,7 +322,7 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
                                 max_output_tokens=150,
                                 temperature=0.1,
                                 response_mime_type="application/json",
-                            )
+                            ),
                         )
                         if response.candidates and response.candidates[0].content.parts:
                             raw = response.candidates[0].content.parts[0].text.strip()
@@ -297,11 +332,17 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
                                 task = str(data.get("task", "")).strip().upper()
                                 hint_raw = data.get("hint") or None
                                 if task in valid_tasks:
-                                    result_holder['task'] = task
-                                    if hint_raw and isinstance(hint_raw, str) and len(hint_raw.strip()) > 3:
-                                        result_holder['hint'] = hint_raw.strip()
+                                    result_holder["task"] = task
+                                    if (
+                                        hint_raw
+                                        and isinstance(hint_raw, str)
+                                        and len(hint_raw.strip()) > 3
+                                    ):
+                                        result_holder["hint"] = hint_raw.strip()
                                     if model_id != cls._router_model:
-                                        print(f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}")
+                                        print(
+                                            f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}"
+                                        )
                                         cls._router_model = model_id
                                     return
                             except Exception:
@@ -309,25 +350,29 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
                             # 纯文本回退解析
                             for task in valid_tasks:
                                 if task in raw.upper():
-                                    result_holder['task'] = task
+                                    result_holder["task"] = task
                                     if model_id != cls._router_model:
-                                        print(f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}")
+                                        print(
+                                            f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}"
+                                        )
                                         cls._router_model = model_id
                                     return
-                            result_holder['task'] = "CHAT"
+                            result_holder["task"] = "CHAT"
                         else:
-                            result_holder['task'] = "CHAT"
+                            result_holder["task"] = "CHAT"
                         if model_id != cls._router_model:
-                            print(f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}")
+                            print(
+                                f"[AIRouter] 路由模型降级: {cls._router_model} → {model_id}"
+                            )
                             cls._router_model = model_id
                         return
                     except Exception as e:
                         if cls._is_model_unavailable(str(e)):
                             print(f"[AIRouter] 模型 {model_id} 不可用，尝试下一个: {e}")
                             continue
-                        result_holder['error'] = str(e)
+                        result_holder["error"] = str(e)
                         return
-                result_holder['error'] = "所有路由模型均不可用"
+                result_holder["error"] = "所有路由模型均不可用"
 
             thread = threading.Thread(target=call_model, daemon=True)
             thread.start()
@@ -346,7 +391,9 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             hint = result_holder["hint"]
             if task:
                 cls._cache_set(cache_key, (task, "🤖 AI+Hint", hint))
-                print(f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}")
+                print(
+                    f"[AIRouter] classify_with_hint → {task} | hint={'yes' if hint else 'none'}"
+                )
                 return task, "🤖 AI+Hint", "AI", hint
 
             task, conf, src = cls.classify(client, user_input, timeout=timeout)

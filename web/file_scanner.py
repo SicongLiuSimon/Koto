@@ -38,37 +38,130 @@ from typing import Any, Callable, Dict, List, Optional
 
 # 系统/无意义目录 — 跳过，不扫描
 _SKIP_DIRS_WIN = {
-    "windows", "$recycle.bin", "recycler", "system volume information",
-    "programdata", "program files", "program files (x86)",
-    "appdata", "localappdata", "users\\default", "users\\public\\documents\\my music",
-    "boot", "recovery", "perflogs",
-    "__pycache__", ".git", ".svn", "node_modules", ".venv", "venv", "env",
-    "site-packages", "dist-packages",
+    "windows",
+    "$recycle.bin",
+    "recycler",
+    "system volume information",
+    "programdata",
+    "program files",
+    "program files (x86)",
+    "appdata",
+    "localappdata",
+    "users\\default",
+    "users\\public\\documents\\my music",
+    "boot",
+    "recovery",
+    "perflogs",
+    "__pycache__",
+    ".git",
+    ".svn",
+    "node_modules",
+    ".venv",
+    "venv",
+    "env",
+    "site-packages",
+    "dist-packages",
 }
 
 _SKIP_EXT = {
-    ".sys", ".dll", ".exe", ".pdb", ".cab", ".msi", ".ocx",
-    ".drv", ".ini", ".lnk", ".tmp", ".log", ".dat", ".bak",
-    ".swp", ".swo", ".DS_Store",
+    ".sys",
+    ".dll",
+    ".exe",
+    ".pdb",
+    ".cab",
+    ".msi",
+    ".ocx",
+    ".drv",
+    ".ini",
+    ".lnk",
+    ".tmp",
+    ".log",
+    ".dat",
+    ".bak",
+    ".swp",
+    ".swo",
+    ".DS_Store",
 }
 
 # 文件分类
 _CATEGORY = {
-    "文档": {".doc", ".docx", ".pdf", ".txt", ".md", ".rtf", ".odt",
-              ".wps", ".ppt", ".pptx", ".odp", ".xls", ".xlsx", ".ods",
-              ".csv", ".html", ".htm", ".epub", ".mobi"},
-    "图片": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg",
-              ".tif", ".tiff", ".ico", ".heic", ".raw", ".cr2"},
-    "视频": {".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm",
-              ".m4v", ".ts", ".rmvb"},
-    "音频": {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma",
-              ".opus", ".ape"},
-    "代码": {".py", ".js", ".ts", ".java", ".c", ".cpp", ".cs", ".go",
-              ".rs", ".php", ".rb", ".swift", ".kt", ".r", ".scala",
-              ".sh", ".bat", ".ps1", ".json", ".xml", ".yaml", ".yml",
-              ".sql", ".css", ".scss"},
-    "压缩包": {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz",
-               ".tgz", ".iso"},
+    "文档": {
+        ".doc",
+        ".docx",
+        ".pdf",
+        ".txt",
+        ".md",
+        ".rtf",
+        ".odt",
+        ".wps",
+        ".ppt",
+        ".pptx",
+        ".odp",
+        ".xls",
+        ".xlsx",
+        ".ods",
+        ".csv",
+        ".html",
+        ".htm",
+        ".epub",
+        ".mobi",
+    },
+    "图片": {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".svg",
+        ".tif",
+        ".tiff",
+        ".ico",
+        ".heic",
+        ".raw",
+        ".cr2",
+    },
+    "视频": {
+        ".mp4",
+        ".avi",
+        ".mkv",
+        ".mov",
+        ".wmv",
+        ".flv",
+        ".webm",
+        ".m4v",
+        ".ts",
+        ".rmvb",
+    },
+    "音频": {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma", ".opus", ".ape"},
+    "代码": {
+        ".py",
+        ".js",
+        ".ts",
+        ".java",
+        ".c",
+        ".cpp",
+        ".cs",
+        ".go",
+        ".rs",
+        ".php",
+        ".rb",
+        ".swift",
+        ".kt",
+        ".r",
+        ".scala",
+        ".sh",
+        ".bat",
+        ".ps1",
+        ".json",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".sql",
+        ".css",
+        ".scss",
+    },
+    "压缩包": {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz", ".iso"},
 }
 
 # 最大单次扫描文件数（防止内存爆炸）
@@ -79,15 +172,16 @@ _YIELD_EVERY = 5_000
 
 # ─── Data Model ───────────────────────────────────────────────────────────────
 
+
 @dataclass
 class FileEntry:
-    path: str        # 绝对路径
-    name: str        # 文件名（原始大小写）
+    path: str  # 绝对路径
+    name: str  # 文件名（原始大小写）
     name_lower: str  # 文件名小写（用于搜索）
-    ext: str         # 扩展名（小写，含圆点）
-    size: int        # 字节数
-    mtime: float     # 修改时间戳
-    category: str    # 文件类别
+    ext: str  # 扩展名（小写，含圆点）
+    size: int  # 字节数
+    mtime: float  # 修改时间戳
+    category: str  # 文件类别
 
 
 def _classify(ext: str) -> str:
@@ -98,6 +192,7 @@ def _classify(ext: str) -> str:
 
 
 # ─── FileScanner ──────────────────────────────────────────────────────────────
+
 
 class FileScanner:
     """全盘文件扫描与搜索引擎（单例，线程安全）"""
@@ -197,7 +292,7 @@ class FileScanner:
         with cls._lock:
             if cls._status["running"]:
                 return False  # 已经在扫描
-        
+
         if drives is None:
             drives = cls.get_drives()
 
@@ -249,12 +344,14 @@ class FileScanner:
 
         try:
             for drive in drives:
-                for root_dir, dirs, files in os.walk(drive, topdown=True, followlinks=False):
+                for root_dir, dirs, files in os.walk(
+                    drive, topdown=True, followlinks=False
+                ):
                     # 跳过系统目录（原地修改 dirs 阻止 os.walk 递归进入）
                     dirs[:] = [
-                        d for d in dirs
-                        if d.lower() not in _SKIP_DIRS_WIN
-                        and not d.startswith(".")
+                        d
+                        for d in dirs
+                        if d.lower() not in _SKIP_DIRS_WIN and not d.startswith(".")
                     ]
 
                     # 更新当前目录状态
@@ -315,7 +412,9 @@ class FileScanner:
                 cls._status["end_time"] = time.time()
 
             cls._save_index()
-            logger.info(f"[FileScanner] ✅ 扫描完成: {scanned:,} 已检查 / {len(new_index):,} 已索引")
+            logger.info(
+                f"[FileScanner] ✅ 扫描完成: {scanned:,} 已检查 / {len(new_index):,} 已索引"
+            )
 
         except Exception as e:
             with cls._lock:
@@ -385,24 +484,28 @@ class FileScanner:
 
             # 4. 序列相似度（较慢，仅对分较低的时候用）
             if score < 0.5:
-                seq = difflib.SequenceMatcher(None, q, name_no_ext, autojunk=False).ratio()
+                seq = difflib.SequenceMatcher(
+                    None, q, name_no_ext, autojunk=False
+                ).ratio()
                 if seq > score:
                     score = seq * 0.8  # 序列相似度打九折
 
             if score < min_score:
                 continue
 
-            results.append({
-                "path": entry.path,
-                "name": entry.name,
-                "ext": entry.ext,
-                "size": entry.size,
-                "size_str": _human_size(entry.size),
-                "mtime": entry.mtime,
-                "mtime_str": _human_time(entry.mtime),
-                "category": entry.category,
-                "score": round(score, 3),
-            })
+            results.append(
+                {
+                    "path": entry.path,
+                    "name": entry.name,
+                    "ext": entry.ext,
+                    "size": entry.size,
+                    "size_str": _human_size(entry.size),
+                    "mtime": entry.mtime,
+                    "mtime_str": _human_time(entry.mtime),
+                    "category": entry.category,
+                    "score": round(score, 3),
+                }
+            )
 
         # 排序：score 高 → 修改时间新
         results.sort(key=lambda r: (-r["score"], -r["mtime"]))
@@ -420,9 +523,11 @@ class FileScanner:
                 os.startfile(path)
             elif sys.platform == "darwin":
                 import subprocess
+
                 subprocess.Popen(["open", path])
             else:
                 import subprocess
+
                 subprocess.Popen(["xdg-open", path])
             return {
                 "success": True,
@@ -464,6 +569,7 @@ class FileScanner:
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _human_size(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if n < 1024:
@@ -474,6 +580,7 @@ def _human_size(n: int) -> str:
 
 def _human_time(ts: float) -> str:
     import datetime
+
     try:
         return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
     except Exception:
@@ -486,11 +593,9 @@ _STRIP_PREFIXES = re.compile(
     r"^(帮我|请|能不能帮我|你能|麻烦)?"
     r"(找|找一下|找找|搜索|搜一下|查找|打开|打开一下|定位|帮我找|帮我打开|"
     r"open|find|search|locate|look for)\s*",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
-_STRIP_SUFFIXES = re.compile(
-    r"(文件|这个文件|那个文件|的文件|\.?\s*$)", re.IGNORECASE
-)
+_STRIP_SUFFIXES = re.compile(r"(文件|这个文件|那个文件|的文件|\.?\s*$)", re.IGNORECASE)
 
 
 def extract_query_from_input(text: str) -> str:
@@ -511,19 +616,59 @@ def extract_query_from_input(text: str) -> str:
 # ─── Intent detection ─────────────────────────────────────────────────────────
 
 _DISK_SEARCH_KEYWORDS = [
-    "找文件", "帮我找", "打开文件", "帮我打开", "找一下", "找找", "搜索文件",
-    "定位文件", "在哪里", "查找文件", "哪个文件", "找到这个文件",
-    "打开一下", "找出来", "定位一下", "show me", "open file", "find file",
-    "find the file", "where is", "locate file",
+    "找文件",
+    "帮我找",
+    "打开文件",
+    "帮我打开",
+    "找一下",
+    "找找",
+    "搜索文件",
+    "定位文件",
+    "在哪里",
+    "查找文件",
+    "哪个文件",
+    "找到这个文件",
+    "打开一下",
+    "找出来",
+    "定位一下",
+    "show me",
+    "open file",
+    "find file",
+    "find the file",
+    "where is",
+    "locate file",
     # 列举/归纳/浏览类
-    "列出", "列举", "归纳", "列一下", "有哪些", "看看有什么", "显示文件",
+    "列出",
+    "列举",
+    "归纳",
+    "列一下",
+    "有哪些",
+    "看看有什么",
+    "显示文件",
     # 扫描类
-    "扫描我的电脑", "扫描电脑", "扫描磁盘", "扫描硬盘", "全盘扫描", "开始扫描",
-    "scan my", "start scan", "全盘搜索",
+    "扫描我的电脑",
+    "扫描电脑",
+    "扫描磁盘",
+    "扫描硬盘",
+    "全盘扫描",
+    "开始扫描",
+    "scan my",
+    "start scan",
+    "全盘搜索",
     # 文件夹监控类
-    "监控文件夹", "监控目录", "开始监控", "停止监控", "正在监控", "监控列表",
+    "监控文件夹",
+    "监控目录",
+    "开始监控",
+    "停止监控",
+    "正在监控",
+    "监控列表",
     # 文件内容读取/问答类
-    "提取字段", "提取信息", "关键信息", "合同信息", "解读这个", "分析这个文件",
+    "提取字段",
+    "提取信息",
+    "关键信息",
+    "合同信息",
+    "解读这个",
+    "分析这个文件",
 ]
 
 
@@ -531,7 +676,7 @@ def is_disk_search_intent(text: str) -> bool:
     """判断用户输入是否是全盘文件搜索意图"""
     tl = text.lower()
     # 明确的 Windows 路径（如 C:\xxx）= 始终视为磁盘搜索
-    if re.search(r'[a-z]:[/\\]', tl):
+    if re.search(r"[a-z]:[/\\]", tl):
         return True
     return any(kw in tl for kw in _DISK_SEARCH_KEYWORDS)
 

@@ -398,7 +398,6 @@ class SkillDefinition:
 
     # ── 方法 ─────────────────────────────────────────────────────────────────
 
-
     def render_prompt(
         self,
         variables: Optional[Dict[str, Any]] = None,
@@ -427,7 +426,11 @@ class SkillDefinition:
             try:
                 template = template.format(**variables)
             except KeyError as e:
-                logger.warning("[SkillDefinition] render_prompt() missing variable %s for skill=%s", e, self.id)
+                logger.warning(
+                    "[SkillDefinition] render_prompt() missing variable %s for skill=%s",
+                    e,
+                    self.id,
+                )
 
         parts = [template] if template else []
 

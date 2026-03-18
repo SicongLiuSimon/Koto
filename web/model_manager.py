@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 TASK_REQUIREMENTS: Dict[str, Dict[str, Any]] = {
     # CHAT 极度优先 speed，确保 Flash 始终胜出 Pro 模型（Pro score≈19 < Flash score≈23.8）
     "CHAT": {
-        "speed": 14,   # 提高速度权重：Flash(speed=9)≈23.8 > Pro(speed=4)≈21.4
+        "speed": 14,  # 提高速度权重：Flash(speed=9)≈23.8 > Pro(speed=4)≈21.4
         "quality": 6,
         "context": 4,
         "reasoning": 4,
@@ -112,28 +112,46 @@ LOCAL_EXECUTOR_TASKS = {"SYSTEM", "FILE_OP"}
 KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     # ── Gemini 3.x ──────────────────────────────────────────────
     "gemini-3-pro-preview": {
-        "provider": "gemini", "tier": 9,
-        "speed": 4,  "quality": 10, "reasoning": 10,
-        "context": 10, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 9,
+        "speed": 4,
+        "quality": 10,
+        "reasoning": 10,
+        "context": 10,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,  # 普通 Gemini 模型，直接用 generate_content
         "display": "Gemini 3.0 Pro 🚀",
         "strengths": ["推理", "代码", "分析", "复杂任务"],
     },
     "gemini-3-flash-preview": {
-        "provider": "gemini", "tier": 7,
-        "speed": 9,  "quality": 7,  "reasoning": 7,
-        "context": 7, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 7,
+        "speed": 9,
+        "quality": 7,
+        "reasoning": 7,
+        "context": 7,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,  # 普通 Gemini 模型，直接用 generate_content
         "display": "Gemini 3.0 Flash ⚡",
         "strengths": ["快速", "对话", "多模态"],
     },
     "gemini-3.1-pro-preview": {
-        "provider": "gemini", "tier": 9,
-        "speed": 4,  "quality": 10, "reasoning": 10,
-        "context": 10, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 9,
+        "speed": 4,
+        "quality": 10,
+        "reasoning": 10,
+        "context": 10,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,
         "display": "Gemini 3.1 Pro 🎯",
         "strengths": ["推理", "代码", "分析", "复杂任务"],
@@ -201,11 +219,17 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     },
     # ── Deep Research ────────────────────────────────────────────
     "deep-research-pro-preview-12-2025": {
-        "provider": "gemini", "tier": 10,
-        "speed": 1,  "quality": 10, "reasoning": 10,
-        "context": 10, "multimodal": False, "function_calling": False,
-        "grounding": True, "image_gen": False,
-        "interactions_only": True,   # 仅支持 Interactions API，不能用 generate_content
+        "provider": "gemini",
+        "tier": 10,
+        "speed": 1,
+        "quality": 10,
+        "reasoning": 10,
+        "context": 10,
+        "multimodal": False,
+        "function_calling": False,
+        "grounding": True,
+        "image_gen": False,
+        "interactions_only": True,  # 仅支持 Interactions API，不能用 generate_content
         "display": "Deep Research Pro 🔬",
         "strengths": ["深度研究", "学术分析", "综合报告"],
     },
@@ -289,7 +313,17 @@ _INFER_RULES: List[Tuple[str, Dict[str, Any]]] = [
     (r"image.*gen|gen.*image", {"image_gen": True}),
     (r"image.*preview|flash.*image", {"image_gen": True, "multimodal": True}),
     # 深度研究（仅支持 Interactions API）
-    (r"deep.?research",  {"grounding": True, "reasoning": 10, "context": 10, "speed": 1, "tier_bonus": 3, "interactions_only": True}),
+    (
+        r"deep.?research",
+        {
+            "grounding": True,
+            "reasoning": 10,
+            "context": 10,
+            "speed": 1,
+            "tier_bonus": 3,
+            "interactions_only": True,
+        },
+    ),
     # Pro 系列能力更强
     (
         r"\bpro\b",
@@ -509,7 +543,11 @@ class ModelManager:
         ]
         for mid in _PREFERRED_FALLBACKS:
             caps = self._cached_caps.get(mid)
-            if caps and not caps.get("interactions_only", False) and not caps.get("image_gen", False):
+            if (
+                caps
+                and not caps.get("interactions_only", False)
+                and not caps.get("image_gen", False)
+            ):
                 return mid
         # 兜底：按 tier+speed 排序，但排除 preview/exp 等访问受限模型
         candidates = [
@@ -523,14 +561,17 @@ class ModelManager:
         ]
         if not candidates:
             candidates = [
-                (mid, caps) for mid, caps in self._cached_caps.items()
+                (mid, caps)
+                for mid, caps in self._cached_caps.items()
                 if not caps.get("interactions_only", False)
                 and not caps.get("image_gen", False)
                 and mid != "local-executor"
             ]
         if not candidates:
             return "gemini-2.5-flash"
-        best = max(candidates, key=lambda x: x[1].get("tier", 0) + x[1].get("speed", 0) * 0.3)
+        best = max(
+            candidates, key=lambda x: x[1].get("tier", 0) + x[1].get("speed", 0) * 0.3
+        )
         return best[0]
 
     def refresh(self) -> Dict[str, str]:
@@ -658,9 +699,9 @@ class ModelManager:
         # CHAT 只允许 Flash 级模型（tier ≤ 7），Pro 模型对会话消息是过度消耗
         _CHAT_MAX_TIER = 7
 
-        best_id          = None
-        best_score       = -1.0
-        best_uncapped    = None   # CHAT 专用：如果无 Flash 可用时的终极兜底
+        best_id = None
+        best_score = -1.0
+        best_uncapped = None  # CHAT 专用：如果无 Flash 可用时的终极兜底
         best_uncapped_sc = -1.0
 
         for mid in model_ids:
@@ -674,7 +715,7 @@ class ModelManager:
             # 记录不受限的最佳候选（仅 CHAT 需要）
             if task == "CHAT" and sc > best_uncapped_sc:
                 best_uncapped_sc = sc
-                best_uncapped    = mid
+                best_uncapped = mid
             # CHAT 任务：跳过 tier > _CHAT_MAX_TIER 的 Pro 级模型
             if task == "CHAT" and caps.get("tier", 5) > _CHAT_MAX_TIER:
                 continue
@@ -694,18 +735,18 @@ class ModelManager:
     def _static_default_map() -> Dict[str, str]:
         """API 不可用时的静态兜底映射（使用 generate_content 兼容的稳定模型）。"""
         defaults = {
-            "CHAT":       "gemini-3-flash-preview",
-            "CODER":      "gemini-3.1-pro-preview",
+            "CHAT": "gemini-3-flash-preview",
+            "CODER": "gemini-3.1-pro-preview",
             "WEB_SEARCH": "gemini-2.5-flash",
-            "VISION":     "gemini-2.5-flash",
-            "RESEARCH":   "gemini-3.1-pro-preview",
-            "FILE_GEN":     "gemini-3-flash-preview",
+            "VISION": "gemini-2.5-flash",
+            "RESEARCH": "gemini-3.1-pro-preview",
+            "FILE_GEN": "gemini-3-flash-preview",
             "DOC_ANNOTATE": "gemini-3.1-pro-preview",
-            "PAINTER":    "gemini-3.1-flash-image-preview",
-            "AGENT":      "gemini-3-flash-preview",
-            "SYSTEM":     "local-executor",
-            "FILE_OP":    "local-executor",
-            "COMPLEX":    "gemini-3.1-pro-preview",
+            "PAINTER": "gemini-3.1-flash-image-preview",
+            "AGENT": "gemini-3-flash-preview",
+            "SYSTEM": "local-executor",
+            "FILE_OP": "local-executor",
+            "COMPLEX": "gemini-3.1-pro-preview",
         }
         return defaults
 

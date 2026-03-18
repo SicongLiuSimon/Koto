@@ -1,14 +1,15 @@
 """
 Batch file operations with progress tracking.
 """
-import os
-import re
-import json
+
 import csv
-import uuid
-import shutil
+import json
+import os
 import queue
+import re
+import shutil
 import threading
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -49,7 +50,14 @@ class BatchFileOpsManager:
             job = self.jobs.get(job_id)
             return self._job_to_dict(job) if job else None
 
-    def create_job(self, name: str, operation: str, input_dir: str, output_dir: str, options: Dict[str, Any]) -> BatchJobRecord:
+    def create_job(
+        self,
+        name: str,
+        operation: str,
+        input_dir: str,
+        output_dir: str,
+        options: Dict[str, Any],
+    ) -> BatchJobRecord:
         job_id = uuid.uuid4().hex[:12]
         job = BatchJobRecord(
             job_id=job_id,
@@ -90,16 +98,18 @@ class BatchFileOpsManager:
             return {
                 "success": False,
                 "error": "未识别批量操作类型",
-                "hint": self._usage_hint()
+                "hint": self._usage_hint(),
             }
 
         input_dir = self._extract_path(text, ["输入", "从", "目录", "文件夹"])
-        output_dir = self._extract_path(text, ["输出", "保存到", "到", "目标", "导出到"])
+        output_dir = self._extract_path(
+            text, ["输出", "保存到", "到", "目标", "导出到"]
+        )
         if not input_dir or not output_dir:
             return {
                 "success": False,
                 "error": "缺少输入或输出目录",
-                "hint": self._usage_hint()
+                "hint": self._usage_hint(),
             }
 
         options: Dict[str, Any] = {}
@@ -111,7 +121,7 @@ class BatchFileOpsManager:
                 return {
                     "success": False,
                     "error": "缺少目标格式",
-                    "hint": "示例: 批量转换 从 C:\\A 到 D:\\B 转为 pdf"
+                    "hint": "示例: 批量转换 从 C:\\A 到 D:\\B 转为 pdf",
                 }
             options["target_ext"] = target_ext
 
@@ -170,9 +180,13 @@ class BatchFileOpsManager:
         return None
 
     def _extract_exts(self, text: str) -> List[str]:
-        exts = re.findall(r"\.(docx|pdf|xlsx|pptx|txt|json|csv|png|jpg|jpeg)", text, re.IGNORECASE)
+        exts = re.findall(
+            r"\.(docx|pdf|xlsx|pptx|txt|json|csv|png|jpg|jpeg)", text, re.IGNORECASE
+        )
         if not exts:
-            exts = re.findall(r"(docx|pdf|xlsx|pptx|txt|json|csv|png|jpg|jpeg)", text, re.IGNORECASE)
+            exts = re.findall(
+                r"(docx|pdf|xlsx|pptx|txt|json|csv|png|jpg|jpeg)", text, re.IGNORECASE
+            )
         return [f".{e.lower()}" for e in exts]
 
     def _extract_target_ext(self, text: str) -> Optional[str]:
@@ -234,12 +248,12 @@ class BatchFileOpsManager:
     def _usage_hint(self) -> str:
         return (
             "示例:\n"
-            "- 批量转换 从 \"C:\\A\" 输出到 \"D:\\B\" 转为 pdf\n"
-            "- 批量重命名 从 \"C:\\A\" 输出到 \"D:\\B\" 前缀=项目_ 序号=001\n"
-            "- 批量归档 从 \"C:\\A\" 输出到 \"D:\\B\"\n"
-            "- 图片压缩 从 \"C:\\A\" 输出到 \"D:\\B\" 质量=80 宽=1200\n"
-            "- 抽取文本 从 \"C:\\A\" 输出到 \"D:\\B\"\n"
-            "- 批量清理 从 \"C:\\A\" 输出到 \"D:\\B\""
+            '- 批量转换 从 "C:\\A" 输出到 "D:\\B" 转为 pdf\n'
+            '- 批量重命名 从 "C:\\A" 输出到 "D:\\B" 前缀=项目_ 序号=001\n'
+            '- 批量归档 从 "C:\\A" 输出到 "D:\\B"\n'
+            '- 图片压缩 从 "C:\\A" 输出到 "D:\\B" 质量=80 宽=1200\n'
+            '- 抽取文本 从 "C:\\A" 输出到 "D:\\B"\n'
+            '- 批量清理 从 "C:\\A" 输出到 "D:\\B"'
         )
 
     def _run_job(self, job_id: str):
@@ -250,13 +264,16 @@ class BatchFileOpsManager:
 
         job.status = "running"
         job.started_at = datetime.now().isoformat()
-        self._emit(job_id, {
-            "type": "progress",
-            "current": 0,
-            "total": 0,
-            "status": "start",
-            "detail": f"开始处理: {job.name}"
-        })
+        self._emit(
+            job_id,
+            {
+                "type": "progress",
+                "current": 0,
+                "total": 0,
+                "status": "start",
+                "detail": f"开始处理: {job.name}",
+            },
+        )
 
         input_dir = Path(job.input_dir)
         output_dir = Path(job.output_dir)
@@ -265,13 +282,16 @@ class BatchFileOpsManager:
         files = self._collect_files(input_dir, job.options.get("include_exts"))
         job.total_items = len(files)
 
-        self._emit(job_id, {
-            "type": "progress",
-            "current": 0,
-            "total": job.total_items,
-            "status": "scan",
-            "detail": f"发现 {job.total_items} 个文件"
-        })
+        self._emit(
+            job_id,
+            {
+                "type": "progress",
+                "current": 0,
+                "total": job.total_items,
+                "status": "scan",
+                "detail": f"发现 {job.total_items} 个文件",
+            },
+        )
 
         for idx, path in enumerate(files, start=1):
             try:
@@ -287,39 +307,49 @@ class BatchFileOpsManager:
                 result = {"source": str(path), "success": False, "error": str(e)}
                 job.results.append(result)
 
-            self._emit(job_id, {
-                "type": "progress",
-                "current": idx,
-                "total": job.total_items,
-                "status": "processing",
-                "detail": f"{path.name}"
-            })
+            self._emit(
+                job_id,
+                {
+                    "type": "progress",
+                    "current": idx,
+                    "total": job.total_items,
+                    "status": "processing",
+                    "detail": f"{path.name}",
+                },
+            )
 
         job.status = "completed" if job.failed_items == 0 else "failed"
         job.completed_at = datetime.now().isoformat()
 
         summary = self._build_summary(job)
-        self._emit(job_id, {
-            "type": "final",
-            "summary": summary,
-            "job": self._job_to_dict(job)
-        })
+        self._emit(
+            job_id, {"type": "final", "summary": summary, "job": self._job_to_dict(job)}
+        )
 
     def _emit(self, job_id: str, event: Dict[str, Any]):
         q = self.job_events.get(job_id)
         if q:
             q.put(event)
 
-    def _collect_files(self, input_dir: Path, include_exts: Optional[List[str]]) -> List[Path]:
+    def _collect_files(
+        self, input_dir: Path, include_exts: Optional[List[str]]
+    ) -> List[Path]:
         if not input_dir.exists():
             return []
-        files = [p for p in input_dir.rglob('*') if p.is_file()]
+        files = [p for p in input_dir.rglob("*") if p.is_file()]
         if include_exts:
             include_exts = [e.lower() for e in include_exts]
             files = [p for p in files if p.suffix.lower() in include_exts]
         return files
 
-    def _process_file(self, job: BatchJobRecord, path: Path, input_root: Path, output_root: Path, index: int) -> Dict[str, Any]:
+    def _process_file(
+        self,
+        job: BatchJobRecord,
+        path: Path,
+        input_root: Path,
+        output_root: Path,
+        index: int,
+    ) -> Dict[str, Any]:
         op = job.operation
         if op == "convert":
             return self._convert_file(path, input_root, output_root, job.options)
@@ -335,7 +365,13 @@ class BatchFileOpsManager:
             return self._clean_normalize(path, input_root, output_root)
         return {"source": str(path), "success": False, "error": f"未知操作: {op}"}
 
-    def _relative_output_path(self, path: Path, input_root: Path, output_root: Path, new_ext: Optional[str] = None) -> Path:
+    def _relative_output_path(
+        self,
+        path: Path,
+        input_root: Path,
+        output_root: Path,
+        new_ext: Optional[str] = None,
+    ) -> Path:
         relative = path.relative_to(input_root)
         if new_ext:
             relative = relative.with_suffix(new_ext)
@@ -343,7 +379,9 @@ class BatchFileOpsManager:
         dest.parent.mkdir(parents=True, exist_ok=True)
         return dest
 
-    def _convert_file(self, path: Path, input_root: Path, output_root: Path, options: Dict[str, Any]) -> Dict[str, Any]:
+    def _convert_file(
+        self, path: Path, input_root: Path, output_root: Path, options: Dict[str, Any]
+    ) -> Dict[str, Any]:
         target_ext = options.get("target_ext")
         if not target_ext:
             return {"source": str(path), "success": False, "error": "缺少目标格式"}
@@ -354,6 +392,7 @@ class BatchFileOpsManager:
         try:
             if source_ext in [".docx", ".doc"] and target_ext == ".txt":
                 from docx import Document
+
                 doc = Document(str(path))
                 text = "\n".join([p.text for p in doc.paragraphs])
                 dest.write_text(text, encoding="utf-8")
@@ -361,6 +400,7 @@ class BatchFileOpsManager:
 
             if source_ext == ".pdf" and target_ext == ".txt":
                 import PyPDF2
+
                 text = ""
                 with open(path, "rb") as f:
                     reader = PyPDF2.PdfReader(f)
@@ -371,6 +411,7 @@ class BatchFileOpsManager:
 
             if source_ext in [".xlsx", ".xls"] and target_ext == ".csv":
                 import openpyxl
+
                 wb = openpyxl.load_workbook(path, data_only=True)
                 ws = wb.active
                 with open(dest, "w", newline="", encoding="utf-8") as f:
@@ -381,6 +422,7 @@ class BatchFileOpsManager:
 
             if source_ext == ".csv" and target_ext in [".xlsx", ".xls"]:
                 import openpyxl
+
                 wb = openpyxl.Workbook()
                 ws = wb.active
                 with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -390,8 +432,13 @@ class BatchFileOpsManager:
                 wb.save(dest)
                 return {"source": str(path), "success": True, "output": str(dest)}
 
-            if source_ext in [".png", ".jpg", ".jpeg"] and target_ext in [".png", ".jpg", ".jpeg"]:
+            if source_ext in [".png", ".jpg", ".jpeg"] and target_ext in [
+                ".png",
+                ".jpg",
+                ".jpeg",
+            ]:
                 from PIL import Image
+
                 image = Image.open(path)
                 if target_ext in [".jpg", ".jpeg"] and image.mode != "RGB":
                     image = image.convert("RGB")
@@ -401,17 +448,33 @@ class BatchFileOpsManager:
             if source_ext in [".docx", ".doc"] and target_ext == ".pdf":
                 try:
                     from docx2pdf import convert
+
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     convert(str(path), str(dest))
                     return {"source": str(path), "success": True, "output": str(dest)}
                 except Exception as e:
-                    return {"source": str(path), "success": False, "error": f"docx->pdf 需要 docx2pdf: {e}"}
+                    return {
+                        "source": str(path),
+                        "success": False,
+                        "error": f"docx->pdf 需要 docx2pdf: {e}",
+                    }
 
-            return {"source": str(path), "success": False, "error": f"不支持 {source_ext} -> {target_ext}"}
+            return {
+                "source": str(path),
+                "success": False,
+                "error": f"不支持 {source_ext} -> {target_ext}",
+            }
         except Exception as e:
             return {"source": str(path), "success": False, "error": str(e)}
 
-    def _rename_file(self, path: Path, input_root: Path, output_root: Path, options: Dict[str, Any], index: int) -> Dict[str, Any]:
+    def _rename_file(
+        self,
+        path: Path,
+        input_root: Path,
+        output_root: Path,
+        options: Dict[str, Any],
+        index: int,
+    ) -> Dict[str, Any]:
         prefix = options.get("prefix", "")
         suffix = options.get("suffix", "")
         seq_start = options.get("seq_start")
@@ -445,15 +508,30 @@ class BatchFileOpsManager:
         analysis = analyzer.analyze_file(str(path))
         folder = analysis.get("suggested_folder") or "other"
         organizer = FileOrganizer(str(output_root))
-        result = organizer.organize_file(str(path), folder, auto_confirm=True, metadata={
-            "entity": analysis.get("entity"),
-            "entity_type": analysis.get("entity_type")
-        })
+        result = organizer.organize_file(
+            str(path),
+            folder,
+            auto_confirm=True,
+            metadata={
+                "entity": analysis.get("entity"),
+                "entity_type": analysis.get("entity_type"),
+            },
+        )
         if result.get("success"):
-            return {"source": str(path), "success": True, "output": result.get("dest_file")}
-        return {"source": str(path), "success": False, "error": result.get("error", "归档失败")}
+            return {
+                "source": str(path),
+                "success": True,
+                "output": result.get("dest_file"),
+            }
+        return {
+            "source": str(path),
+            "success": False,
+            "error": result.get("error", "归档失败"),
+        }
 
-    def _compress_image(self, path: Path, input_root: Path, output_root: Path, options: Dict[str, Any]) -> Dict[str, Any]:
+    def _compress_image(
+        self, path: Path, input_root: Path, output_root: Path, options: Dict[str, Any]
+    ) -> Dict[str, Any]:
         if path.suffix.lower() not in [".png", ".jpg", ".jpeg"]:
             return {"source": str(path), "success": False, "error": "非图片文件"}
         try:
@@ -477,7 +555,9 @@ class BatchFileOpsManager:
         image.save(dest, quality=quality, optimize=True)
         return {"source": str(path), "success": True, "output": str(dest)}
 
-    def _extract_text(self, path: Path, input_root: Path, output_root: Path) -> Dict[str, Any]:
+    def _extract_text(
+        self, path: Path, input_root: Path, output_root: Path
+    ) -> Dict[str, Any]:
         dest = self._relative_output_path(path, input_root, output_root, ".txt")
         try:
             from web.file_analyzer import FileAnalyzer
@@ -491,7 +571,9 @@ class BatchFileOpsManager:
         dest.write_text(text, encoding="utf-8")
         return {"source": str(path), "success": True, "output": str(dest)}
 
-    def _clean_normalize(self, path: Path, input_root: Path, output_root: Path) -> Dict[str, Any]:
+    def _clean_normalize(
+        self, path: Path, input_root: Path, output_root: Path
+    ) -> Dict[str, Any]:
         ext = path.suffix.lower()
         dest = self._relative_output_path(path, input_root, output_root)
 
@@ -505,7 +587,11 @@ class BatchFileOpsManager:
             try:
                 from PIL import Image
             except Exception as e:
-                return {"source": str(path), "success": False, "error": f"缺少 Pillow: {e}"}
+                return {
+                    "source": str(path),
+                    "success": False,
+                    "error": f"缺少 Pillow: {e}",
+                }
             image = Image.open(path)
             if image.mode != "RGB" and ext in [".jpg", ".jpeg"]:
                 image = image.convert("RGB")
@@ -528,7 +614,9 @@ class BatchFileOpsManager:
             lines.append("\n❗ 失败样例:")
             for item in job.results:
                 if not item.get("success"):
-                    lines.append(f"- {Path(item.get('source', '')).name}: {item.get('error', 'error')}")
+                    lines.append(
+                        f"- {Path(item.get('source', '')).name}: {item.get('error', 'error')}"
+                    )
                     if len(lines) > 12:
                         break
         return "\n".join(lines)

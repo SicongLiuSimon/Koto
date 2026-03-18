@@ -6,13 +6,14 @@
   - 甲乙方 / 联系人
   - 主题摘要（1-2句）
 """
+
 from __future__ import annotations
 
 import json
 import re
 import socket
-from datetime import datetime, date
-from typing import Dict, List, Optional, Any
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
 # ── Ollama 连接 ──────────────────────────────────────────────────────────────
 _OLLAMA_HOST = "127.0.0.1"
@@ -53,7 +54,9 @@ def _ollama_available() -> bool:
         return False
 
 
-def extract_fields(file_name: str, content: str, file_type: str = "") -> Optional[Dict[str, Any]]:
+def extract_fields(
+    file_name: str, content: str, file_type: str = ""
+) -> Optional[Dict[str, Any]]:
     """
     用 Ollama 从文档内容中提取关键字段。
     返回 dict 或 None（Ollama 不可用时）。
@@ -64,8 +67,12 @@ def extract_fields(file_name: str, content: str, file_type: str = "") -> Optiona
         return None
     try:
         import requests as _req
+
         truncated = content[:3000]
-        prompt = _EXTRACT_PROMPT + f"文件名: {file_name}\n文件类型: {file_type}\n---\n{truncated}"
+        prompt = (
+            _EXTRACT_PROMPT
+            + f"文件名: {file_name}\n文件类型: {file_type}\n---\n{truncated}"
+        )
         resp = _req.post(
             f"{_OLLAMA_URL}/api/generate",
             json={

@@ -8,7 +8,7 @@ Scores layout and content density and returns suggestions.
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 
 class PPTQualityChecker:
@@ -82,7 +82,11 @@ class PPTQualityChecker:
                     # Simple title detection: large font or top area text
                     if font_size and font_size >= 28:
                         has_title = True
-                    elif shape.top is not None and shape.top < 1000000 and len(text) <= 40:
+                    elif (
+                        shape.top is not None
+                        and shape.top < 1000000
+                        and len(text) <= 40
+                    ):
                         has_title = True
 
                     # 统计要点

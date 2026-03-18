@@ -7,6 +7,7 @@ Routes:
   GET    /api/sessions/<name>       — Get session with full history
   DELETE /api/sessions/<name>       — Delete a session
 """
+
 import logging
 import time
 
@@ -20,6 +21,7 @@ sessions_bp = Blueprint("sessions", __name__)
 def _get_session_manager():
     """Lazy import to avoid circular dependency with app.py."""
     from web.app import session_manager
+
     return session_manager
 
 

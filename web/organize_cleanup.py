@@ -12,8 +12,10 @@ _organize 目录整合清理工具
 使用方式:
     python -m web.organize_cleanup [--dry-run] [--ai-rename]
 """
+
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -22,24 +24,23 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
-import logging
-
 
 logger = logging.getLogger(__name__)
+
 
 class OrganizeCleanup:
     """智能整合清理 _organize 目录"""
 
     # 文件名修订后缀模式（与 FileAnalyzer._REVISION_PATTERNS 保持一致）
     _REVISION_PATTERNS = [
-        re.compile(r'_revised\(\d+\)$', re.IGNORECASE),
-        re.compile(r'_revised_\d{8,14}$', re.IGNORECASE),
-        re.compile(r'_revised$', re.IGNORECASE),
-        re.compile(r'\(\d+\)$'),
-        re.compile(r'_\d{8,14}$'),
-        re.compile(r'_copy\d*$', re.IGNORECASE),
-        re.compile(r'_副本\d*$'),
-        re.compile(r'_\d+$'),
+        re.compile(r"_revised\(\d+\)$", re.IGNORECASE),
+        re.compile(r"_revised_\d{8,14}$", re.IGNORECASE),
+        re.compile(r"_revised$", re.IGNORECASE),
+        re.compile(r"\(\d+\)$"),
+        re.compile(r"_\d{8,14}$"),
+        re.compile(r"_copy\d*$", re.IGNORECASE),
+        re.compile(r"_副本\d*$"),
+        re.compile(r"_\d+$"),
     ]
 
     def __init__(self, organize_root: str = "workspace/_organize"):
@@ -57,7 +58,9 @@ class OrganizeCleanup:
         Returns:
             清理报告 dict
         """
-        self._log(f"===== _organize 整合清理 {'(预演)' if dry_run else '(实际执行)'} =====")
+        self._log(
+            f"===== _organize 整合清理 {'(预演)' if dry_run else '(实际执行)'} ====="
+        )
         self._log(f"根目录: {self.organize_root}")
 
         # 1. 扫描所有文件夹及其内容
@@ -239,7 +242,9 @@ class OrganizeCleanup:
     # ──────────────────────────────────────────────
     # 3. 合并计划
     # ──────────────────────────────────────────────
-    def _create_merge_plan(self, groups: List[Set[str]], folder_info: Dict[str, Dict]) -> List[Dict]:
+    def _create_merge_plan(
+        self, groups: List[Set[str]], folder_info: Dict[str, Dict]
+    ) -> List[Dict]:
         """为每个相似组选择最佳保留目标。"""
         plans = []
         for group in groups:
@@ -253,16 +258,20 @@ class OrganizeCleanup:
                 ),
             )
             sources = [f for f in members if f != best]
-            plans.append({
-                "target": best,
-                "sources": sources,
-            })
+            plans.append(
+                {
+                    "target": best,
+                    "sources": sources,
+                }
+            )
         return plans
 
     # ──────────────────────────────────────────────
     # 4. 执行合并
     # ──────────────────────────────────────────────
-    def _execute_merge(self, target: str, sources: List[str], folder_info: Dict[str, Dict]) -> Dict:
+    def _execute_merge(
+        self, target: str, sources: List[str], folder_info: Dict[str, Dict]
+    ) -> Dict:
         """将 sources 中的文件移到 target 文件夹，跳过内容重复的文件。"""
         target_dir = self.organize_root / target
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -377,8 +386,9 @@ class OrganizeCleanup:
         """使用 Gemini AI 模型分析文件内容并重命名文件夹。"""
         renames = 0
         try:
-            from app.core.config import get_settings
             import google.genai as genai
+
+            from app.core.config import get_settings
 
             settings = get_settings()
             api_key = settings.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
@@ -425,7 +435,7 @@ class OrganizeCleanup:
                 suggested_name = response.text.strip().strip('"').strip("'")
                 if suggested_name and 2 <= len(suggested_name) <= 30:
                     # 清理名称
-                    safe_name = re.sub(r'[\\/:*?"<>|]', '_', suggested_name)
+                    safe_name = re.sub(r'[\\/:*?"<>|]', "_", suggested_name)
                     if safe_name != root_path.name:
                         new_path = root_path.parent / safe_name
                         if not new_path.exists():
@@ -464,14 +474,16 @@ class OrganizeCleanup:
                 except Exception:
                     file_size = 0
 
-                entries.append({
-                    "source_path": "",
-                    "organized_path": str(fp),
-                    "folder": rel,
-                    "file_name": f,
-                    "file_size": file_size,
-                    "organized_at": datetime.now().isoformat(),
-                })
+                entries.append(
+                    {
+                        "source_path": "",
+                        "organized_path": str(fp),
+                        "folder": rel,
+                        "file_name": f,
+                        "file_size": file_size,
+                        "organized_at": datetime.now().isoformat(),
+                    }
+                )
 
         index = {
             "version": "1.0",
@@ -527,7 +539,9 @@ class OrganizeCleanup:
                 # 也尝试删除空的父目录
                 parent = folder.parent
                 if parent != self.organize_root and parent.exists():
-                    remaining = [x for x in parent.iterdir() if not x.name.startswith("_")]
+                    remaining = [
+                        x for x in parent.iterdir() if not x.name.startswith("_")
+                    ]
                     if not remaining:
                         self._try_remove_folder(parent)
         except Exception as e:

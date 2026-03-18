@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import unittest
 from collections import deque
-from unittest.mock import MagicMock, patch, PropertyMock, call
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 
@@ -29,12 +29,14 @@ pytestmark = [
 # Minimal stubs so the module can be imported without google.genai installed
 # ---------------------------------------------------------------------------
 
+
 def _make_document_feedback_class():
     """
     Import DocumentFeedback.  Returns the class or None if import fails for
     a reason other than missing google.genai (which we mock away).
     """
-    import sys, types
+    import sys
+    import types
 
     # Stub google.genai hierarchy
     for mod_name in [
@@ -56,6 +58,7 @@ def _make_document_feedback_class():
 
     try:
         from web.document_feedback import DocumentFeedbackSystem as DocumentFeedback
+
         return DocumentFeedback
     except Exception:
         return None
@@ -71,6 +74,7 @@ requires_df = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_feedback(client=None) -> "DocumentFeedback":
     """Return a DocumentFeedback instance with all heavy deps mocked out."""
@@ -89,21 +93,22 @@ def _make_feedback(client=None) -> "DocumentFeedback":
 def _make_good_response(annotations_json: str = None):
     """Fake generate_content response that returns valid JSON."""
     if annotations_json is None:
-        annotations_json = (
-            '[{"原文片段":"测试文字","修改建议":"修改建议","修改后文本":"修改后","理由":"理由"}]'
-        )
+        annotations_json = '[{"原文片段":"测试文字","修改建议":"修改建议","修改后文本":"修改后","理由":"理由"}]'
     resp = MagicMock()
     resp.text = annotations_json
     return resp
 
 
 def _503_error():
-    return Exception("503 UNAVAILABLE. {'error': {'code': 503, 'message': 'high demand'}}")
+    return Exception(
+        "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'high demand'}}"
+    )
 
 
 # ===========================================================================
 # Bug 1: _analyze_chunk_for_annotations — 503 should retry, not bail
 # ===========================================================================
+
 
 @requires_df
 class TestChunkAnnotationsRetryOn503:
@@ -141,9 +146,9 @@ class TestChunkAnnotationsRetryOn503:
         has_503_flag = any(a.get("_koto_503") for a in result)
         assert has_503_flag, "Immediate 503 fallback must carry _koto_503 flag"
         # Only one API call should have been made (no retry)
-        assert df.client.models.generate_content.call_count == 1, (
-            "Inner method must NOT retry on 503; only 1 API call expected"
-        )
+        assert (
+            df.client.models.generate_content.call_count == 1
+        ), "Inner method must NOT retry on 503; only 1 API call expected"
 
     def test_503_exhausted_returns_fallback_with_503_flag(self):
         """503 on every retry → eventual local fallback annotated with _koto_503."""
@@ -151,7 +156,12 @@ class TestChunkAnnotationsRetryOn503:
         # Mock the fallback to guarantee a non-empty return (short chunks may
         # not match any regex rule in _fallback_annotations_from_chunk)
         fake_fallback = [
-            {"原文片段": "被动句示例", "修改建议": "改主动", "修改后文本": "主动句", "理由": "更自然"}
+            {
+                "原文片段": "被动句示例",
+                "修改建议": "改主动",
+                "修改后文本": "主动句",
+                "理由": "更自然",
+            }
         ]
         df._fallback_annotations_from_chunk = MagicMock(return_value=fake_fallback)
 
@@ -178,9 +188,9 @@ class TestChunkAnnotationsRetryOn503:
         with patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)):
             self._call(df, [_503_error()], max_retries=2)
 
-        assert len(sleep_calls) == 0, (
-            "503 immediate fallback must NOT call sleep; outer loop handles the model switch"
-        )
+        assert (
+            len(sleep_calls) == 0
+        ), "503 immediate fallback must NOT call sleep; outer loop handles the model switch"
 
     def test_non_503_error_falls_back_immediately(self):
         """Non-503 API errors (auth, quota, etc.) should NOT trigger the 503 retry path."""
@@ -196,14 +206,15 @@ class TestChunkAnnotationsRetryOn503:
         # The key assertion: no 503-specific sleep (10s, 20s) was called
         # (regular retry uses 3*retry wait, not 10*retry)
         long_sleeps = [s for s in sleep_calls if s >= 10]
-        assert len(long_sleeps) == 0, (
-            "503-specific long sleep should NOT fire for non-503 errors"
-        )
+        assert (
+            len(long_sleeps) == 0
+        ), "503-specific long sleep should NOT fire for non-503 errors"
 
 
 # ===========================================================================
 # Bug 2: analyze_for_annotation_chunked — failed chunk re-queued after switch
 # ===========================================================================
+
 
 @requires_df
 class TestChunkedAnnotationsModelSwitch:
@@ -251,20 +262,35 @@ class TestChunkedAnnotationsModelSwitch:
 
         # _select_best_model returns the initial model; use empty list to avoid
         # _format_model_table receiving strings instead of dicts.
-        df._select_best_model = MagicMock(
-            return_value=("gemini-3-flash-preview", [])
-        )
+        df._select_best_model = MagicMock(return_value=("gemini-3-flash-preview", []))
 
         # _probe_working_model returns a different model (switch succeeds)
         df._probe_working_model = MagicMock(return_value="gemini-2.5-flash")
 
-        ai_anno = [{"原文片段": "测试", "修改建议": "建议", "修改后文本": "修改后", "理由": "理由"}]
-        fallback_anno = [{"原文片段": "x", "_koto_503": True, "_koto_fallback_error": "503"}]
+        ai_anno = [
+            {
+                "原文片段": "测试",
+                "修改建议": "建议",
+                "修改后文本": "修改后",
+                "理由": "理由",
+            }
+        ]
+        fallback_anno = [
+            {"原文片段": "x", "_koto_503": True, "_koto_fallback_error": "503"}
+        ]
 
         call_count = {"n": 0}
 
-        def _fake_analyze(chunk, doc_type, user_requirement, model_id,
-                          chunk_index, total_chunks, full_doc_context="", max_retries=2):
+        def _fake_analyze(
+            chunk,
+            doc_type,
+            user_requirement,
+            model_id,
+            chunk_index,
+            total_chunks,
+            full_doc_context="",
+            max_retries=2,
+        ):
             call_count["n"] += 1
             # First call: simulate 503 fallback
             if call_count["n"] == 1:
@@ -282,9 +308,9 @@ class TestChunkedAnnotationsModelSwitch:
 
         assert result["success"], f"Expected success, got: {result}"
         # The chunk should have been re-queued and retried
-        assert call_count["n"] >= 3, (
-            f"Expected ≥3 calls (chunk1 fail, chunk1 retry, chunk2), got {call_count['n']}"
-        )
+        assert (
+            call_count["n"] >= 3
+        ), f"Expected ≥3 calls (chunk1 fail, chunk1 retry, chunk2), got {call_count['n']}"
         # Output must contain AI annotations only (no fallback items)
         output_annotations = result.get("annotations", [])
         has_fallback = any(a.get("_koto_fallback_error") for a in output_annotations)
@@ -298,18 +324,33 @@ class TestChunkedAnnotationsModelSwitch:
         """
         df, _ = self._make_df_with_two_chunks()
 
-        df._select_best_model = MagicMock(
-            return_value=("gemini-3-flash-preview", [])
-        )
+        df._select_best_model = MagicMock(return_value=("gemini-3-flash-preview", []))
         # Probe fails to find an alternative
         df._probe_working_model = MagicMock(return_value=None)
 
-        fallback_anno = [{"原文片段": "x", "_koto_503": True, "_koto_fallback_error": "503"}]
-        ai_anno = [{"原文片段": "测试", "修改建议": "建议", "修改后文本": "修改后", "理由": "理由"}]
+        fallback_anno = [
+            {"原文片段": "x", "_koto_503": True, "_koto_fallback_error": "503"}
+        ]
+        ai_anno = [
+            {
+                "原文片段": "测试",
+                "修改建议": "建议",
+                "修改后文本": "修改后",
+                "理由": "理由",
+            }
+        ]
         call_count = {"n": 0}
 
-        def _fake_analyze(chunk, doc_type, user_requirement, model_id,
-                          chunk_index, total_chunks, full_doc_context="", max_retries=2):
+        def _fake_analyze(
+            chunk,
+            doc_type,
+            user_requirement,
+            model_id,
+            chunk_index,
+            total_chunks,
+            full_doc_context="",
+            max_retries=2,
+        ):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 return fallback_anno  # first chunk 503s
@@ -327,23 +368,40 @@ class TestChunkedAnnotationsModelSwitch:
         # Fallback annotations are stripped from output
         output_annotations = result.get("annotations", [])
         has_503_flag = any(a.get("_koto_503") for a in output_annotations)
-        assert not has_503_flag, "Internal _koto_503 markers must be stripped from output"
+        assert (
+            not has_503_flag
+        ), "Internal _koto_503 markers must be stripped from output"
 
     def test_model_switched_only_once(self):
         """_model_switched flag prevents probe from running more than once."""
         df, _ = self._make_df_with_two_chunks()
 
-        df._select_best_model = MagicMock(
-            return_value=("gemini-3-flash-preview", [])
-        )
+        df._select_best_model = MagicMock(return_value=("gemini-3-flash-preview", []))
         df._probe_working_model = MagicMock(return_value="gemini-2.5-flash")
 
-        fallback_anno = [{"原文片段": "x", "_koto_503": True, "_koto_fallback_error": "503"}]
-        ai_anno = [{"原文片段": "测试", "修改建议": "建议", "修改后文本": "修改后", "理由": "理由"}]
+        fallback_anno = [
+            {"原文片段": "x", "_koto_503": True, "_koto_fallback_error": "503"}
+        ]
+        ai_anno = [
+            {
+                "原文片段": "测试",
+                "修改建议": "建议",
+                "修改后文本": "修改后",
+                "理由": "理由",
+            }
+        ]
         call_count = {"n": 0}
 
-        def _fake_analyze(chunk, doc_type, user_requirement, model_id,
-                          chunk_index, total_chunks, full_doc_context="", max_retries=2):
+        def _fake_analyze(
+            chunk,
+            doc_type,
+            user_requirement,
+            model_id,
+            chunk_index,
+            total_chunks,
+            full_doc_context="",
+            max_retries=2,
+        ):
             call_count["n"] += 1
             # First call still 503s even with new model (probe found new model but it also 503s)
             if call_count["n"] <= 2:
@@ -359,14 +417,15 @@ class TestChunkedAnnotationsModelSwitch:
         )
 
         # Probe must only be called once regardless of how many 503s occur
-        assert df._probe_working_model.call_count == 1, (
-            f"_probe_working_model called {df._probe_working_model.call_count} times, expected 1"
-        )
+        assert (
+            df._probe_working_model.call_count == 1
+        ), f"_probe_working_model called {df._probe_working_model.call_count} times, expected 1"
 
 
 # ===========================================================================
 # Bug 1+2 combined: integration-style flow through analyze_for_annotation_chunked
 # ===========================================================================
+
 
 @requires_df
 class TestEndToEndRetryAndRequeue:
@@ -389,12 +448,29 @@ class TestEndToEndRetryAndRequeue:
         df.reader.format_for_ai.return_value = doc_text
         df._select_best_model = MagicMock(return_value=("gemini-3-flash-preview", []))
 
-        ai_anno = [{"原文片段": "测试内容", "修改建议": "修改", "修改后文本": "修改后", "理由": "理由"}]
-        fallback_anno = [{"原文片段": "x", "_koto_503": True, "_koto_fallback_error": "503"}]
+        ai_anno = [
+            {
+                "原文片段": "测试内容",
+                "修改建议": "修改",
+                "修改后文本": "修改后",
+                "理由": "理由",
+            }
+        ]
+        fallback_anno = [
+            {"原文片段": "x", "_koto_503": True, "_koto_fallback_error": "503"}
+        ]
         call_count = {"n": 0}
 
-        def _fake_analyze(chunk, doc_type, user_requirement, model_id,
-                          chunk_index, total_chunks, full_doc_context="", max_retries=2):
+        def _fake_analyze(
+            chunk,
+            doc_type,
+            user_requirement,
+            model_id,
+            chunk_index,
+            total_chunks,
+            full_doc_context="",
+            max_retries=2,
+        ):
             call_count["n"] += 1
             if call_count["n"] == 1:
                 return fallback_anno

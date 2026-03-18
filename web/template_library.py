@@ -4,130 +4,186 @@
 模板库系统 - 报告、简历、方案、PPT 模板一键生成
 """
 
-import os
 import json
-from typing import Dict, List, Any, Optional
-from datetime import datetime
 import logging
-
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class TemplateLibrary:
     """模板库管理器"""
-    
+
     # 内置模板定义
     TEMPLATES = {
         "business_report": {
             "name": "商业报告",
             "type": "docx",
             "description": "标准商业报告模板，包含：封面、目录、摘要、主体、结论",
-            "variables": ["title", "author", "date", "company", "executive_summary", "main_content", "conclusion"]
+            "variables": [
+                "title",
+                "author",
+                "date",
+                "company",
+                "executive_summary",
+                "main_content",
+                "conclusion",
+            ],
         },
         "resume_modern": {
             "name": "现代简历",
             "type": "docx",
             "description": "简洁专业的简历模板",
-            "variables": ["name", "title", "contact", "email", "phone", "summary", "experience", "education", "skills"]
+            "variables": [
+                "name",
+                "title",
+                "contact",
+                "email",
+                "phone",
+                "summary",
+                "experience",
+                "education",
+                "skills",
+            ],
         },
         "meeting_minutes": {
             "name": "会议纪要",
             "type": "docx",
             "description": "标准会议记录格式",
-            "variables": ["meeting_title", "date", "attendees", "topics", "decisions", "action_items"]
+            "variables": [
+                "meeting_title",
+                "date",
+                "attendees",
+                "topics",
+                "decisions",
+                "action_items",
+            ],
         },
         "project_proposal": {
             "name": "项目方案",
             "type": "docx",
             "description": "完整项目提案模板",
-            "variables": ["project_name", "client", "date", "background", "objectives", "scope", "timeline", "budget", "team"]
+            "variables": [
+                "project_name",
+                "client",
+                "date",
+                "background",
+                "objectives",
+                "scope",
+                "timeline",
+                "budget",
+                "team",
+            ],
         },
         "weekly_report": {
             "name": "周报",
             "type": "docx",
             "description": "个人/团队周报模板",
-            "variables": ["title", "week_range", "owner", "highlights", "progress", "risks", "next_plan"]
+            "variables": [
+                "title",
+                "week_range",
+                "owner",
+                "highlights",
+                "progress",
+                "risks",
+                "next_plan",
+            ],
         },
         "work_summary": {
             "name": "工作总结",
             "type": "docx",
             "description": "日/周工作总结模板",
-            "variables": ["title", "date", "tasks_done", "blockers", "plans", "notes"]
+            "variables": ["title", "date", "tasks_done", "blockers", "plans", "notes"],
         },
         "product_intro_ppt": {
             "name": "产品介绍PPT",
             "type": "pptx",
             "description": "产品发布会演示模板",
-            "variables": ["product_name", "tagline", "features", "benefits", "use_cases", "pricing", "contact"]
+            "variables": [
+                "product_name",
+                "tagline",
+                "features",
+                "benefits",
+                "use_cases",
+                "pricing",
+                "contact",
+            ],
         },
         "tech_presentation": {
             "name": "技术演讲PPT",
             "type": "pptx",
             "description": "技术分享演示模板",
-            "variables": ["title", "speaker", "date", "topics", "demo", "qa"]
-        }
+            "variables": ["title", "speaker", "date", "topics", "demo", "qa"],
+        },
     }
-    
+
     def __init__(self, workspace_dir: str = None):
         if workspace_dir is None:
-            workspace_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "workspace")
-        
+            workspace_dir = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), "workspace"
+            )
+
         self.workspace_dir = workspace_dir
         self.templates_dir = os.path.join(workspace_dir, "templates")
         os.makedirs(self.templates_dir, exist_ok=True)
-    
+
     def list_templates(self) -> List[Dict[str, Any]]:
         """列出所有可用模板"""
         templates = []
         for template_id, info in self.TEMPLATES.items():
-            templates.append({
-                "id": template_id,
-                "name": info["name"],
-                "type": info["type"],
-                "description": info["description"],
-                "variables": info["variables"]
-            })
+            templates.append(
+                {
+                    "id": template_id,
+                    "name": info["name"],
+                    "type": info["type"],
+                    "description": info["description"],
+                    "variables": info["variables"],
+                }
+            )
         return templates
-    
+
     def get_template(self, template_id: str) -> Optional[Dict[str, Any]]:
         """获取模板详情"""
         return self.TEMPLATES.get(template_id)
-    
+
     def generate_from_template(
-        self,
-        template_id: str,
-        variables: Dict[str, str],
-        output_dir: str = None
+        self, template_id: str, variables: Dict[str, str], output_dir: str = None
     ) -> Dict[str, Any]:
         """从模板生成文档"""
         template = self.get_template(template_id)
         if not template:
             return {"success": False, "error": "模板不存在"}
-        
+
         if output_dir is None:
             output_dir = os.path.join(self.workspace_dir, "documents")
         os.makedirs(output_dir, exist_ok=True)
-        
+
         # 检查必需变量
         missing_vars = [v for v in template["variables"] if v not in variables]
         if missing_vars:
             for key in missing_vars:
                 variables[key] = ""
-        
+
         # 根据模板类型生成
         if template["type"] == "docx":
-            return self._generate_docx_from_template(template_id, template, variables, output_dir)
+            return self._generate_docx_from_template(
+                template_id, template, variables, output_dir
+            )
         elif template["type"] == "pptx":
-            return self._generate_pptx_from_template(template_id, template, variables, output_dir)
+            return self._generate_pptx_from_template(
+                template_id, template, variables, output_dir
+            )
         else:
             return {"success": False, "error": "不支持的模板类型"}
-    
+
     def _generate_docx_from_template(
         self,
         template_id: str,
         template: Dict,
         variables: Dict[str, str],
-        output_dir: str
+        output_dir: str,
     ) -> Dict[str, Any]:
         """生成Word文档"""
         # 根据不同模板生成不同内容
@@ -145,65 +201,72 @@ class TemplateLibrary:
             content = self._build_work_summary(variables)
         else:
             return {"success": False, "error": "未实现的模板"}
-        
+
         # 保存文档
         from web.document_generator import save_docx
-        
-        title = variables.get("title") or variables.get("project_name") or variables.get("meeting_title") or "文档"
+
+        title = (
+            variables.get("title")
+            or variables.get("project_name")
+            or variables.get("meeting_title")
+            or "文档"
+        )
         filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
-        
-        output_path = save_docx(content, title=title, output_dir=output_dir, filename=filename)
-        
+
+        output_path = save_docx(
+            content, title=title, output_dir=output_dir, filename=filename
+        )
+
         return {
             "success": True,
             "template": template["name"],
             "output_path": output_path,
-            "output_file": os.path.basename(output_path)
+            "output_file": os.path.basename(output_path),
         }
-    
+
     def _generate_pptx_from_template(
         self,
         template_id: str,
         template: Dict,
         variables: Dict[str, str],
-        output_dir: str
+        output_dir: str,
     ) -> Dict[str, Any]:
         """生成PPT"""
         from web.ppt_generator import PPTGenerator
-        
+
         if template_id == "product_intro_ppt":
             outline = self._build_product_ppt_outline(variables)
         elif template_id == "tech_presentation":
             outline = self._build_tech_ppt_outline(variables)
         else:
             return {"success": False, "error": "未实现的PPT模板"}
-        
+
         title = variables.get("product_name") or variables.get("title") or "演示文稿"
         filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pptx"
         output_path = os.path.join(output_dir, filename)
-        
+
         ppt = PPTGenerator(theme="business")
         result = ppt.generate_from_outline(
             title=title,
             outline=outline,
             output_path=output_path,
             subtitle=variables.get("tagline", ""),
-            author=variables.get("speaker", "Koto")
+            author=variables.get("speaker", "Koto"),
         )
-        
+
         if result["success"]:
             return {
                 "success": True,
                 "template": template["name"],
                 "output_path": output_path,
                 "output_file": filename,
-                "slide_count": result.get("slide_count")
+                "slide_count": result.get("slide_count"),
             }
         else:
             return result
-    
+
     # === 模板内容构建器 ===
-    
+
     def _build_business_report(self, vars: Dict[str, str]) -> str:
         return f"""# {vars['title']}
 
@@ -233,7 +296,7 @@ class TemplateLibrary:
 
 *本报告由 Koto 自动生成*
 """
-    
+
     def _build_resume(self, vars: Dict[str, str]) -> str:
         return f"""# {vars['name']}
 
@@ -266,7 +329,7 @@ class TemplateLibrary:
 
 {vars.get('skills', '')}
 """
-    
+
     def _build_meeting_minutes(self, vars: Dict[str, str]) -> str:
         return f"""# {vars['meeting_title']}
 
@@ -364,7 +427,7 @@ class TemplateLibrary:
 
 *本总结由 Koto 自动生成*
 """
-    
+
     def _build_project_proposal(self, vars: Dict[str, str]) -> str:
         return f"""# {vars['project_name']} - 项目方案
 
@@ -411,40 +474,63 @@ class TemplateLibrary:
 
 *本方案由 Koto 生成*
 """
-    
+
     def _build_product_ppt_outline(self, vars: Dict[str, str]) -> List[Dict]:
         return [
-            {"title": "产品概览", "points": [vars.get("product_name", ""), vars.get("tagline", "")]},
-            {"title": "核心功能", "points": vars.get("features", "").split("\n") if vars.get("features") else []},
-            {"title": "价值优势", "points": vars.get("benefits", "").split("\n") if vars.get("benefits") else []},
-            {"title": "应用场景", "points": vars.get("use_cases", "").split("\n") if vars.get("use_cases") else []},
+            {
+                "title": "产品概览",
+                "points": [vars.get("product_name", ""), vars.get("tagline", "")],
+            },
+            {
+                "title": "核心功能",
+                "points": (
+                    vars.get("features", "").split("\n") if vars.get("features") else []
+                ),
+            },
+            {
+                "title": "价值优势",
+                "points": (
+                    vars.get("benefits", "").split("\n") if vars.get("benefits") else []
+                ),
+            },
+            {
+                "title": "应用场景",
+                "points": (
+                    vars.get("use_cases", "").split("\n")
+                    if vars.get("use_cases")
+                    else []
+                ),
+            },
             {"title": "定价方案", "points": [vars.get("pricing", "")]},
-            {"title": "联系我们", "points": [vars.get("contact", "")]}
+            {"title": "联系我们", "points": [vars.get("contact", "")]},
         ]
-    
+
     def _build_tech_ppt_outline(self, vars: Dict[str, str]) -> List[Dict]:
         topics_list = vars.get("topics", "").split("\n") if vars.get("topics") else []
         return [
             {"title": "议题概览", "points": topics_list},
-            {"title": "技术细节", "points": vars.get("demo", "").split("\n") if vars.get("demo") else []},
-            {"title": "Q&A", "points": [vars.get("qa", "提问与讨论")]}
+            {
+                "title": "技术细节",
+                "points": vars.get("demo", "").split("\n") if vars.get("demo") else [],
+            },
+            {"title": "Q&A", "points": [vars.get("qa", "提问与讨论")]},
         ]
 
 
 if __name__ == "__main__":
     lib = TemplateLibrary()
-    
+
     logger.info("=" * 60)
     logger.info("模板库测试")
     logger.info("=" * 60)
-    
+
     # 列出所有模板
     logger.info("\n1. 可用模板:")
     templates = lib.list_templates()
     for t in templates:
         logger.info(f"   [{t['id']}] {t['name']} ({t['type']})")
         logger.info(f"      {t['description']}")
-    
+
     # 测试生成商业报告
     logger.info("\n2. 生成商业报告测试...")
     result = lib.generate_from_template(
@@ -455,13 +541,13 @@ if __name__ == "__main__":
             "company": "AI Research Lab",
             "executive_summary": "本报告分析了2026年AI技术市场趋势...",
             "main_content": "## 市场规模\n\n全球AI市场规模预计达到...\n\n## 主要趋势\n\n- 大模型普及\n- 多模态融合\n- 边缘计算",
-            "conclusion": "AI技术将继续高速发展，企业应积极布局..."
-        }
+            "conclusion": "AI技术将继续高速发展，企业应积极布局...",
+        },
     )
-    
+
     if result["success"]:
         logger.info(f"   ✅ 生成成功: {result['output_file']}")
     else:
         logger.error(f"   ❌ 生成失败: {result.get('error')}")
-    
+
     logger.info("\n✅ 模板库就绪")

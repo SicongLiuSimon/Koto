@@ -5,11 +5,11 @@ Koto Settings Manager
 
 import atexit
 import json
+import logging
 import os
 import sys
 import threading
 from pathlib import Path
-import logging
 
 # 默认设置文件位置
 # 打包模式：config/ 紧邻 Koto.exe；开发模式：config/ 在 web/ 的父级

@@ -27,11 +27,10 @@ doc_planner.py — 复杂文件生成的规划层（Planning Layer）
 """
 
 import json
-import re
-from typing import Optional
-from dataclasses import dataclass, field, asdict
 import logging
-
+import re
+from dataclasses import asdict, dataclass, field
+from typing import Optional
 
 # ═══════════════════════════════════════════════════════
 #  数据结构
@@ -39,27 +38,30 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class SectionPlan:
     heading: str = ""
-    section_type: str = "text"         # text | table | comparison | timeline | highlight | list
+    section_type: str = (
+        "text"  # text | table | comparison | timeline | highlight | list
+    )
     purpose: str = ""
     key_points: list = field(default_factory=list)
-    rough_length: str = "medium"       # short | medium | long
+    rough_length: str = "medium"  # short | medium | long
     notes: str = ""
 
 
 @dataclass
 class DocumentPlan:
-    doc_type: str = "word"             # word | excel | ppt | pdf
+    doc_type: str = "word"  # word | excel | ppt | pdf
     title: str = ""
     target_audience: str = "通用"
-    tone: str = "正式"                 # 正式 | 技术 | 轻松 | 营销 | 学术
-    sections: list = field(default_factory=list)   # List[SectionPlan]
+    tone: str = "正式"  # 正式 | 技术 | 轻松 | 营销 | 学术
+    sections: list = field(default_factory=list)  # List[SectionPlan]
     table_schema: list = field(default_factory=list)
     visual_hints: list = field(default_factory=list)
     generation_notes: str = ""
-    raw_plan_text: str = ""            # 模型规划原文（调试用）
+    raw_plan_text: str = ""  # 模型规划原文（调试用）
     success: bool = True
     error: str = ""
 
@@ -75,7 +77,9 @@ class DocumentPlan:
         ]
         for i, sec in enumerate(self.sections):
             pts = "; ".join(sec.key_points[:4]) if sec.key_points else ""
-            lines.append(f"  {i+1}. [{sec.section_type}] {sec.heading} — {sec.purpose} | 要点: {pts}")
+            lines.append(
+                f"  {i+1}. [{sec.section_type}] {sec.heading} — {sec.purpose} | 要点: {pts}"
+            )
         if self.table_schema:
             lines.append(f"\n表格列定义: {', '.join(self.table_schema)}")
         if self.visual_hints:
@@ -132,6 +136,7 @@ _PLANNING_USER_TEMPLATE = """\
 #  DocumentPlanner
 # ═══════════════════════════════════════════════════════
 
+
 class DocumentPlanner:
     """
     调用 AI 模型生成文档生成计划。
@@ -149,6 +154,7 @@ class DocumentPlanner:
     async def plan(self, user_request: str, previous_context: str = "") -> DocumentPlan:
         """异步规划（与 asyncio 事件循环兼容）"""
         import asyncio
+
         return await asyncio.to_thread(self.plan_sync, user_request, previous_context)
 
     def plan_sync(self, user_request: str, previous_context: str = "") -> DocumentPlan:
@@ -156,6 +162,7 @@ class DocumentPlanner:
         prompt = self._build_prompt(user_request, previous_context)
         try:
             from google.genai import types as genai_types
+
             resp = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
@@ -200,14 +207,16 @@ class DocumentPlanner:
         # 转换 sections
         sections = []
         for sec_data in data.get("sections", []):
-            sections.append(SectionPlan(
-                heading=sec_data.get("heading", ""),
-                section_type=sec_data.get("section_type", "text"),
-                purpose=sec_data.get("purpose", ""),
-                key_points=sec_data.get("key_points", []),
-                rough_length=sec_data.get("rough_length", "medium"),
-                notes=sec_data.get("notes", ""),
-            ))
+            sections.append(
+                SectionPlan(
+                    heading=sec_data.get("heading", ""),
+                    section_type=sec_data.get("section_type", "text"),
+                    purpose=sec_data.get("purpose", ""),
+                    key_points=sec_data.get("key_points", []),
+                    rough_length=sec_data.get("rough_length", "medium"),
+                    notes=sec_data.get("notes", ""),
+                )
+            )
 
         plan = DocumentPlan(
             doc_type=data.get("doc_type", self._detect_doc_type(user_request)),
@@ -221,17 +230,19 @@ class DocumentPlanner:
             raw_plan_text=raw_text,
             success=True,
         )
-        logger.info(f"[DocPlanner] ✅ 规划完成: {plan.doc_type} | {len(plan.sections)} 节 | {plan.title}")
+        logger.info(
+            f"[DocPlanner] ✅ 规划完成: {plan.doc_type} | {len(plan.sections)} 节 | {plan.title}"
+        )
         return plan
 
     def _extract_json(self, text: str) -> Optional[str]:
         """从文本中提取 JSON 块"""
         # 尝试 ```json ... ```
-        m = re.search(r'```(?:json)?\s*(\{[\s\S]+?\})\s*```', text, re.DOTALL)
+        m = re.search(r"```(?:json)?\s*(\{[\s\S]+?\})\s*```", text, re.DOTALL)
         if m:
             return m.group(1)
         # 尝试裸 JSON
-        m = re.search(r'(\{[\s\S]+\})', text, re.DOTALL)
+        m = re.search(r"(\{[\s\S]+\})", text, re.DOTALL)
         if m:
             return m.group(1)
         return None
@@ -246,16 +257,30 @@ class DocumentPlanner:
             return "pdf"
         return "word"
 
-    def _fallback_plan(self, user_request: str, error: str = "", raw_plan_text: str = "") -> DocumentPlan:
+    def _fallback_plan(
+        self, user_request: str, error: str = "", raw_plan_text: str = ""
+    ) -> DocumentPlan:
         """当 AI 规划失败时，生成基础 fallback 计划"""
         doc_type = self._detect_doc_type(user_request)
         sections = [
-            SectionPlan(heading="概述", section_type="text",
-                        purpose="介绍背景与目的", key_points=["背景", "目的", "范围"]),
-            SectionPlan(heading="主体内容", section_type="text",
-                        purpose="核心内容展开", key_points=[user_request[:40]]),
-            SectionPlan(heading="总结", section_type="text",
-                        purpose="总结与建议", key_points=["结论", "建议", "后续步骤"]),
+            SectionPlan(
+                heading="概述",
+                section_type="text",
+                purpose="介绍背景与目的",
+                key_points=["背景", "目的", "范围"],
+            ),
+            SectionPlan(
+                heading="主体内容",
+                section_type="text",
+                purpose="核心内容展开",
+                key_points=[user_request[:40]],
+            ),
+            SectionPlan(
+                heading="总结",
+                section_type="text",
+                purpose="总结与建议",
+                key_points=["结论", "建议", "后续步骤"],
+            ),
         ]
         return DocumentPlan(
             doc_type=doc_type,
@@ -273,7 +298,10 @@ class DocumentPlanner:
 #  系统提示增强器 —— 将规划注入生成阶段的系统提示
 # ═══════════════════════════════════════════════════════
 
-def build_generation_prompt_from_plan(plan: DocumentPlan, user_request: str, previous_data: str = "") -> str:
+
+def build_generation_prompt_from_plan(
+    plan: DocumentPlan, user_request: str, previous_data: str = ""
+) -> str:
     """
     根据 DocumentPlan 构建发送给内容生成模型的用户提示。
     包含完整的结构指引 + 格式要求 + Markdown 输出规范。
@@ -285,7 +313,11 @@ def build_generation_prompt_from_plan(plan: DocumentPlan, user_request: str, pre
     section_guide = _section_guide(plan)
 
     # 前序数据块
-    data_block = f"\n[参考数据/已有信息]\n{previous_data[:2000]}\n" if previous_data.strip() else ""
+    data_block = (
+        f"\n[参考数据/已有信息]\n{previous_data[:2000]}\n"
+        if previous_data.strip()
+        else ""
+    )
 
     prompt = f"""用户需求: {user_request}
 {data_block}

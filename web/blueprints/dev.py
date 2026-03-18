@@ -20,6 +20,7 @@ Routes:
   GET    /api/token-stats                                — Token usage statistics
   POST   /api/token-stats/reset                          — Reset token statistics
 """
+
 import logging
 import os
 
@@ -165,7 +166,9 @@ def api_token_stats_reset():
 @dev_bp.route("/workflow-dag")
 def workflow_dag_page():
     """工作流 DAG 可视化页面"""
-    html_path = os.path.join(os.path.dirname(__file__), os.pardir, "static", "workflow_dag.html")
+    html_path = os.path.join(
+        os.path.dirname(__file__), os.pardir, "static", "workflow_dag.html"
+    )
     try:
         return send_file(html_path)
     except Exception as e:
@@ -451,10 +454,12 @@ def api_response_rate():
         except Exception as e:
             _logger.warning(f"[ResponseRate] ⚠️ ShadowTracer 记录失败: {e}")
 
-    return jsonify({
-        "success": True,
-        "msg_id": msg_id,
-        "stars": stars,
-        "trace_id": trace_id,
-        "flywheel": trace_id is not None,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "msg_id": msg_id,
+            "stars": stars,
+            "trace_id": trace_id,
+            "flywheel": trace_id is not None,
+        }
+    )

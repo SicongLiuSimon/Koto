@@ -9,26 +9,27 @@
 4. 用户接受/拒绝UI支持
 """
 
-import os
 import json
-import time
+import os
 import re
-from typing import Dict, List, Any, Generator, Tuple, Optional
+import time
 from datetime import datetime
+from typing import Any, Dict, Generator, List, Optional, Tuple
+
 from web.document_direct_edit import ImprovedBatchAnnotator
 
 
 def annotate_large_document(
     file_path: str,
-    user_requirement: str = "把所有不合适的翻译、不符合中文语序逻辑、生硬的地方修改"
+    user_requirement: str = "把所有不合适的翻译、不符合中文语序逻辑、生硬的地方修改",
 ) -> Generator[str, None, None]:
     """
     流式标注大文档（直接修改模式）
-    
+
     Args:
         file_path: Word文档路径
         user_requirement: 用户需求
-    
+
     Yields:
         SSE事件流
     """

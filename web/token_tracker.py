@@ -6,19 +6,20 @@ Token 数据直接从 Gemini API 响应的 usage_metadata 字段读取。
 
 数据持久化到: config/token_usage.json
 """
+
 from __future__ import annotations
 
 import json
 import os
 import sys
 import threading
-from datetime import datetime, date
-from typing import Dict, Any
+from datetime import date, datetime
+from typing import Any, Dict
 
 # ── 配置 ─────────────────────────────────────────────────────────────────────
 
 # 打包模式：config/ 紧邻 Koto.exe；开发模式：config/ 在 web/ 的父级
-if getattr(sys, 'frozen', False):
+if getattr(sys, "frozen", False):
     _BASE_DIR = os.path.dirname(sys.executable)
 else:
     _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,36 +31,39 @@ _DATA_FILE = os.path.join(_BASE_DIR, "config", "token_usage.json")
 _PRICING: Dict[str, Dict[str, float]] = {
     # ── Gemini 3.x ────────────────────────────────────────────────
     # 注意：更具体的前缀必须在更短前缀之前
-    "gemini-3.1-pro":        {"input": 1.25,  "output": 10.00},  # 3.1 Pro
-    "gemini-3.1-flash":      {"input": 0.075, "output": 0.30},   # 3.1 Flash
-    "gemini-3-pro":          {"input": 1.25,  "output": 10.00},  # 3.0 Pro
-    "gemini-3-flash":        {"input": 0.075, "output": 0.30},   # 3.0 Flash
-    "gemini-3":              {"input": 0.075, "output": 0.30},   # 其他 3.x fallback
+    "gemini-3.1-pro": {"input": 1.25, "output": 10.00},  # 3.1 Pro
+    "gemini-3.1-flash": {"input": 0.075, "output": 0.30},  # 3.1 Flash
+    "gemini-3-pro": {"input": 1.25, "output": 10.00},  # 3.0 Pro
+    "gemini-3-flash": {"input": 0.075, "output": 0.30},  # 3.0 Flash
+    "gemini-3": {"input": 0.075, "output": 0.30},  # 其他 3.x fallback
     # ── Gemini 2.5 ────────────────────────────────────────────────
-    "gemini-2.5-pro":        {"input": 1.25,  "output": 10.00},
-    "gemini-2.5-flash":      {"input": 0.075, "output": 0.30},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
     # ── Gemini 2.0 ────────────────────────────────────────────────
-    "gemini-2.0-flash-lite": {"input": 0.075, "output": 0.30},   # Lite 版更便宜（须在 flash 前）
-    "gemini-2.0-flash":      {"input": 0.10,  "output": 0.40},   # 标准 Flash / Exp / Preview
-    "gemini-2.0-pro":        {"input": 1.25,  "output": 5.00},
+    "gemini-2.0-flash-lite": {
+        "input": 0.075,
+        "output": 0.30,
+    },  # Lite 版更便宜（须在 flash 前）
+    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},  # 标准 Flash / Exp / Preview
+    "gemini-2.0-pro": {"input": 1.25, "output": 5.00},
     # ── Gemini 1.5 ────────────────────────────────────────────────
-    "gemini-1.5-pro":        {"input": 1.25,  "output": 5.00},
-    "gemini-1.5-flash":      {"input": 0.075, "output": 0.30},
+    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
+    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     # ── 深度研究 ────────────────────────────────────────────
-    "deep-research":         {"input": 2.00,  "output": 8.00},   # 按 Pro 估算（官方未公布）
+    "deep-research": {"input": 2.00, "output": 8.00},  # 按 Pro 估算（官方未公布）
     # ── Embedding ────────────────────────────────────────────
-    "text-embedding-004":    {"input": 0.025, "output": 0.0},    # $0.025/M tokens
-    "text-embedding":        {"input": 0.025, "output": 0.0},    # embedding fallback
+    "text-embedding-004": {"input": 0.025, "output": 0.0},  # $0.025/M tokens
+    "text-embedding": {"input": 0.025, "output": 0.0},  # embedding fallback
     # ── 图像生成 ────────────────────────────────────────────
-    "nano-banana":           {"input": 0.075, "output": 0.30},   # 按 flash 计
+    "nano-banana": {"input": 0.075, "output": 0.30},  # 按 flash 计
     # Imagen 按张计费，这里用 1000 合成 tokens/张换算，与 _TrackedModels.generate_images 配套
     # imagen-4.0 = $0.04/张 → 1000 tokens * $40/M = $0.04
     # imagen-4.0-fast = $0.02/张 → 1000 tokens * $20/M = $0.02
-    "imagen-4.0-fast":       {"input": 20.0,  "output": 0.0},    # Imagen 4.0 Fast
-    "imagen-4.0":            {"input": 40.0,  "output": 0.0},    # Imagen 4.0 标准
-    "imagen-3":              {"input": 20.0,  "output": 0.0},    # Imagen 3
+    "imagen-4.0-fast": {"input": 20.0, "output": 0.0},  # Imagen 4.0 Fast
+    "imagen-4.0": {"input": 40.0, "output": 0.0},  # Imagen 4.0 标准
+    "imagen-3": {"input": 20.0, "output": 0.0},  # Imagen 3
     # ── 默认（兜底） ──────────────────────────────────────────────
-    "default":               {"input": 0.075, "output": 0.30},
+    "default": {"input": 0.075, "output": 0.30},
 }
 
 USD_TO_CNY = 7.25  # 近似汇率
@@ -67,17 +71,17 @@ USD_TO_CNY = 7.25  # 近似汇率
 # ── 内部状态 ──────────────────────────────────────────────────────────────────
 
 _lock = threading.Lock()
-_data: Dict[str, Any] = {}   # 内存缓存，结构见 _empty_data()
-_dirty = False               # 标记是否有未保存的变动
+_data: Dict[str, Any] = {}  # 内存缓存，结构见 _empty_data()
+_dirty = False  # 标记是否有未保存的变动
 
 
 def _empty_data() -> Dict[str, Any]:
     return {
         "version": 1,
-        "daily": {},    # { "YYYY-MM-DD": { model: { input, output, calls } } }
+        "daily": {},  # { "YYYY-MM-DD": { model: { input, output, calls } } }
         "monthly": {},  # { "YYYY-MM": { model: { input, output, calls } } }
-        "skills": {},   # { skill_id: { date: { model: { input, output, calls } } } }
-        "sessions": {}, # { session_id: { "total_tokens": int, "cost_cny": float } }
+        "skills": {},  # { skill_id: { date: { model: { input, output, calls } } } }
+        "sessions": {},  # { session_id: { "total_tokens": int, "cost_cny": float } }
     }
 
 
@@ -117,6 +121,7 @@ def _save_if_dirty() -> None:
 
 # ── 公开 API ──────────────────────────────────────────────────────────────────
 
+
 def record_usage(model: str, prompt_tokens: int, completion_tokens: int) -> None:
     """
     记录一次 API 调用的 token 用量。
@@ -126,8 +131,8 @@ def record_usage(model: str, prompt_tokens: int, completion_tokens: int) -> None
         return
 
     global _dirty
-    today = date.today().isoformat()          # "YYYY-MM-DD"
-    month = today[:7]                         # "YYYY-MM"
+    today = date.today().isoformat()  # "YYYY-MM-DD"
+    month = today[:7]  # "YYYY-MM"
     model_key = _normalize_model(model)
 
     with _lock:
@@ -193,7 +198,9 @@ def record_usage_with_skill(
         # ── per-session ────────────────────────────────────────────
         if session_id:
             sessions = _data.setdefault("sessions", {})
-            sess = sessions.setdefault(session_id, {"total_tokens": 0, "cost_cny": 0.0, "calls": 0})
+            sess = sessions.setdefault(
+                session_id, {"total_tokens": 0, "cost_cny": 0.0, "calls": 0}
+            )
             total = prompt_tokens + completion_tokens
             price = _PRICING.get(model_key, _PRICING["default"])
             cost_usd = (
@@ -226,7 +233,11 @@ def get_skill_stats(skill_id: str | None = None) -> Dict[str, Any]:
     with _lock:
         _load()
         skills_raw = _data.get("skills", {})
-        target = {skill_id: skills_raw[skill_id]} if skill_id and skill_id in skills_raw else skills_raw
+        target = (
+            {skill_id: skills_raw[skill_id]}
+            if skill_id and skill_id in skills_raw
+            else skills_raw
+        )
 
         result = {}
         for sid, date_map in target.items():
@@ -240,7 +251,10 @@ def get_skill_stats(skill_id: str | None = None) -> Dict[str, Any]:
                     inp = counts.get("input", 0)
                     out = counts.get("output", 0)
                     total_tokens += inp + out
-                    cost_usd += inp / 1_000_000 * price["input"] + out / 1_000_000 * price["output"]
+                    cost_usd += (
+                        inp / 1_000_000 * price["input"]
+                        + out / 1_000_000 * price["output"]
+                    )
             result[sid] = {
                 "total_calls": total_calls,
                 "total_tokens": total_tokens,
@@ -271,7 +285,9 @@ def get_stats() -> Dict[str, Any]:
 
         return {
             "today": _aggregate_period(_data.get("daily", {}).get(today_str, {})),
-            "this_month": _aggregate_period(_data.get("monthly", {}).get(month_str, {})),
+            "this_month": _aggregate_period(
+                _data.get("monthly", {}).get(month_str, {})
+            ),
             "last_7_days": _last_n_days(7),
             "data_file": _DATA_FILE,
         }
@@ -305,6 +321,7 @@ def reset_stats(period: str = "all") -> Dict[str, Any]:
 
 
 # ── 内部工具 ──────────────────────────────────────────────────────────────────
+
 
 def _normalize_model(model: str) -> str:
     """把完整的模型名归一化为可读短名，并保留原始前缀用于查价。"""
@@ -370,6 +387,7 @@ def _aggregate_period(model_map: Dict[str, Dict]) -> Dict[str, Any]:
 def _last_n_days(n: int) -> list:
     """返回最近 n 天的每日汇总（含今天），按日期升序"""
     from datetime import timedelta
+
     today = date.today()
     daily = _data.get("daily", {})
     result = []
@@ -377,11 +395,13 @@ def _last_n_days(n: int) -> list:
         d = (today - timedelta(days=i)).isoformat()
         day_models = daily.get(d, {})
         agg = _aggregate_period(day_models)
-        result.append({
-            "date": d,
-            "total": agg["total"],
-            "calls": agg["calls"],
-            "cost_usd": agg["cost_usd"],
-            "cost_cny": agg["cost_cny"],
-        })
+        result.append(
+            {
+                "date": d,
+                "total": agg["total"],
+                "calls": agg["calls"],
+                "cost_usd": agg["cost_usd"],
+                "cost_cny": agg["cost_cny"],
+            }
+        )
     return result

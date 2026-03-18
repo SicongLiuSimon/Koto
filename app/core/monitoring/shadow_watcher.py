@@ -173,11 +173,64 @@ _PHRASE_PATTERNS = [
 
 # ── 任务类型关键词（用于 _track_hourly_task 时段×任务交叉分析）──────────────────
 _TASK_TYPE_KEYWORDS: Dict[str, List[str]] = {
-    "分析": ["分析", "评估", "比较", "对比", "解读", "解释", "review", "analyze", "compare"],
-    "创作": ["写", "创作", "生成", "起草", "撰写", "write", "create", "generate", "draft"],
-    "执行": ["运行", "执行", "打开", "启动", "关闭", "安装", "下载", "run", "execute", "open", "install"],
-    "问答": ["是什么", "怎么", "为什么", "如何", "能解释", "what is", "how to", "why", "explain"],
-    "修改": ["修改", "优化", "改进", "润色", "修复", "调整", "edit", "fix", "improve", "refine"],
+    "分析": [
+        "分析",
+        "评估",
+        "比较",
+        "对比",
+        "解读",
+        "解释",
+        "review",
+        "analyze",
+        "compare",
+    ],
+    "创作": [
+        "写",
+        "创作",
+        "生成",
+        "起草",
+        "撰写",
+        "write",
+        "create",
+        "generate",
+        "draft",
+    ],
+    "执行": [
+        "运行",
+        "执行",
+        "打开",
+        "启动",
+        "关闭",
+        "安装",
+        "下载",
+        "run",
+        "execute",
+        "open",
+        "install",
+    ],
+    "问答": [
+        "是什么",
+        "怎么",
+        "为什么",
+        "如何",
+        "能解释",
+        "what is",
+        "how to",
+        "why",
+        "explain",
+    ],
+    "修改": [
+        "修改",
+        "优化",
+        "改进",
+        "润色",
+        "修复",
+        "调整",
+        "edit",
+        "fix",
+        "improve",
+        "refine",
+    ],
     "搜索": ["找", "搜", "查找", "查一下", "find", "search", "look for"],
     "翻译": ["翻译", "译成", "translate", "翻成"],
     "讨论": ["讲讲", "聊聊", "谈谈", "discuss", "opinion"],
@@ -262,8 +315,8 @@ class ShadowWatcher:
 
     def __init__(self):
         self._obs_lock = threading.Lock()
-        self._write_lock = threading.Lock()   # 序列化磁盘写入，防止并发写覆盖旧数据
-        self._dirty_count = 0                 # _dirty_save 累计计数
+        self._write_lock = threading.Lock()  # 序列化磁盘写入，防止并发写覆盖旧数据
+        self._dirty_count = 0  # _dirty_save 累计计数
         self._obs: Dict[str, Any] = _default_obs()
         # 会话轮次计数（内存中，重启清零）
         self._session_exchanges: Dict[str, int] = {}
@@ -670,17 +723,17 @@ class ShadowWatcher:
         """
         try:
             _BASE.mkdir(parents=True, exist_ok=True)
-            with self._write_lock:          # 将 dump→write 作为原子序列，防止并发写覆盖
+            with self._write_lock:  # 将 dump→write 作为原子序列，防止并发写覆盖
                 with self._obs_lock:
                     # 裁剪已完成的 open_tasks（保留全部未完成 + 最近 20 条已完成）
                     open_tasks = self._obs.get("open_tasks", [])
                     undone = [t for t in open_tasks if not t.get("done")]
-                    done   = [t for t in open_tasks if t.get("done")]
+                    done = [t for t in open_tasks if t.get("done")]
                     self._obs["open_tasks"] = undone + done[-20:]
                     # 裁剪已解决的 failed_tasks（保留全部未解决 + 最近 10 条已解决）
                     failed_tasks = self._obs.get("failed_tasks", [])
                     unresolved = [f for f in failed_tasks if not f.get("resolved")]
-                    resolved   = [f for f in failed_tasks if f.get("resolved")]
+                    resolved = [f for f in failed_tasks if f.get("resolved")]
                     self._obs["failed_tasks"] = unresolved + resolved[-10:]
                     payload = json.dumps(self._obs, ensure_ascii=False, indent=2)
                 _OBS_FILE.write_text(payload, encoding="utf-8")

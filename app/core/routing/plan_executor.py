@@ -284,8 +284,13 @@ class PlanExecutor:
 
             # 如果当前波次包含多个无依赖步骤，提示并行执行
             if len(wave) > 1:
-                names = "、".join(s.get("description", f"步骤{s.get('id')}") for s in wave)
-                yield {"type": "status", "message": f"⚡ 并行执行 {len(wave)} 个步骤: {names}"}
+                names = "、".join(
+                    s.get("description", f"步骤{s.get('id')}") for s in wave
+                )
+                yield {
+                    "type": "status",
+                    "message": f"⚡ 并行执行 {len(wave)} 个步骤: {names}",
+                }
 
             # 并发执行当前波次，每步收集自己的事件列表和结果
             wave_outcomes: List[Tuple[Dict, List[Dict], Dict]] = await self._run_wave(
@@ -307,7 +312,7 @@ class PlanExecutor:
 
                 # 步骤失败时尝试动态重规划
                 if not result.get("success"):
-                    remaining = [s for w in wave_list[wave_idx + 1:] for s in w]
+                    remaining = [s for w in wave_list[wave_idx + 1 :] for s in w]
                     new_steps = await self._attempt_replan(
                         user_input=self.store.get("user_input", ""),
                         completed_results=self.step_results[:-1],
@@ -331,7 +336,9 @@ class PlanExecutor:
             if replan_insertions:
                 flat_new = [s for ns in replan_insertions for s in ns]
                 new_waves = _topo_waves(flat_new)
-                wave_list = wave_list[: wave_idx + 1] + new_waves + wave_list[wave_idx + 1:]
+                wave_list = (
+                    wave_list[: wave_idx + 1] + new_waves + wave_list[wave_idx + 1 :]
+                )
 
             wave_idx += 1
 
@@ -358,6 +365,7 @@ class PlanExecutor:
         同一波次步骤互无依赖，可安全并发读取 ContextStore。
         写入 ContextStore 由调用方在 gather 完成后顺序执行，无竞争。
         """
+
         async def _run_one(step: Dict, pos: int) -> Tuple[Dict, List[Dict], Dict]:
             step_id = step.get("id", pos + 1)
             task_type = step.get("task_type", "CHAT")
@@ -365,13 +373,15 @@ class PlanExecutor:
             output_key = step.get("output_key") or f"step_{step_id}_output"
             events: List[Dict] = []
 
-            events.append({
-                "type": "progress",
-                "step_number": pos + 1,
-                "step_description": description,
-                "message": f"步骤 {pos+1}/{total}: {description}",
-                "detail": f"任务类型: {task_type}",
-            })
+            events.append(
+                {
+                    "type": "progress",
+                    "step_number": pos + 1,
+                    "step_description": description,
+                    "message": f"步骤 {pos+1}/{total}: {description}",
+                    "detail": f"任务类型: {task_type}",
+                }
+            )
 
             handler = self.handlers.get(task_type) or self.handlers.get("DEFAULT")
             if handler is None:
@@ -446,6 +456,7 @@ class PlanExecutor:
         """
         try:
             from app.core.routing.local_planner import LocalPlanner
+
             completed_steps_info = [r["step"] for r in completed_results]
             completed_outputs = [
                 (r["result"].get("output") or r["result"].get("content") or "")[:200]

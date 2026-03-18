@@ -40,11 +40,6 @@ logger = logging.getLogger(__name__)
 
 # ── 可选依赖 ─────────────────────────────────────────────────────────────────
 try:
-    from langgraph.graph import StateGraph, END
-    from langgraph.types import Send  # v1.x: Send moved from langgraph.graph to langgraph.types
-    from langgraph.checkpoint.memory import MemorySaver
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
-    from typing_extensions import TypedDict, Annotated
     import operator
 
     from langchain_core.messages import (
@@ -53,6 +48,7 @@ try:
         HumanMessage,
         SystemMessage,
     )
+    from langgraph.checkpoint.memory import MemorySaver
     from langgraph.graph import END, StateGraph
     from langgraph.types import (  # v1.x: Send moved from langgraph.graph to langgraph.types
         Send,
@@ -107,6 +103,7 @@ if _LG_AVAILABLE:
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared node factory
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _get_llm(model_id: str = "gemini-3-flash-preview"):
     from app.core.llm.langchain_adapter import KotoLangChainLLM
@@ -427,8 +424,7 @@ class WorkflowEngine:
         "multi_agent_ppt": _build_multi_agent_ppt_graph,
     }
 
-    def __init__(self, model_id: str = "gemini-3-flash-preview",
-                 checkpointer=None):
+    def __init__(self, model_id: str = "gemini-3-flash-preview", checkpointer=None):
         _assert_langgraph()
         self.model_id = model_id
         if checkpointer is None:
@@ -580,7 +576,9 @@ class WorkflowEngine:
             return f"# Error: {exc}"
 
     @classmethod
-    def detect_workflow(cls, task_type: str, user_input: str, has_file: bool = False) -> str:
+    def detect_workflow(
+        cls, task_type: str, user_input: str, has_file: bool = False
+    ) -> str:
         """
         根据 SmartDispatcher 返回的 task_type 推断最佳工作流。
         与现有 TaskDecomposer.TASK_PATTERNS 映射兼容。
@@ -605,8 +603,25 @@ class WorkflowEngine:
         #   1) 主动获取信息的意图（非"分析已有文件"，而是"去研究/调研某主题"）
         #   2) 明确要生成文档/报告的输出意图
         # 这样可避免"分析下这个BP"之类的文件分析请求误触发 research_and_document 工作流
-        _ACTIVE_RESEARCH_KW = ["研究", "调研", "深入研究", "综合研究", "全面研究", "调查", "查阅"]
-        _DOC_OUTPUT_KW = ["报告", "word", "pdf", "文档", "生成文档", "整理成", "写报告", "做报告"]
+        _ACTIVE_RESEARCH_KW = [
+            "研究",
+            "调研",
+            "深入研究",
+            "综合研究",
+            "全面研究",
+            "调查",
+            "查阅",
+        ]
+        _DOC_OUTPUT_KW = [
+            "报告",
+            "word",
+            "pdf",
+            "文档",
+            "生成文档",
+            "整理成",
+            "写报告",
+            "做报告",
+        ]
         if task_type in ("RESEARCH", "FILE_GEN") and (
             any(k in text for k in _ACTIVE_RESEARCH_KW)
             and any(k in text for k in _DOC_OUTPUT_KW)
