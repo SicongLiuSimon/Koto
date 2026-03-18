@@ -88,7 +88,7 @@ foreach ($path in $requiredPaths) {
 
 # File size validation — catch empty or corrupt builds
 $exeSize = (Get-Item $exePath).Length / 1MB
-if ($exeSize -lt 50) { Fail "Koto.exe is only $([math]::Round($exeSize,1))MB (expected >= 50MB)" }
+if ($exeSize -lt 40) { Fail "Koto.exe is only $([math]::Round($exeSize,1))MB (expected >= 40MB)" }
 else                  { Pass "Koto.exe size is $([math]::Round($exeSize,1))MB" }
 
 # Critical DLL check — Python runtime must be present

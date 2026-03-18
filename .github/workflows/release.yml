@@ -209,6 +209,8 @@ jobs:
 
       - name: Run installer E2E test
         shell: pwsh
+        env:
+          KOTO_SERVER_ONLY: "1"
         run: |
           $setup = Get-Item "dist\Koto_v*_Setup.exe" | Select-Object -First 1
           if (-not $setup) { Write-Host "::error::Setup EXE not found in dist\"; exit 1 }
@@ -223,6 +225,8 @@ jobs:
 
       - name: Run portable E2E test
         shell: pwsh
+        env:
+          KOTO_SERVER_ONLY: "1"
         run: |
           $zip = Get-Item "dist\Koto_v*_Windows.zip" | Select-Object -First 1
           if (-not $zip) { Write-Host "::warning::ZIP not found, skipping portable test"; exit 0 }
