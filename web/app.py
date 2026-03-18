@@ -32,7 +32,36 @@ from flask import (
     stream_with_context,
 )
 from flask_cors import CORS
-from werkzeug.utils import secure_filename as _secure_filename
+from werkzeug.utils import secure_filename as _werkzeug_secure_filename
+
+
+def _secure_filename(name: str) -> str:
+    """Unicode-safe filename sanitizer that preserves Chinese/CJK characters.
+
+    werkzeug.secure_filename strips all non-ASCII chars, turning '王宇轩-简历.docx'
+    into '-.docx' which is both misleading and collision-prone.
+    This wrapper keeps Unicode letters/digits while still removing
+    truly dangerous characters (null bytes, path separators, etc.).
+    """
+    import unicodedata, re as _re_fn
+    if not name:
+        return ""
+    # Normalise to NFC (avoid composed/decomposed mismatch)
+    name = unicodedata.normalize("NFC", name)
+    # Kill null bytes and path traversal characters
+    name = name.replace("\x00", "").replace("/", "_").replace("\\", "_")
+    name = name.replace(":", "_").replace("*", "_").replace("?", "_")
+    name = name.replace('"', "_").replace("<", "_").replace(">", "_").replace("|", "_")
+    # Collapse multiple spaces/underscores to single underscore
+    name = _re_fn.sub(r'[\s_]+', '_', name)
+    # Strip leading/trailing dots/underscores/spaces (Windows dislikes trailing dots)
+    name = name.strip('. _')
+    # If after all sanitization the base (without ext) is empty, fall back to werkzeug
+    base, _, ext = name.rpartition('.')
+    if not base.strip('. _'):
+        fallback = _werkzeug_secure_filename(name)
+        return fallback if fallback else ""
+    return name
 
 # Import new routing modules
 from app.core.routing import SmartDispatcher
@@ -14998,127 +15027,182 @@ def chat_with_file():
             )
             _app_logger.info(f"[FILE_GEN PPT] 文件内容已保存到会话")
 
+            # 构造包含文件内容的增强 Prompt，送入高质量 PPT 管道
+            _doc_context = file_content if file_content else ""
+            if not _doc_context:
+                # 兜底：从已提取的 formatted_message 中取内容
+                _fc_marker = "=== 文件内容 ==="
+                if _fc_marker in formatted_message:
+                    _doc_context = formatted_message[formatted_message.index(_fc_marker) + len(_fc_marker):].strip()
+                else:
+                    _doc_context = formatted_message
+
+            if len(_doc_context) > 50000:
+                _doc_context = _doc_context[:50000] + "...(截断)"
+
+            _ppt_enhanced_prompt = (
+                f"{user_input}\n\n"
+                f"【参考资料】\n"
+                f"以下是上传文件 《{filename}》 的完整内容，PPT 必须严格基于此内容生成：\n\n"
+                f"=== {filename} ===\n{_doc_context}\n"
+            )
+            if len(_ppt_enhanced_prompt) > 100000:
+                _ppt_enhanced_prompt = _ppt_enhanced_prompt[:100000] + "\n...(context truncated)"
+
             # 使用流式响应（Streamed Response）以支持实时进度显示
             def generate_ppt_file_stream():
                 import asyncio
-                import queue
+                import queue as _queue_mod
                 import threading
                 import time as _time
+                import traceback as _traceback
 
-                from web.app import TaskOrchestrator
+                from web.ppt_pipeline import PPTGenerationPipeline
 
                 _start = _time.time()
+                pipeline_timeout_sec = 300
 
-                # 发送初始化信息
-                yield f"data: {json.dumps({'type': 'classification', 'task_type': 'FILE_GEN', 'subtask': 'PPT_CREATION', 'message': '📊 开始 PPT 演示文稿生成流程'})}\n\n"
+                event_queue = _queue_mod.Queue()
 
-                # 准备任务参数
-                subtask = {
-                    "task_type": "FILE_GEN",
-                    "index": 1,
-                    "description": f"从文档 {filename} 生成 PPT",
-                }
-                context = {"original_input": user_input, "step_1_output": file_content}
+                def _progress_listener(msg, p=None):
+                    event_queue.put({"type": "progress", "msg": msg, "progress": p})
 
-                # 进度队列
-                progress_queue = queue.Queue()
+                def _thought_listener(text):
+                    event_queue.put({"type": "thought", "text": text})
 
-                def _progress_cb(msg, detail=""):
-                    progress_queue.put({"msg": msg, "detail": detail})
+                run_state = {"done": False, "result": None, "error": None, "traceback": ""}
 
-                # 任务结果容器
-                task_result_holder = {"result": None}
-
-                # 后台执行函数
-                def _run_task_thread():
-                    # 为新线程创建独立的事件循环
+                def _run_pipeline_bg():
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
                     try:
-                        task_result_holder["result"] = loop.run_until_complete(
-                            TaskOrchestrator._execute_file_gen(
-                                user_input, context, subtask, _progress_cb
+                        ai_client = get_client()
+                        pipeline = PPTGenerationPipeline(ai_client=ai_client)
+                        run_state["result"] = loop.run_until_complete(
+                            pipeline.generate(
+                                user_request=_ppt_enhanced_prompt,
+                                output_path=os.path.join(
+                                    settings_manager.documents_dir,
+                                    f"Koto_Presentation_{int(_time.time())}.pptx",
+                                ),
+                                enable_auto_images=True,
+                                progress_callback=_progress_listener,
+                                thought_callback=_thought_listener,
                             )
                         )
-                    except Exception as e:
-                        task_result_holder["result"] = {
-                            "success": False,
-                            "error": str(e),
-                        }
+                    except Exception as bg_err:
+                        run_state["error"] = str(bg_err)
+                        run_state["traceback"] = _traceback.format_exc()
                     finally:
-                        loop.close()
-                        progress_queue.put(None)  # Signal done
+                        try:
+                            loop.close()
+                        except Exception:
+                            pass
+                        run_state["done"] = True
 
-                # 启动后台线程
-                t = threading.Thread(target=_run_task_thread)
-                t.start()
+                worker = threading.Thread(target=_run_pipeline_bg, daemon=True)
+                worker.start()
 
-                # 主线程循环读取进度
-                while True:
+                yield f"data: {json.dumps({'type': 'progress', 'message': '📊 正在启动 PPT 生成管道...', 'detail': f'基于文件: {filename}'})}\n\n"
+
+                last_progress_msg = "正在初始化..."
+                while not run_state["done"]:
+                    elapsed = int(_time.time() - _start)
+                    if elapsed > pipeline_timeout_sec:
+                        run_state["error"] = f"PPT 生成超时（>{pipeline_timeout_sec}s）"
+                        break
+
                     try:
-                        item = progress_queue.get(timeout=0.1)
-                        if item is None:
-                            break
-                        # 发送进度SSE
-                        yield f"data: {json.dumps({'type': 'progress', 'message': item['msg'], 'detail': item['detail']})}\n\n"
-                    except queue.Empty:
-                        if not t.is_alive():
-                            break
+                        while not event_queue.empty():
+                            item = event_queue.get_nowait()
+                            if item["type"] == "progress":
+                                last_progress_msg = item["msg"]
+                                detail_text = (
+                                    f"进度: {item['progress']}%"
+                                    if item["progress"] is not None
+                                    else f"已用时 {elapsed}s"
+                                )
+                                yield f"data: {json.dumps({'type': 'progress', 'message': item['msg'], 'detail': detail_text})}\n\n"
+                            elif item["type"] == "thought":
+                                thought_text = f"\n\n> 🤖 **Koto 思考**: {item['text']}\n"
+                                yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
+                    except _queue_mod.Empty:
+                        pass
 
-                t.join()
-                ppt_result = task_result_holder["result"]
-                _elapsed = _time.time() - _start
+                    if elapsed % 2 == 0 and event_queue.empty():
+                        yield f"data: {json.dumps({'type': 'progress', 'message': last_progress_msg, 'detail': f'已用时 {elapsed}s'})}\n\n"
 
-                # 处理最终结果
-                if ppt_result and ppt_result.get("success"):
-                    saved_files = ppt_result.get("saved_files", [])
-                    if saved_files:
-                        ppt_file_path = (
-                            saved_files[0]
-                            if isinstance(saved_files, list)
-                            else saved_files
-                        )
-                        # 保存会话数据
-                        session_manager_ppt.save_generation_data(
-                            session_id=ppt_session_id,
-                            ppt_data=ppt_result.get("ppt_data"),
-                            ppt_file_path=ppt_file_path,
-                        )
+                    _time.sleep(0.5)
 
-                        final_msg = (
-                            f"✅ PPT 演示已生成\n\n"
-                            f"📄 文件: [{os.path.basename(ppt_file_path)}]({ppt_file_path.replace(os.sep, '/')})\n"
-                            f"🔗 会话ID: `{ppt_session_id}`\n"
-                            f"⏱️ 耗时: {_elapsed:.1f}s"
-                        )
-                        yield f"data: {json.dumps({'type': 'token', 'content': final_msg})}\n\n"
+                # 排空剩余事件
+                try:
+                    while not event_queue.empty():
+                        item = event_queue.get_nowait()
+                        if item["type"] == "progress":
+                            yield f"data: {json.dumps({'type': 'progress', 'message': item['msg'], 'detail': ''})}\n\n"
+                        elif item["type"] == "thought":
+                            thought_text = f"\n\n> 🤖 **Koto 思考**: {item['text']}\n"
+                            yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
+                except Exception:
+                    pass
 
-                        # 更新历史
-                        session_manager.update_last_model_response(
-                            f"{session_name}.json",
-                            final_msg,
-                            task="FILE_GEN",
-                            model_name=model_to_use,
-                            saved_files=[ppt_file_path],
-                        )
+                if run_state["error"]:
+                    err = run_state["error"]
+                    _app_logger.error(f"[FILE_GEN PPT] 管道错误: {err}")
+                    yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 生成失败: {err}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': round(_time.time()-_start,2)})}\n\n"
+                    return
 
-                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [ppt_file_path], 'ppt_session_id': ppt_session_id})}\n\n"
-                    else:
-                        err_msg = "⚠️ PPT 框架已生成，但文件保存失败"
-                        yield f"data: {json.dumps({'type': 'error', 'message': err_msg})}\n\n"
-                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
-                else:
-                    err_msg = (
-                        ppt_result.get("error", "未知错误")
-                        if ppt_result
-                        else "任务执行无结果"
+                ppt_result = run_state["result"] or {}
+                saved_path = ppt_result.get("output_path") or ppt_result.get("file_path")
+
+                if not ppt_result.get("success") or not saved_path or not os.path.exists(saved_path):
+                    err_detail = ppt_result.get("error", "未返回有效文件路径")
+                    _app_logger.error(f"[FILE_GEN PPT] 管道返回失败: {err_detail}")
+                    yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 生成失败: {err_detail}'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': round(_time.time()-_start,2)})}\n\n"
+                    return
+
+                _elapsed = round(_time.time() - _start, 2)
+                rel_path = os.path.relpath(saved_path, WORKSPACE_DIR).replace("\\", "/")
+
+                # 保存会话数据
+                try:
+                    session_manager_ppt.save_generation_data(
+                        session_id=ppt_session_id,
+                        ppt_data=ppt_result.get("ppt_data"),
+                        ppt_file_path=saved_path,
                     )
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'❌ 生成失败: {err_msg}'})}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
+                except Exception:
+                    pass
+
+                success_msg = (
+                    f"✅ **PPT 生成成功！**\n\n"
+                    f"基于上传文件《{filename}》生成的演示文稿。\n"
+                    f"📁 文件: **{os.path.basename(saved_path)}**\n"
+                    f"⏱️ 耗时: {_elapsed}s"
+                )
+                yield f"data: {json.dumps({'type': 'progress', 'message': '✅ PPT 生成完成！', 'detail': os.path.basename(saved_path)})}\n\n"
+                yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
+
+                session_manager.update_last_model_response(
+                    f"{session_name}.json",
+                    success_msg,
+                    task="FILE_GEN",
+                    model_name=model_to_use,
+                    saved_files=[rel_path],
+                )
+
+                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [rel_path], 'total_time': _elapsed, 'ppt_session_id': ppt_session_id})}\n\n"
 
             return Response(
                 stream_with_context(generate_ppt_file_stream()),
                 mimetype="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                    "Connection": "keep-alive",
+                },
             )
 
         elif task_type in ["FILE_GEN", "RESEARCH", "CHAT"]:

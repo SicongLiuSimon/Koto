@@ -1223,7 +1223,13 @@ class DocumentFeedbackSystem:
                 full_doc_context=formatted_content,
                 max_retries=2  # 单段只重试一次（总计2次），配合240s超时保证成功率
             )
-            anno_list = [a for a in (raw_annotations or []) if not a.get("_koto_fallback_error")]
+            _all_raw = raw_annotations or []
+            _fb_items = [a for a in _all_raw if a.get("_koto_fallback_error")]
+            anno_list = [a for a in _all_raw if not a.get("_koto_fallback_error")]
+            _single_last_err = _fb_items[0].get("_koto_fallback_error", "") if _fb_items else ""
+            if _fb_items:
+                logger.warning(f"[DocumentFeedback] ⚠️ 单段AI失败，已用本地兜底（{len(_fb_items)}条），均已过滤")
+                logger.error(f"[DocumentFeedback] ❌ 单段API错误: {_single_last_err[:100]}")
             return {
                 "success": True,
                 "file_path": file_path,
@@ -1231,10 +1237,11 @@ class DocumentFeedbackSystem:
                 "summary": f"单段AI标注，生成{len(anno_list)}条修改建议",
                 "annotation_count": len(anno_list),
                 "chunks_processed": 1,
-                "fallback_used": False,
-                "fallback_chunk_count": 0,
-                "ai_chunk_count": 1,
-                "last_api_error": "",
+                "fallback_used": len(_fb_items) > 0 and len(anno_list) == 0,
+                "partial_fallback": len(_fb_items) > 0 and len(anno_list) > 0,
+                "fallback_chunk_count": 1 if _fb_items else 0,
+                "ai_chunk_count": 1 if anno_list else 0,
+                "last_api_error": _single_last_err,
             }
 
         # 分段处理（按段落切分，保证不打断句子）
@@ -2327,6 +2334,7 @@ class DocumentFeedbackSystem:
 2. **精准定位**：`原文` 字段必须与文档中的**纯文本**完全一致，不要省略或修改原文。
 3. **纯文本原文（关键！）**：`原文` 字段中**绝对不能含有** Markdown 格式符号，例如 `##`、`###`、`-`（列表符）、`>`（引用符）、`**`、`*` 等。请只提取括号外的实际文字内容。例如文档中显示的是某段正文内容，`原文` 就写那段正文，不要带任何标记前缀。
 4. **适度修改**：只修改真正有语病、翻译腔、逻辑不通顺或生硬的地方。不要为了修改而修改。
+5. **最小原文范围（关键！）**：`原文` 必须是**需要改动的最小文本单元**——改一个词就只选那个词，改几个字就只选那几个字，改一句就选那句。**禁止把整段话都放进 `原文`**，除非整段都需要整体重写。有长有短才是正常的标注，大部分标注应该是片段或短句级别，而非整段。
 
 ## ⚠️ 去AI味 — 必须严格遵守的语言风格：
 你改写后的文本**绝对不能有AI味**。以下是具体禁令：
