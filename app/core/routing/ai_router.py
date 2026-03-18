@@ -10,18 +10,21 @@ class AIRouter:
     """
 
     # 路由器当前使用的模型（由 ModelManager 初始化后可更新；不可用时自动降级）
-    _router_model: str = "gemini-2.5-flash"
+    _router_model: str = "gemini-3-flash-preview"
 
     # 路由模型降级链（所有模型必须支持 generate_content，不能是 interactions_only）
     _ROUTER_MODEL_CHAIN: list = [
-        "gemini-2.5-flash",       # 首选：最快且兼容 generate_content 的模型
-        "gemini-2.0-flash",       # 备选1
-        "gemini-2.0-flash-lite",  # 备选2：轻量级，几乎必然可用
+        "gemini-3-flash-preview",   # 首选：当前最快可用的 Flash 模型
+        "gemini-3-pro-preview",     # 备选1：当前 Pro 模型（路由任务也可用）
+        "gemini-2.5-flash",         # 备选2：旧版 Flash 兜底
+        "gemini-2.0-flash",         # 备选3
+        "gemini-2.0-flash-lite",    # 备选4：极端兜底
     ]
 
     # 已知 Interactions-only 模型前缀（不能用 generate_content，拒绝设为路由模型）
+    # 注意：gemini-3-flash-preview / gemini-3-pro-preview 是普通模型，不在此列
     _INTERACTIONS_ONLY_PREFIXES: tuple = (
-        "gemini-3-flash-preview", "gemini-3-pro-preview", "deep-research-",
+        "deep-research-",
     )
 
     # 判定模型不可用的错误信号词

@@ -506,17 +506,11 @@ class SmartDispatcher:
                 "报告",
                 "生成",
                 "做成",
-                "标注",
-                "批注",
-                "润色",
-                "改写",
-                "校对",
-                "审校",
-                "修订",
-                "纠错",
             ]
         ):
             return "FILE_GEN"
+        # 编辑/润色类动词（无文件上下文时）→ 让 AI 路由器判断，不强制 FILE_GEN
+        # 有文件上下文时已在上方 [file_attached:] 分支中正确路由到 DOC_ANNOTATE
         if any(k in text_lower for k in ["研究", "分析", "深入", "介绍"]):
             return "RESEARCH"
         return "CHAT"
