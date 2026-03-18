@@ -1,8 +1,11 @@
 import logging
 import os
 import time
+import logging
+import queue
+import threading
+import concurrent.futures
 from typing import Any, Dict, Generator, List, Optional, Union
-
 from .base import LLMProvider
 
 try:
@@ -18,11 +21,9 @@ logger = logging.getLogger(__name__)
 # Must be routed through rc.interactions.create(agent=...) instead.
 # NOTE: gemini-3-flash-preview and gemini-3-pro-preview are regular models
 # (use generate_content). Only deep-research-* are actual Interactions API agents.
-_INTERACTIONS_ONLY_MODELS: frozenset = frozenset(
-    {
-        "deep-research-pro-preview-12-2025",  # Research agent: Interactions API only
-    }
-)
+_INTERACTIONS_ONLY_MODELS: frozenset = frozenset({
+    "deep-research-pro-preview-12-2025",  # Research agent: Interactions API only
+})
 # No background=True restriction needed for current interactions models
 _NO_BACKGROUND_MODELS: frozenset = frozenset()
 
@@ -33,6 +34,10 @@ class GeminiProvider(LLMProvider):
     MAX_RETRIES = 3
     RETRY_BASE_DELAY = 2.0  # seconds
     RETRYABLE_STATUS_CODES = {429, 503}
+    # 非流式调用整体超时（秒），超时后抛出 TimeoutError 触发本地模型兜底
+    CALL_TIMEOUT: int = int(os.getenv("GEMINI_CALL_TIMEOUT", "30"))
+    # 流式调用每个 chunk 之间的最长等待（秒）
+    STREAM_CHUNK_TIMEOUT: int = int(os.getenv("GEMINI_STREAM_CHUNK_TIMEOUT", "15"))
 
     def __init__(self, api_key: str = None):
         self.api_key = (
@@ -103,16 +108,31 @@ class GeminiProvider(LLMProvider):
             raise
 
     def _call_with_retry(self, model: str, contents, config):
-        """Call generate_content with exponential backoff retry on 429/503."""
+        """Call generate_content with exponential backoff retry on 429/503.
+        
+        每次调用在独立线程中执行，若超过 CALL_TIMEOUT 秒无响应则抛出
+        TimeoutError（消息含 "timed out"），触发上层本地模型兜底逻辑。
+        """
         last_exc = None
         for attempt in range(self.MAX_RETRIES):
             try:
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=config,
-                )
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                    _future = _pool.submit(
+                        self.client.models.generate_content,
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    )
+                    try:
+                        response = _future.result(timeout=self.CALL_TIMEOUT)
+                    except concurrent.futures.TimeoutError:
+                        raise TimeoutError(
+                            f"LLM call timed out after {self.CALL_TIMEOUT}s"
+                        )
                 return self._format_response(response)
+            except TimeoutError:
+                # 超时不重试，直接向上抛，由 UnifiedAgent 产生 ERROR step
+                raise
             except Exception as exc:
                 last_exc = exc
                 # Check if retryable
@@ -282,14 +302,42 @@ class GeminiProvider(LLMProvider):
         }
 
     def _stream_generator(self, response_iterator: Any):
-        """Yield standardized chunks from google.genai stream."""
-        for chunk in response_iterator:
-            text = getattr(chunk, "text", "") or ""
+        """Yield standardized chunks from google.genai stream.
+
+        后台线程负责迭代 SDK 流并向队列投递 chunk；主生成器以 STREAM_CHUNK_TIMEOUT
+        秒超时读取队列。若超时则认为云端流卡住，抛出 TimeoutError 触发兜底。
+        """
+        _q: queue.Queue = queue.Queue()
+        _SENTINEL = object()
+
+        def _feed():
+            try:
+                for chunk in response_iterator:
+                    _q.put(chunk)
+            except Exception as exc:
+                _q.put(exc)
+            finally:
+                _q.put(_SENTINEL)
+
+        _t = threading.Thread(target=_feed, daemon=True)
+        _t.start()
+
+        while True:
+            try:
+                item = _q.get(timeout=self.STREAM_CHUNK_TIMEOUT)
+            except queue.Empty:
+                raise TimeoutError(
+                    f"Stream stalled: no chunk received in {self.STREAM_CHUNK_TIMEOUT}s"
+                )
+            if item is _SENTINEL:
+                break
+            if isinstance(item, Exception):
+                raise item
+            text = getattr(item, "text", "") or ""
             finish_reason = None
-            candidates = getattr(chunk, "candidates", None) or []
+            candidates = getattr(item, "candidates", None) or []
             if candidates:
                 finish_reason = getattr(candidates[0], "finish_reason", None)
-
             yield {
                 "content": text,
                 "finish_reason": finish_reason,
@@ -318,15 +366,12 @@ class GeminiProvider(LLMProvider):
         try:
             import httpx
             from google.genai._api_client import HttpOptions as _HttpOptions
-
             http_client = httpx.Client(
                 timeout=httpx.Timeout(300.0, connect=30.0), verify=True
             )
             rc = genai.Client(
                 api_key=self.api_key,
-                http_options=_HttpOptions(
-                    api_version="v1beta", httpx_client=http_client
-                ),
+                http_options=_HttpOptions(api_version="v1beta", httpx_client=http_client),
             )
         except Exception:
             rc = self.client
@@ -370,7 +415,6 @@ class GeminiProvider(LLMProvider):
             # Interactions API has no token-level streaming; emit as a single chunk
             def _single_chunk():
                 yield {"content": text, "finish_reason": "stop"}
-
             return _single_chunk()
 
         return {"content": text, "tool_calls": [], "usage": {}}
@@ -386,11 +430,14 @@ class GeminiProvider(LLMProvider):
             return str(obj.text)
         if hasattr(obj, "parts"):
             return " ".join(
-                str(p.text) for p in (obj.parts or []) if hasattr(p, "text") and p.text
+                str(p.text)
+                for p in (obj.parts or [])
+                if hasattr(p, "text") and p.text
             )
         if hasattr(obj, "outputs"):
             texts = [
-                GeminiProvider._get_interactions_text(o) for o in (obj.outputs or [])
+                GeminiProvider._get_interactions_text(o)
+                for o in (obj.outputs or [])
             ]
             return "\n".join(t for t in texts if t)
         return ""
@@ -407,8 +454,6 @@ class GeminiProvider(LLMProvider):
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if content:
-                label = (
-                    "\u52a9\u624b" if role in ("assistant", "model") else "\u7528\u6237"
-                )
+                label = "\u52a9\u624b" if role in ("assistant", "model") else "\u7528\u6237"
                 lines.append(f"{label}: {content}")
         return "\n".join(lines)

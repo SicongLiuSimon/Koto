@@ -1,8 +1,10 @@
 import json
+import logging
 import re
 
 from app.core.routing.local_model_router import LocalModelRouter
 
+logger = logging.getLogger(__name__)
 
 class LocalPlanner:
     """Local planner/controller using Ollama for multi-step task planning."""
@@ -190,15 +192,12 @@ class LocalPlanner:
             _memory_hint = ""
             try:
                 import sys as _sys
-
                 _app = _sys.modules.get("web.app") or _sys.modules.get("app")
                 _get_mgr = getattr(_app, "get_memory_manager", None) if _app else None
                 if _get_mgr:
                     _mgr = _get_mgr()
                     if _mgr and hasattr(_mgr, "get_compact_memory_snapshot"):
-                        _memory_hint = (
-                            _mgr.get_compact_memory_snapshot(max_chars=150) or ""
-                        )
+                        _memory_hint = _mgr.get_compact_memory_snapshot(max_chars=150) or ""
             except Exception:
                 pass
 
@@ -291,19 +290,20 @@ class LocalPlanner:
             # 只从明确支持 generate_content 的模型里选，不选 Interactions-only
             _safe_plan_models = [
                 "gemini-3.1-pro-preview",  # 目前最强 generate_content 兼容模型
-                "gemini-2.5-pro",  # 次选：强推理
-                "gemini-2.5-flash",  # 高质量快速模型
-                "gemini-2.0-flash",  # 备选
-                "gemini-1.5-flash",  # 降级兜底
+                "gemini-2.5-pro",          # 次选：强推理
+                "gemini-2.5-flash",        # 高质量快速模型
+                "gemini-2.0-flash",        # 备选
+                "gemini-1.5-flash",        # 降级兜底
             ]
-            _planning_model = _safe_plan_models[1]  # 默认 gemini-2.5-flash
+            # 默认 gemini-2.5-flash（index=2）；gemini-2.5-pro（index=1）更贵不应作默认
+            _PLAN_DEFAULT_IDX = 2
+            _planning_model = _safe_plan_models[_PLAN_DEFAULT_IDX]
             try:
                 from app.core.llm.model_fallback import get_fallback_executor
-
                 _fbe = get_fallback_executor()
                 _planning_model = next(
                     (m for m in _safe_plan_models if _fbe.is_available(m)),
-                    _safe_plan_models[1],
+                    _safe_plan_models[_PLAN_DEFAULT_IDX],
                 )
             except Exception:
                 pass
@@ -326,18 +326,17 @@ class LocalPlanner:
             raw = resp.text or ""
             result = cls._parse_plan_json(raw)
             if result:
-                print(
-                    f"[LocalPlanner] ✅ Cloud fallback 规划成功 ({_planning_model}): {len(result.get('steps', []))} 步"
+                logger.info(
+                    "[LocalPlanner] Cloud 规划成功 (%s): %d 步",
+                    _planning_model, len(result.get("steps", []))
                 )
             return result
         except Exception as e:
-            print(f"[LocalPlanner] ⚠️ Cloud fallback 规划失败: {e}")
+            logger.warning("[LocalPlanner] Cloud 规划失败: %s", e)
             return None
 
     @classmethod
-    def self_check(
-        cls, user_input: str, steps: list, results: list, timeout: float = 6.0
-    ) -> dict:
+    def self_check(cls, user_input: str, steps: list, results: list, timeout: float = 6.0) -> dict:
         """
         对执行结果进行验证（Result Verification）。
 
@@ -352,11 +351,7 @@ class LocalPlanner:
         # ── 2. Ollama 离线兜底 ───────────────────────────────────────────────
         try:
             if not LocalModelRouter.is_ollama_available():
-                return {
-                    "status": "complete",
-                    "summary": "(云端验证不可用，离线模式跳过自检)",
-                    "next_actions": [],
-                }
+                return {"status": "complete", "summary": "(云端验证不可用，离线模式跳过自检)", "next_actions": []}
             if not LocalModelRouter.init_model():
                 return {
                     "status": "complete",
@@ -421,9 +416,7 @@ class LocalPlanner:
             return {"status": "partial", "summary": "(自检异常)", "next_actions": []}
 
     @classmethod
-    def _self_check_with_cloud(
-        cls, user_input: str, steps: list, results: list
-    ) -> dict | None:
+    def _self_check_with_cloud(cls, user_input: str, steps: list, results: list) -> dict | None:
         """
         使用云端模型验证多步任务执行结果。
         返回标准验证 dict，失败则返回 None。
@@ -431,26 +424,18 @@ class LocalPlanner:
         """
         try:
             import importlib
-
             _types = importlib.import_module("google.genai.types")
             import sys
-
             _app_module = sys.modules.get("web.app") or sys.modules.get("app")
             _client = getattr(_app_module, "client", None) if _app_module else None
             if _client is None:
                 return None
 
             # 验证使用强模型保证准确性，gemini-3.1-pro-preview 为首选
-            _check_models = [
-                "gemini-3.1-pro-preview",
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-2.0-flash-lite",
-            ]
+            _check_models = ["gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
             _check_model = _check_models[0]
             try:
                 from app.core.llm.model_fallback import get_fallback_executor
-
                 _fbe = get_fallback_executor()
                 _check_model = next(
                     (m for m in _check_models if _fbe.is_available(m)),
@@ -462,21 +447,13 @@ class LocalPlanner:
             summary_lines = []
             for i, (s, r) in enumerate(zip(steps, results), start=1):
                 ok = r.get("success") if isinstance(r, dict) else False
-                out = (
-                    (r.get("output") or r.get("error") or "")[:120]
-                    if isinstance(r, dict)
-                    else ""
-                )
-                summary_lines.append(
-                    f"步骤{i}: {s.get('task_type')} - {'OK' if ok else 'FAIL'} - {out}"
-                )
+                out = (r.get("output") or r.get("error") or "")[:120] if isinstance(r, dict) else ""
+                summary_lines.append(f"步骤{i}: {s.get('task_type')} - {'OK' if ok else 'FAIL'} - {out}")
 
             check_prompt = (
                 cls.CHECK_PROMPT
-                + "\n用户需求:\n"
-                + user_input[:400]
-                + "\n\n执行摘要:\n"
-                + "\n".join(summary_lines)
+                + "\n用户需求:\n" + user_input[:400]
+                + "\n\n执行摘要:\n" + "\n".join(summary_lines)
             )
 
             resp = _client.models.generate_content(
@@ -494,17 +471,11 @@ class LocalPlanner:
                 result = {
                     "status": check.get("status", "partial"),
                     "summary": check.get("summary", ""),
-                    "next_actions": (
-                        check.get("next_actions", [])
-                        if isinstance(check.get("next_actions", []), list)
-                        else []
-                    ),
+                    "next_actions": check.get("next_actions", []) if isinstance(check.get("next_actions", []), list) else [],
                     "model": _check_model,
                 }
-                print(
-                    f"[LocalPlanner] ✅ 云端验证完成 ({_check_model}): {result['status']}"
-                )
+                logger.info("[LocalPlanner] 云端验证完成 (%s): %s", _check_model, result["status"])
                 return result
         except Exception as e:
-            print(f"[LocalPlanner] ⚠️ 云端验证失败: {e}")
+            logger.warning("[LocalPlanner] 云端验证失败: %s", e)
         return None

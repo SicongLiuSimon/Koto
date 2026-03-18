@@ -138,12 +138,32 @@ jobs:
           path: logs\build_latest.log
           retention-days: 7
 
+      - name: Build LocalModelInstaller
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path logs | Out-Null
+          .\.venv\Scripts\pyinstaller.exe local_model_installer.spec --clean -y *> logs\local_model_installer_build_latest.log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::LocalModelInstaller build failed. Last 30 lines:"
+            Get-Content logs\local_model_installer_build_latest.log -Tail 30
+            exit 1
+          }
+          Write-Host "LocalModelInstaller OK -> dist\LocalModelInstaller.exe"
+
+      - name: Upload LocalModelInstaller build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-model-installer-build-log
+          path: logs\local_model_installer_build_latest.log
+          retention-days: 7
+
       - name: Assemble portable bundle
         shell: pwsh
         env:
           PYTHONIOENCODING: utf-8
         run: |
-          .\.venv\Scripts\python.exe src\deploy_portable.py --allow-missing-installer
+          .\.venv\Scripts\python.exe src\deploy_portable.py
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::deploy_portable.py failed"; exit 1 }
           Write-Host "Portable bundle ready -> dist\Koto_Portable\"
 
@@ -289,7 +309,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-docker, test-installer]
+    needs: [build-windows, test-installer]
     if: github.event_name == 'push'
     permissions:
       contents: write

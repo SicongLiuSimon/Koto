@@ -194,6 +194,69 @@ def _make_skill_id(name: str) -> str:
     return slug or f"skill_{hashlib.md5(name.encode()).hexdigest()[:8]}"
 
 
+def _auto_register_intent_binding(skill_def) -> None:
+    """
+    从 intent_description 和 tags 中提取触发关键词，
+    并向 SkillBindingManager 注册意图绑定，使新 Skill 立即参与关键词自动匹配。
+    无论成功与否都不抛出异常，只记录日志。
+    """
+    # 收集候选关键词：tags 优先，再从 intent_description 提取短语
+    skip_generic = {"general", "custom", "style", "behavior", "domain", "workflow",
+                    "auto-extracted", "chat", "coder", "research"}
+    keywords: list = []
+
+    # 1. 有效 tags
+    for tag in (getattr(skill_def, "tags", None) or []):
+        tag = str(tag).strip()
+        if len(tag) >= 2 and tag.lower() not in skip_generic:
+            keywords.append(tag)
+
+    # 2. 从 intent_description 按常用分隔符拆出 2-8 字短语
+    intent = str(getattr(skill_def, "intent_description", "") or "").strip()
+    if intent:
+        parts = re.split(r"[、，；。/|或]", intent)
+        for part in parts:
+            # 去掉常见前缀
+            for prefix in ("用户需要", "用户想要", "当用户", "用于", "适用于", "用户"):
+                if part.startswith(prefix):
+                    part = part[len(prefix):]
+            part = part.strip()
+            if 2 <= len(part) <= 8:
+                keywords.append(part)
+
+    # 去重，最多 8 个
+    seen: set = set()
+    patterns: list = []
+    for kw in keywords:
+        if kw not in seen:
+            seen.add(kw)
+            patterns.append(kw)
+            if len(patterns) >= 8:
+                break
+
+    if not patterns:
+        return  # 无有效关键词，跳过
+
+    try:
+        from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+        mgr = get_skill_binding_manager()
+        # 检查是否已有同 Skill 的意图绑定，避免重复注册
+        existing = mgr.list_bindings(skill_id=skill_def.id, binding_type="intent")
+        if existing:
+            return
+        mgr.bind_intent(
+            skill_id=skill_def.id,
+            intent_patterns=patterns,
+            auto_disable_after_turns=3,
+        )
+        logger.info(
+            f"[skill_recorder] 自动注册意图绑定: {skill_def.id} "
+            f"keywords={patterns}"
+        )
+    except Exception as e:
+        logger.debug(f"[skill_recorder] 意图绑定注册跳过: {e}")
+
+
 # ── 核心类 ────────────────────────────────────────────────────────────────────
 
 
@@ -238,7 +301,6 @@ class SkillRecorder:
 
         # 获取共享 Gemini client（与 LocalPlanner / AIRouter 同一模式）
         import sys as _sys
-
         _app_module = _sys.modules.get("web.app") or _sys.modules.get("app")
         _client = getattr(_app_module, "client", None) if _app_module else None
         if _client is None:
@@ -255,7 +317,6 @@ class SkillRecorder:
         def _call():
             try:
                 import importlib
-
                 _types = importlib.import_module("google.genai.types")
                 resp = _client.models.generate_content(
                     model="gemini-2.5-flash",
@@ -289,14 +350,11 @@ class SkillRecorder:
                 return None
             logger.info(
                 "[skill_recorder] ✅ LLM 语义分析完成: %s → %s",
-                skill_name,
-                data.get("intent_description", ""),
+                skill_name, data.get("intent_description", ""),
             )
             return data
         except json.JSONDecodeError as e:
-            logger.debug(
-                "[skill_recorder] LLM JSON 解析失败: %s | raw=%r", e, raw[:200]
-            )
+            logger.debug("[skill_recorder] LLM JSON 解析失败: %s | raw=%r", e, raw[:200])
             return None
 
     # ── 从 session 对话文件提取 ──────────────────────────────────────────────
@@ -419,6 +477,12 @@ class SkillRecorder:
                 f"[skill_recorder] SkillManager 注册失败（已保存到磁盘）: {e}"
             )
 
+        # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
+        _auto_register_intent_binding(skill_def)
+
+        # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
+        _auto_register_intent_binding(skill_def)
+
         # ── 注册触发关键词到决策层 ────────────────────────────────────────────
         kws = list(getattr(skill_def, "trigger_keywords", None) or [])
         if kws:
@@ -426,37 +490,28 @@ class SkillRecorder:
             # 1) SkillAutoMatcher._PATTERN_MAP（关键词即时匹配）
             try:
                 from app.core.skills.skill_auto_matcher import SkillAutoMatcher
-
                 # 避免重复注册
-                existing_ids = {
-                    e.get("skill_id") for e in SkillAutoMatcher._PATTERN_MAP
-                }
+                existing_ids = {e.get("skill_id") for e in SkillAutoMatcher._PATTERN_MAP}
                 if skill_id not in existing_ids:
                     SkillAutoMatcher._PATTERN_MAP.append(
                         {"skill_id": skill_id, "patterns": kws}
                     )
                     logger.info(
                         "[skill_recorder] ✅ AutoMatcher 注册 %d 个关键词: %s",
-                        len(kws),
-                        kws,
+                        len(kws), kws,
                     )
             except Exception as e:
                 logger.debug("[skill_recorder] AutoMatcher 注册失败: %s", e)
 
             # 2) SkillBindingManager.bind_intent()（对话 intent 持久绑定）
             try:
-                from app.core.skills.skill_trigger_binding import (
-                    get_skill_binding_manager,
-                )
-
+                from app.core.skills.skill_trigger_binding import get_skill_binding_manager
                 get_skill_binding_manager().bind_intent(
                     skill_id=skill_id,
                     intent_patterns=kws,
                     auto_disable_after_turns=3,
                 )
-                logger.info(
-                    "[skill_recorder] ✅ BindingManager intent 绑定: %s", skill_id
-                )
+                logger.info("[skill_recorder] ✅ BindingManager intent 绑定: %s", skill_id)
             except Exception as e:
                 logger.debug("[skill_recorder] BindingManager 绑定失败: %s", e)
 
@@ -561,9 +616,7 @@ class SkillRecorder:
             icon="🤖",
             category="custom",
             skill_nature=skill_nature,
-            description=description
-            or intent_desc
-            or f"自动从对话提取的技能：{skill_name}",
+            description=description or intent_desc or f"自动从对话提取的技能：{skill_name}",
             intent_description=intent_desc,
             task_types=task_types,
             version="1.0.0",

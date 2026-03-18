@@ -34,8 +34,8 @@ from typing import Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 _MAX_SUGGESTIONS = 3
-_NGRAM_THRESHOLD = 0.08  # Jaccard 二元组阈值，与 SkillAutoMatcher 保持一致
-_MIN_ANSWER_LEN = 40  # 答案字数阈值——过短通常是闲聊，不推荐 Skill
+_NGRAM_THRESHOLD = 0.08   # Jaccard 二元组阈值，与 SkillAutoMatcher 保持一致
+_MIN_ANSWER_LEN  = 40     # 答案字数阈值——过短通常是闲聊，不推荐 Skill
 
 
 class SkillSuggester:
@@ -75,7 +75,6 @@ class SkillSuggester:
 
         try:
             from app.core.skills.skill_manager import SkillManager
-
             SkillManager._ensure_init()
         except Exception as exc:
             logger.debug(f"[SkillSuggester] SkillManager 加载失败，跳过推荐: {exc}")
@@ -100,18 +99,16 @@ class SkillSuggester:
                 tags = list(getattr(skill_def, "tags", None) or [])
                 trigger_kws = list(getattr(skill_def, "trigger_keywords", None) or [])
 
-            candidates.append(
-                {
-                    "id": skill_id,
-                    "name": s.get("name", skill_id),
-                    "icon": s.get("icon", "🔧"),
-                    "description": s.get("description", ""),
-                    "intent_description": intent_desc,
-                    "tags": tags,
-                    "trigger_keywords": trigger_kws,
-                    "task_types": s.get("task_types", []),
-                }
-            )
+            candidates.append({
+                "id":               skill_id,
+                "name":             s.get("name", skill_id),
+                "icon":             s.get("icon", "🔧"),
+                "description":      s.get("description", ""),
+                "intent_description": intent_desc,
+                "tags":             tags,
+                "trigger_keywords": trigger_kws,
+                "task_types":       s.get("task_types", []),
+            })
 
         if not candidates:
             return []
@@ -123,15 +120,13 @@ class SkillSuggester:
 
         result = []
         for _, c in scored[:max_n]:
-            result.append(
-                {
-                    "id": c["id"],
-                    "name": c["name"],
-                    "icon": c["icon"],
-                    "description": c["description"],
-                    "intent_description": c["intent_description"],
-                }
-            )
+            result.append({
+                "id":                 c["id"],
+                "name":               c["name"],
+                "icon":               c["icon"],
+                "description":        c["description"],
+                "intent_description": c["intent_description"],
+            })
         return result
 
     @classmethod
@@ -226,9 +221,7 @@ class SkillSuggester:
                     break  # 每个 Skill 只加一次
 
             # Layer 3: 字符二元组语义近似
-            desc_text = (
-                c.get("intent_description") or c.get("description") or ""
-            ).strip()
+            desc_text = (c.get("intent_description") or c.get("description") or "").strip()
             if desc_text and input_bigrams:
                 desc_bigrams = cls._ngrams(desc_text[:400])
                 if desc_bigrams:
@@ -257,7 +250,6 @@ class SkillSuggester:
         hits: set = set()
         try:
             from app.core.skills.skill_auto_matcher import SkillAutoMatcher
-
             for entry in SkillAutoMatcher._PATTERN_MAP:
                 if any(p.lower() in lowered_input for p in entry["patterns"]):
                     hits.add(entry["skill_id"])
@@ -269,7 +261,7 @@ class SkillSuggester:
     def _ngrams(cls, text: str, n: int = 2) -> set:
         """生成字符 n-gram 集合（移除空格后）。"""
         t = text.lower().replace(" ", "")
-        return {t[i : i + n] for i in range(max(0, len(t) - n + 1))}
+        return {t[i:i + n] for i in range(max(0, len(t) - n + 1))}
 
     # ── 联动：chains_to 下一步推荐 ────────────────────────────────────────────
 
@@ -303,12 +295,9 @@ class SkillSuggester:
 
         try:
             from app.core.skills.skill_manager import SkillManager
-
             SkillManager._ensure_init()
         except Exception as exc:
-            logger.debug(
-                f"[SkillSuggester] suggest_chains SkillManager 加载失败: {exc}"
-            )
+            logger.debug(f"[SkillSuggester] suggest_chains SkillManager 加载失败: {exc}")
             return []
 
         seen_chain_ids: set = set()
@@ -332,18 +321,14 @@ class SkillSuggester:
                 if not target or target.get("enabled", False):
                     continue
                 t_def = SkillManager._def_registry.get(chain_id)
-                result.append(
-                    {
-                        "id": chain_id,
-                        "name": target.get("name", chain_id),
-                        "icon": target.get("icon", "🔧"),
-                        "description": target.get("description", ""),
-                        "intent_description": (
-                            getattr(t_def, "intent_description", "") if t_def else ""
-                        ),
-                        "source_skill": s_def.name or src_id,
-                    }
-                )
+                result.append({
+                    "id": chain_id,
+                    "name": target.get("name", chain_id),
+                    "icon": target.get("icon", "🔧"),
+                    "description": target.get("description", ""),
+                    "intent_description": getattr(t_def, "intent_description", "") if t_def else "",
+                    "source_skill": s_def.name or src_id,
+                })
                 logger.debug(
                     "[SkillSuggester] 🔗 chains_to 推荐: %s → %s", src_id, chain_id
                 )
