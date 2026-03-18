@@ -341,7 +341,7 @@ class UnifiedAgent(Agent):
         _time_prefix = (
             f"当前本地时间：{_now.strftime('%Y年%m月%d日 %H:%M')}（{_weekday}）\n"
             f"⚠️ 本模型训练数据有截止日期，当前系统时间即为真实参考时间。"
-            f"对于所有涉及"最新/目前/当前"状态的具体事实查询，请优先调用 web_search 工具获取最新信息，"
+            f"对于所有涉及\u201c最新/目前/当前\u201d状态的具体事实查询，请优先调用 web_search 工具获取最新信息，"
             f"不要依赖可能已过时的训练数据。\n\n"
         )
         _effective_instruction = _time_prefix + _effective_instruction

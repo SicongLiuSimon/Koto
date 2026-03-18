@@ -2,7 +2,7 @@
 
 Covers:
 - AIRouter._cache is a dict class attribute
-- AIRouter._cache_max_size == 100
+- AIRouter._CACHE_MAX_SIZE == 500
 - Cache eviction: adding entries beyond max_size triggers half-eviction
 - RouterDecision dataclass construction and defaults
 - LocalModelRouter._init_response_model (classmethod, queries Ollama)
@@ -23,10 +23,10 @@ class TestAIRouterCacheType:
 
         assert isinstance(AIRouter._cache, dict)
 
-    def test_cache_max_size_is_100(self):
+    def test_CACHE_MAX_SIZE_is_500(self):
         from app.core.routing.ai_router import AIRouter
 
-        assert AIRouter._cache_max_size == 100
+        assert AIRouter._CACHE_MAX_SIZE == 500
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ class TestAIRouterCacheEviction:
         from app.core.routing.ai_router import AIRouter
 
         cache = AIRouter._cache
-        max_size = AIRouter._cache_max_size
+        max_size = AIRouter._CACHE_MAX_SIZE
         # Fill to max_size
         for i in range(max_size):
             cache[f"key{i}"] = f"val{i}"

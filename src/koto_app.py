@@ -430,6 +430,8 @@ class WindowAPI:
             parsed = urlparse(url)
             if parsed.scheme not in ("http", "https"):
                 return {"success": False, "error": "不允许的协议"}
+            if not parsed.netloc:
+                return {"success": False, "error": "无效的URL（缺少域名）"}
             webbrowser.open(url)
             return {"success": True}
         except Exception as e:

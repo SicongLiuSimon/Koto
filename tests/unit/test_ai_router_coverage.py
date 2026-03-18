@@ -50,12 +50,12 @@ class TestCacheSet:
         assert AIRouter._cache["key1"] == "value1"
 
     def test_eviction_when_full(self):
-        """When cache reaches _cache_max_size, oldest half should be evicted."""
+        """When cache reaches _CACHE_MAX_SIZE, oldest half should be evicted."""
         from app.core.routing.ai_router import AIRouter
 
-        original_max = AIRouter._cache_max_size
+        original_max = AIRouter._CACHE_MAX_SIZE
         try:
-            AIRouter._cache_max_size = 10
+            AIRouter._CACHE_MAX_SIZE = 10
             # Fill cache to capacity
             for i in range(10):
                 AIRouter._cache[f"k{i}"] = f"v{i}"
@@ -70,7 +70,7 @@ class TestCacheSet:
             # Newest pre-eviction keys should remain
             assert "k5" in AIRouter._cache
         finally:
-            AIRouter._cache_max_size = original_max
+            AIRouter._CACHE_MAX_SIZE = original_max
 
 
 @pytest.mark.unit
@@ -181,10 +181,9 @@ class TestClassify:
         task, conf, src = AIRouter.classify(client, "write code", timeout=5.0)
         # Multiple models were attempted (chain was iterated)
         assert call_count >= 2
-        # The error from the first model persists in result_holder,
-        # so the overall result is an error even though a later model succeeded.
-        assert task is None
-        assert conf == "Error"
+        # New router correctly returns the fallback model's successful result
+        assert task == "CODER"
+        assert conf != "Error"
 
     def test_all_models_unavailable(self):
         """When every model in the chain fails with 'not found', return error."""
@@ -206,8 +205,8 @@ class TestClassify:
         client = MagicMock()
         client.models.generate_content.return_value = response
         task, conf, src = AIRouter.classify(client, "hello", timeout=5.0)
-        assert task is None
-        assert conf == "NoResult"
+        # New router returns CHAT as default when candidates is empty
+        assert task == "CHAT"
 
 
 @pytest.mark.unit

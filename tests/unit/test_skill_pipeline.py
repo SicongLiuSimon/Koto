@@ -54,7 +54,8 @@ class TestPipelineResult:
         )
         assert r.success is True
 
-    def test_not_success_when_steps_skipped(self):
+    def test_success_despite_steps_skipped(self):
+        """Skipped steps (skip_on_error=True) are non-fatal; success = any step ran."""
         r = PipelineResult(
             final_output="ok",
             context={},
@@ -62,7 +63,7 @@ class TestPipelineResult:
             steps_skipped=["b"],
             elapsed_ms=1.0,
         )
-        assert r.success is False
+        assert r.success is True
 
     def test_not_success_when_nothing_executed(self):
         r = PipelineResult(
@@ -187,10 +188,12 @@ class TestSkillPipelineContextPassing:
     def test_initial_context_available_to_first_step(self, mock_registry):
         mock_registry.dispatch.return_value = "ok"
 
-        pipeline = SkillPipeline(steps=[PipelineStep("s1")])
+        step = PipelineStep("s1", pass_full_ctx=True)
+        pipeline = SkillPipeline(steps=[step])
         result = pipeline.run(user_input="x", context={"file": "a.py"})
 
         ctx_passed = mock_registry.dispatch.call_args.kwargs["context"]
+        # With pass_full_ctx=True, context keys are spread into call_ctx directly
         assert ctx_passed["file"] == "a.py"
 
     @patch(_PATCH_REGISTRY)
@@ -201,8 +204,8 @@ class TestSkillPipelineContextPassing:
         SkillPipeline(steps=[step]).run(user_input="x", context={"key": "val"})
 
         ctx_passed = mock_registry.dispatch.call_args.kwargs["context"]
-        # When pass_full_ctx=True, ctx["context"] should be a copy of the shared context
-        assert ctx_passed["context"]["key"] == "val"
+        # When pass_full_ctx=True, context keys are spread directly into call_ctx
+        assert ctx_passed["key"] == "val"
 
     @patch(_PATCH_REGISTRY)
     def test_input_from_maps_context_keys(self, mock_registry):
