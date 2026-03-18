@@ -120,6 +120,8 @@ jobs:
 
       - name: Run installer E2E test
         shell: pwsh
+        env:
+          KOTO_SERVER_ONLY: "1"
         run: |
           $setup = Get-Item "dist\Koto_v*_Setup.exe" | Select-Object -First 1
           if (-not $setup) { Write-Host "::error::Setup EXE not found"; exit 1 }
@@ -129,11 +131,13 @@ jobs:
             -TestInstallDir "$env:LOCALAPPDATA\KotoCI_Build" `
             -Port 5099 `
             -HealthTimeoutSec 60 `
-            -RequireHealth:$false
+            -RequireHealth:$true
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Run portable E2E test
         shell: pwsh
+        env:
+          KOTO_SERVER_ONLY: "1"
         run: |
           $zip = Get-Item "dist\Koto_v*_Windows.zip" | Select-Object -First 1
           if (-not $zip) { Write-Host "::warning::ZIP not found, skipping portable test"; exit 0 }
@@ -142,7 +146,7 @@ jobs:
             -ZipFile $zip.FullName `
             -Port 5098 `
             -HealthTimeoutSec 60 `
-            -RequireHealth:$false
+            -RequireHealth:$true
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Upload build artifacts

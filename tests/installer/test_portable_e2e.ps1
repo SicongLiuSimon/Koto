@@ -4,12 +4,11 @@
 
     Steps:
       1. Extract ZIP to temp dir
-      2. Seed config (bypass first-run wizard)
-      3. Launch Koto.exe on KOTO_PORT=5098
-      4. Poll /api/health up to 30 s
-      5. Verify critical files in _internal
-      6. Stop process
-      7. Remove temp dir
+      2. Verify critical files + file size + Python DLL
+      3. Seed config (bypass first-run wizard) + launch
+      4. Poll /api/health + /api/ping
+      5. Stop process
+      6. Remove temp dir
 
     Exit 0 on success, 1 on any failure.
 
@@ -87,6 +86,16 @@ foreach ($path in $requiredPaths) {
     else                 { Fail "Missing: $path" }
 }
 
+# File size validation — catch empty or corrupt builds
+$exeSize = (Get-Item $exePath).Length / 1MB
+if ($exeSize -lt 50) { Fail "Koto.exe is only $([math]::Round($exeSize,1))MB (expected >= 50MB)" }
+else                  { Pass "Koto.exe size is $([math]::Round($exeSize,1))MB" }
+
+# Critical DLL check — Python runtime must be present
+$pythonDll = Join-Path $internalDir "python311.dll"
+if (Test-Path $pythonDll) { Pass "python311.dll exists in _internal" }
+else                      { Fail "python311.dll missing from _internal" }
+
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 3 — Seed config + launch
 # ══════════════════════════════════════════════════════════════════════════
@@ -94,6 +103,7 @@ Write-Host "`n[Step 3] Seeding config and launching..."
 & (Join-Path $ScriptDir "seed_config.ps1") -InstallDir $ExtractDir
 
 $env:KOTO_PORT = $Port
+if ($env:KOTO_SERVER_ONLY) { Write-Host "  KOTO_SERVER_ONLY=$env:KOTO_SERVER_ONLY (server-only mode)" }
 $kotoProc = Start-Process -FilePath $exePath `
     -WorkingDirectory $ExtractDir `
     -PassThru
@@ -133,6 +143,16 @@ if (-not $healthy) {
         Fail "Health endpoint did not respond within ${HealthTimeoutSec}s"
     } else {
         Write-Host "::warning::Health endpoint did not respond within ${HealthTimeoutSec}s (best-effort in CI — pywebview may not init headless)"
+    }
+}
+
+# /api/ping endpoint check
+if ($healthy) {
+    try {
+        $pingResp = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 5
+        Pass "/api/ping responded"
+    } catch {
+        Write-Host "  WARN: /api/ping did not respond"
     }
 }
 

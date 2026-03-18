@@ -966,6 +966,15 @@ def _bootstrap_api_setup():
 
 def main():
     """主入口 - 桌面应用模式"""
+    # Server-only mode for CI testing — skip GUI, just run Flask
+    if os.environ.get("KOTO_SERVER_ONLY") == "1":
+        from web.app import app
+
+        port = int(os.environ.get("KOTO_PORT", "5000"))
+        print(f"[SERVER-ONLY] Starting Koto on http://127.0.0.1:{port}")
+        app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+        return
+
     # 初始化
     ensure_directories()
     _bootstrap_api_setup()  # API 密钥向导（便携版 / 首次启动 / 密钥失效时触发）

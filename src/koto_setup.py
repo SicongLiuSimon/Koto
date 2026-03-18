@@ -604,11 +604,13 @@ def _prompt_local_model_if_needed():
 
 # ── 主程序入口 ────────────────────────────────────────
 def main():
-    # Step 1: 运行设置向导（首次/强制模式）
-    _run_setup_if_needed()
+    # In server-only mode, skip all interactive setup and go straight to app
+    if os.environ.get("KOTO_SERVER_ONLY") != "1":
+        # Step 1: 运行设置向导（首次/强制模式）
+        _run_setup_if_needed()
 
-    # Step 2: 询问是否安装本地 AI 模型（首次启动，可选）
-    _prompt_local_model_if_needed()
+        # Step 2: 询问是否安装本地 AI 模型（首次启动，可选）
+        _prompt_local_model_if_needed()
 
     # Step 3: 启动 Koto 桌面程序
     # 兼容 src/ 布局：先找项目根，再找 src/ 子目录

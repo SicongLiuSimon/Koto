@@ -4,14 +4,15 @@
 
     Steps:
       1. Silent install to $TestInstallDir
-      2. Seed config (bypass first-run wizard)
-      3. Launch Koto.exe on KOTO_PORT=5099
-      4. Poll /api/health up to 30 s
-      5. Verify critical files exist in the bundle
-      6. Verify Windows registry key written by Inno Setup
-      7. Stop Koto process
-      8. Silent uninstall
-      9. Verify install directory was removed
+      2. Verify critical files + file size + Start Menu shortcut
+      3. Verify Windows registry key written by Inno Setup
+      4. Seed config (bypass first-run wizard) + launch Koto.exe
+      5. Poll /api/health + /api/ping
+      6. Stop Koto process
+      7. Silent uninstall
+      8. Verify cleanup (files + registry key removed)
+      9. Reinstall (upgrade scenario)
+     10. Second uninstall + verify cleanup
 
     Exit 0 on success, 1 on any failure.
 
@@ -104,6 +105,16 @@ foreach ($path in $requiredPaths) {
     else                 { Fail "Missing: $path" }
 }
 
+# File size validation — catch empty or corrupt builds
+$exeSize = (Get-Item $exePath).Length / 1MB
+if ($exeSize -lt 50) { Fail "Koto.exe is only $([math]::Round($exeSize,1))MB (expected >= 50MB)" }
+else                  { Pass "Koto.exe size is $([math]::Round($exeSize,1))MB" }
+
+# Start Menu shortcut check
+$startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Koto"
+if (Test-Path "$startMenu\Koto.lnk") { Pass "Start Menu shortcut exists" }
+else { Write-Host "  WARN: Start Menu shortcut not found (may be optional)" }
+
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 3 — Verify registry key (Inno Setup writes under HKCU)
 # ══════════════════════════════════════════════════════════════════════════
@@ -119,6 +130,7 @@ Write-Host "`n[Step 4] Seeding config and launching Koto.exe..."
 & (Join-Path $ScriptDir "seed_config.ps1") -InstallDir $TestInstallDir
 
 $env:KOTO_PORT = $Port
+if ($env:KOTO_SERVER_ONLY) { Write-Host "  KOTO_SERVER_ONLY=$env:KOTO_SERVER_ONLY (server-only mode)" }
 $kotoProc = Start-Process -FilePath $exePath `
     -WorkingDirectory $TestInstallDir `
     -PassThru
@@ -170,6 +182,16 @@ if (-not $healthy) {
     }
 }
 
+# /api/ping endpoint check
+if ($healthy) {
+    try {
+        $pingResp = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 5
+        Pass "/api/ping responded"
+    } catch {
+        Write-Host "  WARN: /api/ping did not respond"
+    }
+}
+
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 6 — Stop Koto
 # ══════════════════════════════════════════════════════════════════════════
@@ -202,6 +224,44 @@ Write-Host "`n[Step 8] Verifying uninstall cleaned up..."
 Start-Sleep -Seconds 2
 if (Test-Path $exePath) { Fail "Koto.exe still present after uninstall" }
 else                    { Pass "Koto.exe removed" }
+
+if (-not (Test-Path $regPath)) { Pass "Registry key removed after uninstall" }
+else                           { Fail "Registry key still present after uninstall" }
+
+# ══════════════════════════════════════════════════════════════════════════
+# STEP 9 — Reinstall (upgrade scenario test)
+# ══════════════════════════════════════════════════════════════════════════
+Write-Host "`n[Step 9] Reinstalling (upgrade scenario)..."
+$p2 = Start-Process -FilePath $SetupExe `
+    -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=`"$TestInstallDir`"" `
+    -Wait -PassThru
+if ($p2.ExitCode -ne 0) { Fail "Reinstall exited with code $($p2.ExitCode)" }
+else                     { Pass "Reinstall exited 0" }
+
+# Verify files are present again
+if (Test-Path $exePath) { Pass "Koto.exe present after reinstall" }
+else                    { Fail "Koto.exe missing after reinstall" }
+if (Test-Path (Join-Path $TestInstallDir "unins000.exe")) { Pass "unins000.exe present after reinstall" }
+else                                                       { Fail "unins000.exe missing after reinstall" }
+
+# ══════════════════════════════════════════════════════════════════════════
+# STEP 10 — Second uninstall + verify cleanup
+# ══════════════════════════════════════════════════════════════════════════
+Write-Host "`n[Step 10] Second silent uninstall..."
+$uninsExe2 = Join-Path $TestInstallDir "unins000.exe"
+if (Test-Path $uninsExe2) {
+    $u2 = Start-Process -FilePath $uninsExe2 `
+        -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" `
+        -Wait -PassThru
+    if ($u2.ExitCode -eq 0) { Pass "Second uninstaller exited 0" }
+    else                     { Fail "Second uninstaller exited $($u2.ExitCode)" }
+} else {
+    Fail "unins000.exe not found for second uninstall"
+}
+
+Start-Sleep -Seconds 2
+if (Test-Path $exePath) { Fail "Koto.exe still present after second uninstall" }
+else                    { Pass "Koto.exe removed after second uninstall" }
 
 # ══════════════════════════════════════════════════════════════════════════
 # RESULT
