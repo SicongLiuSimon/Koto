@@ -405,7 +405,8 @@ class LocalModelRouter:
                 )
                 for m in resp.json().get("models", [])
             ]
-        except:
+        except (requests.RequestException, ConnectionError) as e:
+            logger.warning("Failed to query Ollama models: %s", e)
             return False
 
         if not installed:

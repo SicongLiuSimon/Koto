@@ -15485,12 +15485,48 @@ def get_ppt_session(session_id):
 
 @app.route("/api/v1/models", methods=["GET"])
 def api_list_models():
-    """
-    动态模型列表 API
-    返回当前 API 可用的模型及各任务的路由结果。
-    - ready: 模型管理器是否已完成初始化
-    - model_map: 任务 → 模型 ID 的当前路由表（含评分信息）
-    - available: 所有可用模型的能力列表
+    """List available AI models and current task routing.
+    ---
+    tags:
+      - Models
+    responses:
+      200:
+        description: Model list with routing info
+        schema:
+          type: object
+          properties:
+            ready:
+              type: boolean
+              description: Whether the model manager has finished initializing
+            model_map:
+              type: object
+              description: "Task \u2192 model ID routing table with scoring info"
+            available:
+              type: array
+              description: All available models with capabilities
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  display:
+                    type: string
+                  tier:
+                    type: integer
+                  provider:
+                    type: string
+                  strengths:
+                    type: array
+                    items:
+                      type: string
+            fallback:
+              type: string
+              description: Fallback model ID for interactions
+            interactions_only:
+              type: array
+              items:
+                type: string
+              description: Models restricted to interactions only
     """
     if _model_manager:
         return jsonify(
@@ -15536,9 +15572,39 @@ def api_list_models():
 
 @app.route("/api/v1/models/refresh", methods=["POST"])
 def api_refresh_models():
-    """
-    手动触发模型列表刷新。
-    重新查询 API 并更新路由表，在新模型上线后可立即生效。
+    """Manually refresh the model list and routing table.
+    ---
+    tags:
+      - Models
+    responses:
+      200:
+        description: Refresh result
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [ok, initializing]
+              description: "'ok' when refresh succeeded, 'initializing' when manager is starting up"
+            model_map:
+              type: object
+              description: Updated task-to-model routing table (present when status is ok)
+            count:
+              type: integer
+              description: Number of available models (present when status is ok)
+            message:
+              type: string
+              description: Status message (present when status is initializing)
+      500:
+        description: Refresh failed
+        schema:
+          type: object
+          properties:
+            status:
+              type: string
+              example: error
+            error:
+              type: string
     """
     if not _model_manager_available or _model_manager is None:
         # 管理器未就绪，在后台重新初始化
@@ -16013,7 +16079,43 @@ def browse_folders():
 
 @app.route("/api/chat/interrupt", methods=["POST"])
 def interrupt_chat():
-    """中断当前对话生成"""
+    """Interrupt an in-progress chat generation.
+    ---
+    tags:
+      - Chat
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - session
+          properties:
+            session:
+              type: string
+              description: Name of the session to interrupt
+            task_id:
+              type: string
+              description: Optional scheduler task ID to cancel (for long-running tasks like DOC_ANNOTATE)
+    responses:
+      200:
+        description: Interrupt signal sent
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            message:
+              type: string
+      400:
+        description: Missing session parameter
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+    """
     payload = request.json or {}
     session_name = payload.get("session")
     task_id = payload.get("task_id")

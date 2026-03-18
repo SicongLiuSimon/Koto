@@ -30,19 +30,23 @@ document_bp = Blueprint("document", __name__)
 # Lazy imports – avoids circular dependency with web.app
 # ---------------------------------------------------------------------------
 
+
 def _get_client():
     from web.app import client
+
     return client
 
 
 def _get_workspace_dir():
     from web.app import WORKSPACE_DIR
+
     return WORKSPACE_DIR
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers (moved verbatim from web/app.py)
 # ---------------------------------------------------------------------------
+
 
 def _should_use_annotation_system(requirement: str, has_file: bool = False) -> bool:
     """
@@ -120,7 +124,7 @@ def _call_document_annotate(file_path: str, requirement: str):
         result = feedback_system.full_annotation_loop(
             file_path=file_path,
             user_requirement=requirement,
-            model_id="gemini-3.1-pro-preview"
+            model_id="gemini-3.1-pro-preview",
         )
 
         # 添加处理模式标记
@@ -166,11 +170,57 @@ def _call_document_analysis(file_path: str, requirement: str):
 # Route handlers
 # ---------------------------------------------------------------------------
 
+
 @document_bp.route("/api/document/smart-process", methods=["POST"])
 def document_smart_process():
-    """
-    智能文档处理入口
-    自动判断使用：标注系统 or 文件分析系统
+    """Smart document processing entry point. Automatically routes to annotation or analysis system.
+    ---
+    tags:
+      - Documents
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - file_path
+          properties:
+            file_path:
+              type: string
+              description: Path to the document file
+            requirement:
+              type: string
+              default: ""
+              description: Processing requirement or instruction
+    responses:
+      200:
+        description: Processing result (varies by routing target)
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+      400:
+        description: Missing file_path parameter
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+      500:
+        description: Processing error
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
     """
     try:
         data = request.json
@@ -245,7 +295,44 @@ def document_feedback():
 
 @document_bp.route("/api/document/analyze", methods=["POST"])
 def document_analyze():
-    """仅分析文档，不应用修改"""
+    """Analyze a document without applying modifications.
+    ---
+    tags:
+      - Documents
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - file_path
+          properties:
+            file_path:
+              type: string
+              description: Path to the document (relative paths are resolved under workspace/documents)
+            requirement:
+              type: string
+              default: ""
+              description: User requirement or analysis focus
+    responses:
+      200:
+        description: Analysis result with suggestions
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            analysis:
+              type: object
+              description: Document analysis and improvement suggestions
+      400:
+        description: Missing file_path parameter
+      404:
+        description: File not found
+      500:
+        description: Analysis error
+    """
     try:
         data = request.json
         file_path = data.get("file_path")
@@ -322,9 +409,9 @@ def document_annotate():
     """文档自动标注：AI分析 -> 生成标注 -> 应用到副本"""
     try:
         data = request.json
-        file_path = data.get('file_path')
-        user_requirement = data.get('requirement', '')
-        model_id = data.get('model_id', 'gemini-3.1-pro-preview')
+        file_path = data.get("file_path")
+        user_requirement = data.get("requirement", "")
+        model_id = data.get("model_id", "gemini-3.1-pro-preview")
 
         if not file_path:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400

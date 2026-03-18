@@ -43,21 +43,25 @@ file_editor_bp = Blueprint("file_editor", __name__)
 
 def _get_file_editor():
     from web.app import get_file_editor
+
     return get_file_editor()
 
 
 def _get_file_indexer():
     from web.app import get_file_indexer
+
     return get_file_indexer()
 
 
 def _get_concept_extractor():
     from web.app import get_concept_extractor
+
     return get_concept_extractor()
 
 
 def _get_settings_manager():
     from web.app import settings_manager
+
     return settings_manager
 
 
@@ -177,7 +181,56 @@ def notebook_study_guide():
 
 @file_editor_bp.route("/api/notebook/upload", methods=["POST"])
 def notebook_upload():
-    """上传并解析文件 (PDF/Docx/Txt)"""
+    """Upload and parse a file (PDF, Docx, or Txt).
+    ---
+    tags:
+      - Notebook
+    consumes:
+      - multipart/form-data
+    parameters:
+      - in: formData
+        name: file
+        type: file
+        required: true
+        description: The file to upload (PDF, Docx, or Txt)
+    responses:
+      200:
+        description: File parsed successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            filename:
+              type: string
+              description: Original filename
+            content:
+              type: string
+              description: Extracted text content
+            char_count:
+              type: integer
+              description: Number of characters in extracted content
+      400:
+        description: No file provided or empty filename
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+      500:
+        description: File parsing error
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+    """
     if "file" not in request.files:
         return jsonify({"success": False, "error": "No file part"}), 400
     file = request.files["file"]

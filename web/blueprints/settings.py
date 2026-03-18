@@ -24,31 +24,37 @@ settings_bp = Blueprint("settings_routes", __name__)
 def _app():
     """Return the web.app module (for mutable globals)."""
     import web.app as _mod
+
     return _mod
 
 
 def _get_settings_manager():
     from web.app import settings_manager
+
     return settings_manager
 
 
 def _get_client():
     from web.app import client
+
     return client
 
 
 def _get_types():
     from web.app import types
+
     return types
 
 
 def _get_create_client():
     from web.app import create_client
+
     return create_client
 
 
 def _get_detected_proxy():
     from web.app import get_detected_proxy
+
     return get_detected_proxy()
 
 
@@ -90,7 +96,35 @@ def api_info():
 
 @settings_bp.route("/api/local-model/status", methods=["GET"])
 def local_model_status():
-    """返回当前本地模型配置和运行状态"""
+    """Get local model configuration and runtime status.
+    ---
+    tags:
+      - Models
+    responses:
+      200:
+        description: Local model info
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            model_name:
+              type: string
+              description: Currently configured local model name
+            status:
+              type: string
+              description: Runtime status of the local model
+      500:
+        description: Failed to retrieve model info
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+    """
     try:
         from app.core.llm.ollama_provider import get_local_model_info
 
@@ -102,7 +136,50 @@ def local_model_status():
 
 @settings_bp.route("/api/local-model/switch", methods=["POST"])
 def local_model_switch():
-    """切换 AI 模式（local / cloud）并热更新客户端缓存"""
+    """Switch AI mode between local and cloud, hot-reloading client cache.
+    ---
+    tags:
+      - Models
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            mode:
+              type: string
+              enum: [local, cloud]
+              default: cloud
+              description: AI inference mode
+            model_tag:
+              type: string
+              description: Specific local model tag to use (only relevant when mode is local)
+    responses:
+      200:
+        description: Mode switched successfully
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+            mode:
+              type: string
+              enum: [local, cloud]
+            model:
+              type: string
+              description: Active model tag after switching
+      500:
+        description: Switch failed
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+    """
     try:
         mod = _app()
         data = request.json or {}
@@ -169,7 +246,44 @@ def local_model_setup():
 
 @settings_bp.route("/api/skills/<skill_id>/toggle", methods=["POST"])
 def toggle_skill(skill_id: str):
-    """启用/禁用某个技能"""
+    """Enable or disable a skill.
+    ---
+    tags:
+      - Skills
+    parameters:
+      - in: path
+        name: skill_id
+        type: string
+        required: true
+        description: Unique identifier of the skill
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+              description: Whether to enable or disable the skill
+    responses:
+      200:
+        description: Toggle result
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+      500:
+        description: Server error
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+              example: false
+            error:
+              type: string
+    """
     try:
         from app.core.skills.skill_manager import SkillManager
 
@@ -371,7 +485,32 @@ def switch_to_main():
 
 @settings_bp.route("/api/setup/status", methods=["GET"])
 def get_setup_status():
-    """检查首次设置状态"""
+    """Check initial setup status (API key, workspace).
+    ---
+    tags:
+      - Setup
+    responses:
+      200:
+        description: Current setup status
+        schema:
+          type: object
+          properties:
+            initialized:
+              type: boolean
+              description: True when both API key and workspace are configured
+            has_api_key:
+              type: boolean
+              description: Whether a valid API key is present
+            has_workspace:
+              type: boolean
+              description: Whether the workspace directory exists
+            workspace_path:
+              type: string
+              description: Absolute path to the workspace directory
+            config_path:
+              type: string
+              description: Absolute path to the configuration file
+    """
     from web.app import API_KEY, PROJECT_ROOT, WORKSPACE_DIR
 
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")

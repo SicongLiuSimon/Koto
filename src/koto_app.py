@@ -7,6 +7,7 @@ Koto 桌面应用 - 独立窗口版本
 """
 
 import faulthandler
+import logging
 import os
 import socket
 import sys
@@ -17,6 +18,8 @@ from datetime import datetime
 from pathlib import Path
 
 import psutil
+
+logger = logging.getLogger(__name__)
 
 KOTO_HOST = "127.0.0.1"
 KOTO_PORT = int(os.environ.get("KOTO_PORT", "5000"))
@@ -280,10 +283,14 @@ def check_config():
 def ensure_dependencies():
     """检查桌面依赖是否已安装（用 find_spec 快速探测，不实际导入）"""
     import importlib.util
+
     missing = []
-    if importlib.util.find_spec('webview') is None:
+    if importlib.util.find_spec("webview") is None:
         missing.append("pywebview")
-    if importlib.util.find_spec('pystray') is None or importlib.util.find_spec('PIL') is None:
+    if (
+        importlib.util.find_spec("pystray") is None
+        or importlib.util.find_spec("PIL") is None
+    ):
         missing.append("pystray/pillow")
 
     if missing:
@@ -318,7 +325,8 @@ class VoiceAPI:
 
             recognizer = get_voice_recognizer()
             return recognizer.list_available_engines()
-        except:
+        except Exception as e:
+            logger.debug("Failed to get voice recognition engines: %s", e)
             return []
 
 
@@ -415,8 +423,8 @@ class WindowAPI:
         try:
             # pywebview没有直接的maximize，用toggle_fullscreen替代
             self.window.toggle_fullscreen()
-        except:
-            pass
+        except Exception as e:
+            logger.debug("Failed to toggle fullscreen: %s", e)
 
     def close(self):
         """关闭窗口"""
@@ -426,6 +434,7 @@ class WindowAPI:
         """在系统默认浏览器中打开外部链接，防止 webview 导航离开 Koto"""
         import webbrowser
         from urllib.parse import urlparse
+
         try:
             parsed = urlparse(url)
             if parsed.scheme not in ("http", "https"):
@@ -892,16 +901,16 @@ def create_system_tray(window_ref=None):
             if window_ref:
                 try:
                     window_ref[0].show()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to show window: %s", e)
 
         def on_hide(icon, item):
             """隐藏主窗口"""
             if window_ref:
                 try:
                     window_ref[0].hide()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to hide window: %s", e)
 
         # 创建托盘图标（优先使用自定义图标）
         if icon_file.exists():
@@ -990,13 +999,16 @@ def main():
     def _generate_icons():
         try:
             from PIL import Image, ImageDraw
+
             icon_dir = ASSETS_DIR
             icon_dir.mkdir(exist_ok=True, parents=True)
             if not png_path.exists():
                 width, height = 256, 256
-                image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+                image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
                 draw = ImageDraw.Draw(image)
-                draw.rounded_rectangle([0, 0, 256, 256], radius=56, fill=(79, 140, 255, 255))
+                draw.rounded_rectangle(
+                    [0, 0, 256, 256], radius=56, fill=(79, 140, 255, 255)
+                )
                 draw.ellipse([48, 48, 208, 208], fill=(255, 255, 255, 255))
                 draw.rectangle([72, 88, 184, 104], fill=(47, 107, 255, 255))
                 draw.rectangle([72, 120, 184, 136], fill=(47, 107, 255, 255))
@@ -1004,7 +1016,10 @@ def main():
                 image.save(str(png_path))
             if not ico_path.exists():
                 image = Image.open(str(png_path))
-                image.save(str(ico_path), sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)])
+                image.save(
+                    str(ico_path),
+                    sizes=[(256, 256), (128, 128), (64, 64), (32, 32), (16, 16)],
+                )
         except Exception as e:
             _write_log(f"⚠️ 生成默认图标失败: {e}")
         finally:
@@ -1126,6 +1141,7 @@ def main():
     # 检测屏幕分辨率，自动适配窗口大小（居中、占屏幕 88%）
     try:
         import ctypes as _ctypes
+
         _u32 = _ctypes.windll.user32
         _u32.SetProcessDPIAware()
         _screen_w = _u32.GetSystemMetrics(0)
@@ -1134,7 +1150,9 @@ def main():
         _win_h = max(700, int(_screen_h * 0.65))
         _win_x = (_screen_w - _win_w) // 2
         _win_y = (_screen_h - _win_h) // 2
-        _write_log(f"✔ 屏幕分辨率: {_screen_w}x{_screen_h}，初始窗口: {_win_w}x{_win_h} 位于 ({_win_x},{_win_y})")
+        _write_log(
+            f"✔ 屏幕分辨率: {_screen_w}x{_screen_h}，初始窗口: {_win_w}x{_win_h} 位于 ({_win_x},{_win_y})"
+        )
     except Exception as _e:
         _win_w, _win_h = 1200, 800
         _win_x, _win_y = None, None

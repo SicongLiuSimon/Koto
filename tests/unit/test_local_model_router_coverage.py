@@ -277,7 +277,7 @@ class TestLocalModelRouterCoverage:
 
     @patch(
         "app.core.routing.local_model_router.requests.get",
-        side_effect=Exception("network error"),
+        side_effect=ConnectionError("network error"),
     )
     @patch.object(
         __import__(

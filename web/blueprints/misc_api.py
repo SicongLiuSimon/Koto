@@ -19,8 +19,10 @@ misc_api_bp = Blueprint("misc_api", __name__)
 # Lazy helpers – avoid circular imports with web.app
 # ---------------------------------------------------------------------------
 
+
 def _get_workspace_dir():
     from web.app import WORKSPACE_DIR
+
     return WORKSPACE_DIR
 
 
@@ -352,7 +354,35 @@ def search_emails():
 
 @misc_api_bp.route("/api/search/all", methods=["GET"])
 def search_all():
-    """全局搜索"""
+    """Global search across all indexed content.
+    ---
+    tags:
+      - Search
+    parameters:
+      - in: query
+        name: query
+        type: string
+        required: true
+        description: Search query string
+      - in: query
+        name: max_results
+        type: integer
+        default: 50
+        description: Maximum number of results to return
+    responses:
+      200:
+        description: Search results
+        schema:
+          type: object
+          properties:
+            results:
+              type: array
+              items:
+                type: object
+            count:
+              type: integer
+              description: Total number of results
+    """
     from search_engine import get_search_engine
 
     query = request.args.get("query", "")
