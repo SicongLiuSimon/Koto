@@ -11,7 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.2.0] — 2025-03-17
+## [1.3.0] — 2026-03-18
+
+### Added
+- **Playwright E2E Browser Tests** (63 tests): Full UI testing suite covering page loads, session management, chat interface, skill marketplace, settings, button sweep, mobile responsive, and accessibility checks
+- **API Smoke Tests** (35 tests): Comprehensive endpoint coverage for memory, macro, setup, voice, document, notebook, ops, shadow, and utility APIs
+- **Mobile Responsive Tests**: Verify pages render correctly at phone (375×667, 414×896) and tablet (768×1024) viewports with overflow and clipping detection
+- **Accessibility Tests**: WCAG checks for alt text, form labels, button names, heading hierarchy, tabindex, lang attribute, and landmark roles
+- **Server-Only Mode** (`KOTO_SERVER_ONLY=1`): New env var to start Flask without GUI/pywebview — enables full health check testing in CI
+- **Installer E2E Improvements**: File size validation, Start Menu shortcut check, reinstall/upgrade cycle test, registry cleanup verification, `/api/ping` endpoint check
+- **E2E CI Pipeline Job**: Playwright tests now run automatically on push (Windows runner, informational)
+
+### Fixed
+- **deleteSession null reference bug**: Fixed `TypeError: Cannot read properties of null (reading 'outerHTML')` when deleting the current session and `welcomeScreen` element was already removed from DOM (`web/static/js/app.js`)
+
+### Changed
+- Installer E2E tests now use `RequireHealth:$true` (was `$false`) — health endpoint is actually verified in CI builds
 
 ### Added
 - **Modular Blueprint Architecture**: Extracted ~206 routes from monolithic `web/app.py` into 14 Flask blueprints (sessions, analytics, proactive, execution, knowledge, file_editor, dev, voice, document, file_organize, workspace, settings, misc_api, pages)
