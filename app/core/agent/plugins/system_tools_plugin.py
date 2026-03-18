@@ -5,7 +5,9 @@ SystemToolsPlugin — Python 代码执行 & 包管理
 适配 UnifiedAgent 插件体系。
 """
 
+import ast
 import importlib
+import logging
 import os
 import subprocess
 import sys
@@ -13,6 +15,84 @@ import traceback
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
+
+logger = logging.getLogger(__name__)
+
+_BLOCKED_AST_NODES = (ast.Import, ast.ImportFrom)
+_BLOCKED_NAMES = frozenset(
+    {
+        "os",
+        "sys",
+        "subprocess",
+        "shutil",
+        "pathlib",
+        "socket",
+        "ctypes",
+        "signal",
+        "multiprocessing",
+        "threading",
+        "__import__",
+        "breakpoint",
+    }
+)
+_BLOCKED_ATTRS = frozenset(
+    {
+        "__builtins__",
+        "__import__",
+        "__subclasses__",
+        "__globals__",
+        "__code__",
+        "__closure__",
+        "__class__",
+        "__bases__",
+        "__mro__",
+    }
+)
+_BLOCKED_BUILTINS = frozenset(
+    {
+        "exec",
+        "eval",
+        "compile",
+        "open",
+        "input",
+        "__import__",
+        "getattr",
+        "setattr",
+        "delattr",
+        "globals",
+        "locals",
+        "vars",
+        "exit",
+        "quit",
+        "breakpoint",
+        "memoryview",
+    }
+)
+_SAFE_BUILTINS = {
+    k: v
+    for k, v in (
+        __builtins__.items()
+        if isinstance(__builtins__, dict)
+        else ((a, getattr(__builtins__, a)) for a in dir(__builtins__))
+    )
+    if k not in _BLOCKED_BUILTINS and not k.startswith("_")
+}
+
+
+def _validate_code_ast(code: str):
+    """Return error message if code is dangerous, else None."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return f"Syntax error: {e}"
+    for node in ast.walk(tree):
+        if isinstance(node, _BLOCKED_AST_NODES):
+            return "Import statements are not allowed in sandboxed execution."
+        if isinstance(node, ast.Name) and node.id in _BLOCKED_NAMES:
+            return f"Access to '{node.id}' is not allowed."
+        if isinstance(node, ast.Attribute) and node.attr in _BLOCKED_ATTRS:
+            return f"Access to '{node.attr}' is not allowed."
+    return None
 
 
 class SystemToolsPlugin(AgentPlugin):
@@ -87,12 +167,17 @@ class SystemToolsPlugin(AgentPlugin):
         import contextlib
         import io
 
+        # AST validation before execution
+        error = _validate_code_ast(code)
+        if error:
+            return f"Blocked: {error}"
+
         stdout_capture = io.StringIO()
-        exec_globals: Dict[str, Any] = {"__builtins__": __builtins__}
+        exec_globals: Dict[str, Any] = {"__builtins__": _SAFE_BUILTINS}
 
         try:
             with contextlib.redirect_stdout(stdout_capture):
-                exec(code, exec_globals)
+                exec(code, exec_globals)  # nosec B102
             output = stdout_capture.getvalue()
             return output if output else "(code executed successfully, no output)"
         except Exception as exc:

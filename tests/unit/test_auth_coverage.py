@@ -195,34 +195,39 @@ class TestRateLimiting:
     @pytest.fixture(autouse=True)
     def _clear_rate_limits(self):
         auth_mod = _get_auth_module()
-        auth_mod._rate_limits.clear()
+        auth_mod._rate_buckets.clear()
         yield
-        auth_mod._rate_limits.clear()
+        auth_mod._rate_buckets.clear()
 
     def test_under_limit_returns_true(self):
         auth_mod = _get_auth_module()
-        assert auth_mod._check_rate_limit("testuser") is True
+        assert auth_mod._check_rate("testuser", "standard") is True
 
     def test_over_limit_returns_false(self):
         auth_mod = _get_auth_module()
+        tier_cfg = auth_mod._RATE_TIERS["standard"]
         # Fill up to the limit
-        for _ in range(auth_mod.MAX_DAILY_REQUESTS):
-            auth_mod._increment_request("testuser")
-        assert auth_mod._check_rate_limit("testuser") is False
+        for _ in range(tier_cfg["max_requests"]):
+            auth_mod._check_rate("testuser", "standard")
+        assert auth_mod._check_rate("testuser", "standard") is False
 
-    def test_increment_request_increments_counter(self):
+    def test_check_rate_increments_bucket(self):
         auth_mod = _get_auth_module()
-        auth_mod._increment_request("u1")
-        auth_mod._increment_request("u1")
-        assert auth_mod._rate_limits["u1"]["count"] == 2
+        auth_mod._check_rate("u1", "standard")
+        auth_mod._check_rate("u1", "standard")
+        assert len(auth_mod._rate_buckets["u1"]) == 2
 
-    def test_rate_limit_resets_on_new_day(self):
+    def test_rate_limit_expires_after_window(self):
         auth_mod = _get_auth_module()
-        # Simulate yesterday's data
-        auth_mod._rate_limits["u1"] = {"date": "1999-01-01", "count": 999}
-        # Checking today should reset and return True
-        assert auth_mod._check_rate_limit("u1") is True
-        assert auth_mod._rate_limits["u1"]["count"] == 0
+        import time as _time
+
+        # Simulate entries older than the window
+        old = _time.time() - 120
+        auth_mod._rate_buckets["u1"] = [old] * 999
+        # Checking now should clear expired entries and return True
+        assert auth_mod._check_rate("u1", "standard") is True
+        # Old entries should be purged
+        assert len(auth_mod._rate_buckets["u1"]) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -236,9 +241,9 @@ class TestFlaskDecorators:
     @pytest.fixture(autouse=True)
     def _clear_rate_limits(self):
         auth_mod = _get_auth_module()
-        auth_mod._rate_limits.clear()
+        auth_mod._rate_buckets.clear()
         yield
-        auth_mod._rate_limits.clear()
+        auth_mod._rate_buckets.clear()
 
     def test_require_auth_blocks_unauthenticated(self, monkeypatch):
         """With AUTH_ENABLED=True and no token, require_auth returns 401."""

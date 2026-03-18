@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
+from typing import Dict
 
 # JWT 依赖（可选降级到简单 token）
 try:
@@ -26,8 +27,17 @@ from flask import g, jsonify, request
 logger = logging.getLogger(__name__)
 
 # ── 配置 ──
-AUTH_ENABLED = os.environ.get("KOTO_AUTH_ENABLED", "false").lower() == "true"
+AUTH_ENABLED = os.environ.get("KOTO_AUTH_ENABLED", "true").lower() in (
+    "true",
+    "1",
+    "yes",
+)
 DEPLOY_MODE = os.environ.get("KOTO_DEPLOY_MODE", "local")
+
+if not AUTH_ENABLED:
+    logger.warning(
+        "⚠️ Authentication is DISABLED. Set KOTO_AUTH_ENABLED=true for production."
+    )
 
 
 def _validate_jwt_secret() -> str:
@@ -131,24 +141,59 @@ def _verify_token(token: str) -> dict:
         return None
 
 
-# ── 请求频率限制 ──
-_rate_limits = {}  # { user_id: { "date": "2026-02-23", "count": 42 } }
+# ── 3-tier sliding-window rate limiting ──
+_rate_buckets: Dict[str, list] = {}  # { user_id: [timestamp, ...] }
+
+_RATE_TIERS = {
+    "strict": {"window": 60, "max_requests": 10},
+    "standard": {"window": 60, "max_requests": 30},
+    "relaxed": {"window": 60, "max_requests": 120},
+}
 
 
-def _check_rate_limit(user_id: str) -> bool:
-    """检查用户今日请求是否超限"""
-    today = datetime.now().strftime("%Y-%m-%d")
-    if user_id not in _rate_limits or _rate_limits[user_id]["date"] != today:
-        _rate_limits[user_id] = {"date": today, "count": 0}
-    return _rate_limits[user_id]["count"] < MAX_DAILY_REQUESTS
+def _check_rate(user_id: str, tier: str = "standard") -> bool:
+    """Return True if the request is within rate limits for the given tier."""
+    cfg = _RATE_TIERS.get(tier, _RATE_TIERS["standard"])
+    now = time.time()
+    window = cfg["window"]
+    max_req = cfg["max_requests"]
+
+    if user_id not in _rate_buckets:
+        _rate_buckets[user_id] = []
+
+    # Slide: drop entries older than the window
+    _rate_buckets[user_id] = [t for t in _rate_buckets[user_id] if now - t < window]
+
+    if len(_rate_buckets[user_id]) >= max_req:
+        return False
+
+    _rate_buckets[user_id].append(now)
+    return True
 
 
-def _increment_request(user_id: str):
-    """增加请求计数"""
-    today = datetime.now().strftime("%Y-%m-%d")
-    if user_id not in _rate_limits or _rate_limits[user_id]["date"] != today:
-        _rate_limits[user_id] = {"date": today, "count": 0}
-    _rate_limits[user_id]["count"] += 1
+def rate_limit(tier: str = "standard"):
+    """Decorator that applies sliding-window rate limiting to a route."""
+
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            uid = getattr(g, "user_id", request.remote_addr or "anon")
+            if not _check_rate(uid, tier):
+                cfg = _RATE_TIERS.get(tier, _RATE_TIERS["standard"])
+                return (
+                    jsonify(
+                        {
+                            "error": f"Rate limit exceeded ({cfg['max_requests']} req/{cfg['window']}s)",
+                            "code": "RATE_LIMIT",
+                        }
+                    ),
+                    429,
+                )
+            return f(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 # ── Flask 中间件 ──
@@ -179,18 +224,17 @@ def require_auth(f):
         user_id = payload.get("user_id", "")
 
         # 频率限制
-        if not _check_rate_limit(user_id):
+        if not _check_rate(user_id, "standard"):
             return (
                 jsonify(
                     {
-                        "error": f"今日请求已达上限 ({MAX_DAILY_REQUESTS}次)",
+                        "error": "Rate limit exceeded",
                         "code": "RATE_LIMIT",
                     }
                 ),
                 429,
             )
 
-        _increment_request(user_id)
         g.user_id = user_id
         g.user_email = payload.get("email", "")
         return f(*args, **kwargs)
@@ -344,12 +388,7 @@ def register_auth_routes(app):
         users = _load_users()
         for email, user in users.items():
             if user["user_id"] == g.user_id:
-                today = datetime.now().strftime("%Y-%m-%d")
-                used = (
-                    _rate_limits.get(g.user_id, {}).get("count", 0)
-                    if _rate_limits.get(g.user_id, {}).get("date") == today
-                    else 0
-                )
+                used = len(_rate_buckets.get(g.user_id, []))
                 return jsonify(
                     {
                         "user_id": g.user_id,
@@ -377,4 +416,6 @@ def register_auth_routes(app):
             }
         )
 
-    logger.warning(f"[Auth] {'✅ 认证系统已启用' if AUTH_ENABLED else '⚠️ 本地模式（无认证）'}")
+    logger.warning(
+        f"[Auth] {'✅ 认证系统已启用' if AUTH_ENABLED else '⚠️ 本地模式（无认证）'}"
+    )

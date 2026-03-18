@@ -5,6 +5,7 @@ DataProcessPlugin — 数据加载、分析、保存
 适配 UnifiedAgent 插件体系。
 """
 
+import ast
 import json
 import os
 from typing import Any, Dict, List
@@ -179,40 +180,90 @@ class DataProcessPlugin(AgentPlugin):
         except Exception as exc:
             return f"Error loading data: {exc}"
 
-    # Patterns that could enable file I/O or code execution via the eval sandbox
-    _EXPR_BLOCKLIST = [
-        "read_csv",
-        "read_excel",
-        "read_json",
-        "read_parquet",
-        "read_table",
-        "to_csv",
-        "to_excel",
-        "to_json",
-        "to_parquet",
-        "os.",
-        "subprocess",
-        "open(",
-        "__import__",
-        "import ",
-        "exec(",
-        "eval(",
-        "system(",
-        "popen(",
-        "getattr",
-        "setattr",
-    ]
+    # AST node types allowed in pandas eval expressions
+    _ALLOWED_EVAL_NODES = (
+        ast.Expression,
+        ast.Module,
+        ast.BinOp,
+        ast.UnaryOp,
+        ast.BoolOp,
+        ast.Compare,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.FloorDiv,
+        ast.Mod,
+        ast.Pow,
+        ast.USub,
+        ast.UAdd,
+        ast.Not,
+        ast.Invert,
+        ast.And,
+        ast.Or,
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+        ast.In,
+        ast.NotIn,
+        ast.Is,
+        ast.IsNot,
+        ast.Subscript,
+        ast.Index,
+        ast.Slice,
+        ast.ExtSlice,
+        ast.Attribute,
+        ast.Call,
+        ast.Name,
+        ast.Load,
+        ast.Constant,
+        ast.Num,
+        ast.Str,
+        ast.NameConstant,
+        ast.List,
+        ast.Tuple,
+        ast.Dict,
+        ast.Set,
+        ast.keyword,
+        ast.Starred,
+        ast.IfExp,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+        ast.comprehension,
+        ast.FormattedValue,
+        ast.JoinedStr,
+        ast.Expr,
+    )
+
+    @classmethod
+    def _validate_eval_ast(cls, expression: str) -> str | None:
+        """Return error message if expression AST is not whitelisted, else None."""
+        try:
+            tree = ast.parse(expression, mode="eval")
+        except SyntaxError:
+            try:
+                tree = ast.parse(expression)
+            except SyntaxError as e:
+                return f"Syntax error: {e}"
+        for node in ast.walk(tree):
+            if not isinstance(node, cls._ALLOWED_EVAL_NODES):
+                return f"Disallowed syntax node: {type(node).__name__}"
+        return None
 
     def query_data(self, filepath: str, expression: str) -> str:
         """Load data and evaluate a pandas expression (df-only namespace)."""
-        expr_lower = expression.lower()
-        for pattern in self._EXPR_BLOCKLIST:
-            if pattern in expr_lower:
-                return f"Error: Expression contains blocked pattern '{pattern}'."
+        # AST whitelist validation
+        ast_error = self._validate_eval_ast(expression)
+        if ast_error:
+            return f"Error: {ast_error}"
         try:
             df = self._load_df(filepath)
-            # Only 'df' is exposed — pandas module is NOT injected to block file I/O.
-            result = eval(expression, {"__builtins__": {}}, {"df": df})
+            result = eval(expression, {"__builtins__": {}}, {"df": df})  # nosec B307
             if hasattr(result, "to_string"):
                 return str(result.head(20).to_string())
             return str(result)

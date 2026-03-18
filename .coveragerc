@@ -1,0 +1,29 @@
+[run]
+source = app, web
+omit =
+    */tests/*
+    */migrations/*
+    */__pycache__/*
+    */venv/*
+    */.venv/*
+branch = True
+parallel = True
+
+[report]
+show_missing = True
+precision = 2
+fail_under = 0
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if __name__ == .__main__
+    raise NotImplementedError
+    pass
+    except ImportError
+
+[html]
+directory = htmlcov
+title = Koto Coverage Report
+
+[xml]
+output = coverage.xml
