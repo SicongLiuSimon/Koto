@@ -22,6 +22,13 @@ from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
+try:
+    import google.genai._api_client  # noqa: F401
+
+    HAS_GENAI = True
+except (ImportError, ModuleNotFoundError):
+    HAS_GENAI = False
+
 # ---------------------------------------------------------------------------
 # Ensure the project root is on sys.path so ``web.app`` can be imported.
 # Pre-set env vars *before* importing the app to avoid side-effects.
@@ -674,6 +681,7 @@ class TestUtils:
         assert isinstance(result, str)
 
     # -- quick_self_check --
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_quick_self_check_exception_returns_pass(self):
         with patch("web.app.client") as mock_client:
             mock_client.models.generate_content.side_effect = Exception("no API")

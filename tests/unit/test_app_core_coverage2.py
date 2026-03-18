@@ -29,6 +29,13 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
+try:
+    import google.genai._api_client  # noqa: F401
+
+    HAS_GENAI = True
+except (ImportError, ModuleNotFoundError):
+    HAS_GENAI = False
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. Routing __init__ (lazy imports)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1071,6 +1078,7 @@ class TestSearchService:
         finally:
             ss_mod.HAS_GENAI_V2 = original
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_search_success(self):
         import app.core.services.search_service as ss_mod
         from app.core.services.search_service import SearchService
@@ -1109,6 +1117,7 @@ class TestSearchService:
         finally:
             ss_mod.HAS_GENAI_V2 = original
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_search_exception(self):
         import app.core.services.search_service as ss_mod
         from app.core.services.search_service import SearchService

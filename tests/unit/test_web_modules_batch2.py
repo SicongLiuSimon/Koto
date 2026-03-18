@@ -22,6 +22,13 @@ from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
 
 import pytest
 
+try:
+    import google.genai._api_client  # noqa: F401
+
+    HAS_GENAI = True
+except (ImportError, ModuleNotFoundError):
+    HAS_GENAI = False
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. FileConverter
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1521,6 +1528,7 @@ class TestImageGeneratorGenerate:
         gen.image_model = "test"
         assert gen.generate_image("a cat", "/out.png") is False
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_generate_images_success(self, tmp_path):
         gen = self._make_gen()
         out = str(tmp_path / "out.png")
@@ -1535,6 +1543,7 @@ class TestImageGeneratorGenerate:
         assert result is True
         assert Path(out).read_bytes() == b"PNG_DATA"
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_generate_images_empty_no_fallback(self, tmp_path):
         gen = self._make_gen()
         out = str(tmp_path / "out.png")

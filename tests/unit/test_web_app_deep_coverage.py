@@ -23,6 +23,13 @@ from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 
 import pytest
 
+try:
+    import google.genai._api_client  # noqa: F401
+
+    HAS_GENAI = True
+except (ImportError, ModuleNotFoundError):
+    HAS_GENAI = False
+
 # ---------------------------------------------------------------------------
 # Env setup before importing the app
 # ---------------------------------------------------------------------------
@@ -686,6 +693,7 @@ class TestTaskOrchestratorValidateQuality:
         )
         assert 0 <= score <= 100
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_with_completed_steps(self):
         app = _import_app()
         combined = {
@@ -701,6 +709,7 @@ class TestTaskOrchestratorValidateQuality:
             )
         assert score >= 40
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_semantic_scoring_fails_gracefully(self):
         app = _import_app()
         combined = {
@@ -720,6 +729,7 @@ class TestTaskOrchestratorValidateQuality:
 # =====================================================================
 @pytest.mark.unit
 class TestExecuteCompoundTask:
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_unknown_task_type(self):
         app = _import_app()
         subtasks = [
@@ -736,6 +746,7 @@ class TestExecuteCompoundTask:
             "未知" in e for e in result.get("errors", [])
         )
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_subtask_exception(self):
         app = _import_app()
         subtasks = [
@@ -968,6 +979,7 @@ class TestKotoBrainChat:
         assert result["task"] == "SYSTEM"
         assert "notepad" in result["response"]
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_manual_model_selection(self):
         brain, app = self._make_brain()
         mock_resp = Mock()
@@ -986,6 +998,7 @@ class TestKotoBrainChat:
             )
         assert result["model"] == "gemini-2.5-flash"
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_image_file_edit_route(self):
         brain, app = self._make_brain()
         file_data = {"mime_type": "image/png", "data": b"fake_img"}
@@ -1004,6 +1017,7 @@ class TestKotoBrainChat:
             result = brain.chat([], "修改背景为蓝色", file_data=file_data)
         assert result["task"] == "PAINTER"
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_image_file_analysis_route(self):
         brain, app = self._make_brain()
         file_data = {"mime_type": "image/jpeg", "data": b"fake_img"}
@@ -1018,6 +1032,7 @@ class TestKotoBrainChat:
             result = brain.chat([], "describe this image", file_data=file_data)
         assert result["task"] == "VISION"
 
+    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_binary_doc_route(self):
         brain, app = self._make_brain()
         file_data = {"mime_type": "application/pdf", "data": b"fake_pdf"}
