@@ -498,18 +498,38 @@ class ModelManager:
         }
 
     def get_fallback_model(self) -> str:
-        """返回最适合做通用降级的模型（支持 generate_content，速度快）。"""
+        """返回最适合做通用降级的模型（支持 generate_content，速度快、稳定可用）。"""
         self.get_model_map()
+        # 优先选用已知稳定的 Flash 模型，避免 pro-preview 等访问受限的模型
+        _PREFERRED_FALLBACKS = [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-preview",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+        ]
+        for mid in _PREFERRED_FALLBACKS:
+            caps = self._cached_caps.get(mid)
+            if caps and not caps.get("interactions_only", False) and not caps.get("image_gen", False):
+                return mid
+        # 兜底：按 tier+speed 排序，但排除 preview/exp 等访问受限模型
         candidates = [
             (mid, caps)
             for mid, caps in self._cached_caps.items()
             if not caps.get("interactions_only", False)
             and not caps.get("image_gen", False)
             and mid != "local-executor"
+            and "preview" not in mid
+            and "-exp" not in mid
         ]
         if not candidates:
+            candidates = [
+                (mid, caps) for mid, caps in self._cached_caps.items()
+                if not caps.get("interactions_only", False)
+                and not caps.get("image_gen", False)
+                and mid != "local-executor"
+            ]
+        if not candidates:
             return "gemini-2.5-flash"
-        # 选 tier 最高但速度也不太慢的
         best = max(candidates, key=lambda x: x[1].get("tier", 0) + x[1].get("speed", 0) * 0.3)
         return best[0]
 
@@ -684,6 +704,7 @@ class ModelManager:
             "AGENT":      "gemini-3-flash-preview",
             "SYSTEM":     "local-executor",
             "FILE_OP":    "local-executor",
+            "COMPLEX":    "gemini-3.1-pro-preview",
         }
         return defaults
 

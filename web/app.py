@@ -1,8 +1,9 @@
-﻿import os
+import os
 import asyncio
-import logging
 import re
 import json
+import logging
+_app_logger = logging.getLogger("koto.app")
 import time
 import threading
 import subprocess
@@ -12,8 +13,6 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-
-_app_logger = logging.getLogger("koto.app")
 
 # 确保 web/ 目录在模块搜索路径中（通过 koto_app.py 启动时需要）
 _web_dir = os.path.dirname(os.path.abspath(__file__))
@@ -763,7 +762,14 @@ _logger_tracked = logging.getLogger(__name__)
 
 
 class _TrackedModels:
-    """拦截 client.models.generate_content，自动记录 token 用量"""
+    """
+    拦截 client.models 的 generate_content / generate_content_stream，实现：
+      1. Token 用量自动记录
+      2. Interactions-only 模型防御路由（前置检查 + 异常捕获兜底）
+         - 在调用 generate_content 前先判断模型是否 interactions-only
+         - 若是，直接转发到 _call_interactions_api_sync()
+         - 若否，正常调用后 catch "Interactions API" 400 错误并 retry
+    """
 
     def __init__(self, real_models):
         object.__setattr__(self, "_real", real_models)
@@ -784,20 +790,55 @@ class _TrackedModels:
     # ── generate_content ────────────────────────────────────────────────────
 
     def generate_content(self, model=None, *args, **kwargs):
-        # 新版 google-genai SDK：(*, model, contents, config) 全为关键字参数
-        # 不能将 model 作为位置参数传入，必须作为关键字参数传递
-        # 兼容旧式位置调用：如果 model 在 args 中，移到 kwargs
+        # 兼容旧式位置调用
         if model is None and args:
             model, args = args[0], args[1:]
-        # 合并剩余位置参数到 kwargs（新 SDK 不接受位置参数，args 应始终为空）
+
+        model_str = str(model or "")
         real = object.__getattribute__(self, '_real')
-        response = real.generate_content(model=model, **kwargs)
+
+        # ① 前置路由：interactions-only 模型直接走 Interactions API
+        if _is_interactions_only(model_str):
+            _logger_tracked.debug(
+                "[TrackedModels] %s → Interactions API (pre-check)", model_str
+            )
+            try:
+                return self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
+            except Exception as _ia_err:
+                _logger_tracked.warning(
+                    "[TrackedModels] Interactions API failed for %s: %s — retrying generate_content as last resort",
+                    model_str, _ia_err,
+                )
+                # 强行尝试 generate_content（极少数情况模型实际支持）
+
+        # ② 标准调用 + 异常兜底
+        try:
+            response = real.generate_content(model=model, **kwargs)
+        except Exception as _gc_err:
+            _err_str = str(_gc_err)
+            if "Interactions API" in _err_str or (
+                "only supports" in _err_str and "Interactions" in _err_str
+            ):
+                _logger_tracked.warning(
+                    "[TrackedModels] 400 Interactions-API error for model=%s — retrying via Interactions API",
+                    model_str,
+                )
+                try:
+                    return self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
+                except Exception as _ia_retry_err:
+                    _logger_tracked.error(
+                        "[TrackedModels] Interactions API retry also failed for %s: %s",
+                        model_str, _ia_retry_err,
+                    )
+            raise  # 非 Interactions 错误，或 retry 也失败后，重新抛出原始异常
+
+        # ③ Token 记录
         if _TOKEN_TRACKER_ENABLED:
             try:
                 usage = getattr(response, "usage_metadata", None)
                 if usage:
                     _record_token_usage(
-                        model=str(model or 'unknown'),
+                        model=model_str,
                         prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
                         completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
                     )
@@ -805,26 +846,69 @@ class _TrackedModels:
                 pass
         return response
 
+    # ── generate_content_stream ─────────────────────────────────────────────
+
     def generate_content_stream(self, model=None, *args, **kwargs):
-        """拦截 generate_content_stream，记录最后一个 chunk 的 usage_metadata"""
+        """
+        拦截流式调用。
+        interactions-only 模型不支持流式接口；遇到此类模型时同步调用
+        Interactions API，再将完整结果包装成单个 chunk yield 出去，
+        保证调用方 for chunk in stream 的用法不变。
+        """
         if model is None and args:
             model, args = args[0], args[1:]
+
+        model_str = str(model or "")
         real = object.__getattribute__(self, '_real')
-        stream = real.generate_content_stream(model=model, **kwargs)
-        _model_str = str(model or 'unknown')
-        for chunk in stream:
-            yield chunk
-            if _TOKEN_TRACKER_ENABLED:
-                try:
-                    usage = getattr(chunk, 'usage_metadata', None)
-                    if usage and (getattr(usage, 'prompt_token_count', 0) or 0) > 0:
-                        _record_token_usage(
-                            model=_model_str,
-                            prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
-                            completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
-                        )
-                except Exception:
-                    pass
+
+        # ① 前置路由：interactions-only 模型 → 同步调用后单 chunk 输出
+        if _is_interactions_only(model_str):
+            _logger_tracked.debug(
+                "[TrackedModels] %s → Interactions API stream-adapter (pre-check)", model_str
+            )
+            try:
+                fake_resp = self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
+                yield fake_resp   # 调用方 for chunk in stream: chunk.text 仍能工作
+                return
+            except Exception as _ia_err:
+                _logger_tracked.warning(
+                    "[TrackedModels] Interactions API stream-adapter failed for %s: %s — raising",
+                    model_str, _ia_err,
+                )
+                raise
+
+        # ② 标准流式调用 + 异常兜底（首个 chunk 前触发）
+        try:
+            stream = real.generate_content_stream(model=model, **kwargs)
+            first_chunk = True
+            for chunk in stream:
+                yield chunk
+                if first_chunk:
+                    first_chunk = False
+                if _TOKEN_TRACKER_ENABLED:
+                    try:
+                        usage = getattr(chunk, 'usage_metadata', None)
+                        if usage and (getattr(usage, 'prompt_token_count', 0) or 0) > 0:
+                            _record_token_usage(
+                                model=model_str,
+                                prompt_tokens=int(getattr(usage, 'prompt_token_count', 0) or 0),
+                                completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
+                            )
+                    except Exception:
+                        pass
+        except Exception as _stream_err:
+            _err_str = str(_stream_err)
+            if "Interactions API" in _err_str or (
+                "only supports" in _err_str and "Interactions" in _err_str
+            ):
+                _logger_tracked.warning(
+                    "[TrackedModels] 400 Interactions-API error in stream for model=%s — retrying via Interactions API",
+                    model_str,
+                )
+                fake_resp = self._call_ia(model_str, kwargs.get("contents"), kwargs.get("config"))
+                yield fake_resp
+                return
+            raise
 
     def generate_images(self, model=None, *args, **kwargs):
         """拦截 generate_images（Imagen），按图片数量记录合成 token 用量"""
@@ -921,22 +1005,222 @@ def create_research_client():
     return genai.Client(api_key=API_KEY, http_options=_HttpOptions(**opts_kwargs))
 
 
-def _call_interactions_api_sync(model_id: str, user_prompt: str, sys_instruction: str = None, timeout: float = 90.0) -> str:
+def _poll_interaction(
+    ia_client,
+    interaction_id: str,
+    *,
+    timeout: float = 900.0,
+    initial_sleep: float = 2.0,
+    backoff_multiplier: float = 1.5,
+    max_sleep: float = 30.0,
+    label: str = "",
+) -> object:
     """
-    通过 Interactions API 调用 gemini-3-*-preview 模型。
-    这些模型不支持 client.models.generate_content()，必须使用此端点。
-    ⚡ 本地模型模式下自动降级为 Ollama，跳过 Interactions API。
+    生产级 Interactions API 轮询器。
+
+    实现指数退避 + 抖动 + 最大超时，避免轮询风暴：
+      - every successful poll: sleep *= backoff_multiplier（上限 max_sleep）
+      - ±25% 随机抖动，分散并发请求峰值
+      - 超时后自动请求取消，再抛出 TimeoutError
+
+    状态机：
+      ─ RUNNING   (active / running / queued / …)  →  继续等待
+      ─ COMPLETED (completed)                       →  返回最终 interaction 对象
+      ─ FAILED    (failed / cancelled / error)      →  抛出 RuntimeError
 
     Args:
-        model_id: 模型 ID，如 "gemini-3-flash-preview"
-        user_prompt: 用户输入文本（已包含格式化内容）
-        sys_instruction: 系统指令（可选），将拼接到 input 前
-        timeout: 最大等待时间（秒）
+        ia_client:          已初始化的 Gemini client（含 .interactions 接口）
+        interaction_id:     rc.interactions.create() 返回的 job ID
+        timeout:            最大等待秒数（默认 15 分钟）
+        initial_sleep:      首次轮询前等待秒数
+        backoff_multiplier: 退避倍率（每轮自动乘以此值）
+        max_sleep:          单次等待上限（秒）
+        label:              日志前缀标签（便于区分调用方）
 
     Returns:
-        模型响应文本；失败时抛出异常
+        status == "completed" 的 interaction 对象
+
+    Raises:
+        RuntimeError: interaction_id 为空
+        TimeoutError: 超出 timeout 仍未完成（已请求取消）
+        RuntimeError: job 返回 failed / cancelled / error 状态
     """
-    # ── 本地模型模式：用 Ollama 直接回答，无需 Interactions API ──
+    import random as _random
+
+    if not interaction_id:
+        raise RuntimeError(f"[{label or 'poll'}] interaction_id 为空，无法轮询")
+
+    _log = logging.getLogger(__name__)
+    tag  = f"[Interactions{':' + label if label else ''}]"
+
+    start          = time.monotonic()
+    sleep_interval = initial_sleep
+    last_status    = ""
+    poll_count     = 0
+
+    _log.info("%s ⏳ job=%s  开始轮询 (timeout=%.0fs)", tag, interaction_id, timeout)
+
+    while True:
+        elapsed = time.monotonic() - start
+
+        # ── 超时检查 ──────────────────────────────────────────────────────────
+        if elapsed >= timeout:
+            _log.warning("%s ⌛ job=%s  轮询超时 (%.0fs elapsed)", tag, interaction_id, elapsed)
+            try:
+                ia_client.interactions.cancel(interaction_id)
+                _log.info("%s 🛑 job=%s  已请求取消", tag, interaction_id)
+            except Exception as _ce:
+                _log.debug("%s 取消请求失败: %s", tag, _ce)
+            raise TimeoutError(
+                f"Interactions API 超时 ({timeout:.0f}s) job={interaction_id}"
+            )
+
+        # ── 轮询请求（网络抖动时短暂等待后重试，不立即放弃）──────────────────
+        try:
+            interaction = ia_client.interactions.get(interaction_id)
+        except Exception as _poll_err:
+            _log.warning(
+                "%s job=%s  轮询请求失败 (#%d): %s",
+                tag, interaction_id, poll_count, _poll_err,
+            )
+            time.sleep(min(sleep_interval, 10.0))
+            continue
+
+        status     = str(getattr(interaction, "status", "") or "").lower().strip()
+        poll_count += 1
+
+        # ── 仅在状态变化时输出日志，避免日志洪水 ─────────────────────────────
+        if status != last_status:
+            msg = _INTERACTION_STATUS_MSGS.get(status, f"状态: {status!r}")
+            _log.info(
+                "%s 🔄 job=%s  [poll#%d | %.0fs] %s",
+                tag, interaction_id, poll_count, elapsed, msg,
+            )
+            last_status = status
+
+        # ── 终止状态判断 ───────────────────────────────────────────────────────
+        if status in _INTERACTION_TERMINAL_STATES:
+            if status in _INTERACTION_SUCCESS_STATES:
+                _log.info(
+                    "%s ✅ job=%s  完成 (total=%.1fs, polls=%d)",
+                    tag, interaction_id, elapsed, poll_count,
+                )
+                return interaction
+            # failed / cancelled / error
+            err_detail = getattr(interaction, "error", None) or status
+            _log.error(
+                "%s ❌ job=%s  失败 status=%s  detail=%s",
+                tag, interaction_id, status, err_detail,
+            )
+            raise RuntimeError(
+                f"Interactions API job 失败 (status={status}, detail={err_detail})"
+            )
+
+        # ── 计算下一轮等待时间：指数退避 + ±25% 随机抖动 ─────────────────────
+        jitter       = sleep_interval * 0.25 * (_random.random() * 2 - 1)
+        actual_sleep = max(1.0, min(sleep_interval + jitter, max_sleep))
+        remaining    = timeout - elapsed
+        actual_sleep = min(actual_sleep, max(0.5, remaining - 0.1))   # 不超过剩余时间
+
+        _log.debug("%s job=%s  等待 %.1fs 后再次轮询…", tag, interaction_id, actual_sleep)
+        time.sleep(actual_sleep)
+
+        # 逐步延长轮询间隔，直到 max_sleep 上限
+        sleep_interval = min(sleep_interval * backoff_multiplier, max_sleep)
+
+
+def _extract_interaction_text_global(interaction) -> str:
+    """
+    从 interaction 对象递归提取输出文本。
+    兼容多种 SDK 返回格式：outputs 列表、text 属性、parts、Pydantic model_dump、dict 等。
+    """
+    def _walk(obj) -> list:
+        if obj is None:
+            return []
+        if isinstance(obj, str):
+            s = obj.strip()
+            return [s] if s else []
+        if isinstance(obj, dict):
+            results = []
+            for key in ("output_text", "text", "content"):
+                val = obj.get(key)
+                if isinstance(val, str) and val.strip():
+                    results.append(val.strip())
+                    return results          # 优先返回语义最强的字段
+            for val in obj.values():
+                results.extend(_walk(val))
+            return results
+        if isinstance(obj, (list, tuple)):
+            results = []
+            for item in obj:
+                results.extend(_walk(item))
+            return results
+        # Pydantic / SDK 对象：先尝试 model_dump()
+        if hasattr(obj, "model_dump"):
+            try:
+                return _walk(obj.model_dump())
+            except Exception:
+                pass
+        if hasattr(obj, "text") and obj.text:
+            return [str(obj.text).strip()]
+        if hasattr(obj, "parts"):
+            results = []
+            for p in (obj.parts or []):
+                results.extend(_walk(p))
+            return results
+        if hasattr(obj, "outputs"):
+            results = []
+            for o in (obj.outputs or []):
+                results.extend(_walk(o))
+            return results
+        return []
+
+    parts = _walk(getattr(interaction, "outputs", None))
+    if not parts:
+        parts = _walk(interaction)
+
+    # 去重，保持原始顺序
+    seen: set = set()
+    deduped = []
+    for p in parts:
+        if p not in seen:
+            deduped.append(p)
+            seen.add(p)
+    return "\n".join(deduped).strip()
+
+
+def _call_interactions_api_sync(
+    model_id: str,
+    user_prompt: str,
+    sys_instruction: str = None,
+    timeout: float = 900.0,
+) -> str:
+    """
+    通过 Interactions API 调用 gemini-3-*-preview / deep-research 等异步模型。
+    这些模型不支持 client.models.generate_content()，必须使用此端点。
+
+    工作流程：
+      1. 本地模型模式 → 直接用 Ollama，跳过 Interactions API
+      2. 云端模式     → rc.interactions.create() 提交异步 job，捕获 interaction_id
+      3.              → _poll_interaction() 轮询（指数退避，最大 timeout 秒）
+      4.              → 提取并返回最终文本
+
+    Args:
+        model_id:        目标模型 ID
+        user_prompt:     用户输入（已格式化）
+        sys_instruction: 系统指令（可选）
+        timeout:         最大等待秒数（默认 15 分钟）
+
+    Returns:
+        模型响应文本
+
+    Raises:
+        TimeoutError:   超时（已自动请求取消）
+        RuntimeError:   job 失败或本地降级失败
+    """
+    _log = logging.getLogger(__name__)
+
+    # ── 本地模型模式：用 Ollama 直接回答，无需 Interactions API ──────────────
     model_mode, _ = _get_local_model_config()
     if model_mode == "local":
         try:
@@ -953,8 +1237,7 @@ def _call_interactions_api_sync(model_id: str, user_prompt: str, sys_instruction
         except Exception as _e:
             raise RuntimeError(f"本地模型 Interactions 降级失败: {_e}") from _e
 
-    rc = create_research_client()
-
+    # ── 云端：提交异步 Interactions 任务 ─────────────────────────────────────
     full_input = user_prompt
     if sys_instruction:
         full_input = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{user_prompt}"
@@ -965,40 +1248,58 @@ def _call_interactions_api_sync(model_id: str, user_prompt: str, sys_instruction
         background=model_id not in _NO_BACKGROUND_MODELS,
         stream=False,
     )
+    # Interactions API 区分两种调用方式：
+    #   agent=  → deep-research 等真正的 Agent
+    #   model=  → gemini-3-pro/flash-preview 等普通模型（用 agent= 会报 400）
+    _create_kwargs: dict = {
+        "input":      full_input[:80000],
+        "background": True,
+        "stream":     False,
+    }
+    if _is_interactions_agent(model_id):
+        _create_kwargs["agent"] = model_id
+    else:
+        _create_kwargs["model"] = model_id
+
+    interaction = rc.interactions.create(**_create_kwargs)
 
     interaction_id = getattr(interaction, "id", None)
-    status = getattr(interaction, "status", "")
-    start_wait = time.time()
+    init_status    = str(getattr(interaction, "status", "") or "").lower()
 
-    while interaction_id and status not in ("completed", "failed", "cancelled") and (time.time() - start_wait) < timeout:
-        time.sleep(2)
-        interaction = rc.interactions.get(interaction_id)
-        status = getattr(interaction, "status", "")
+    # 快速路径：极少数情况下 create() 即刻返回已完成
+    if init_status in _INTERACTION_SUCCESS_STATES:
+        _log.info(
+            "[Interactions] ⚡ job=%s 即时完成 (status=%s)", interaction_id, init_status
+        )
+        return _extract_interaction_text_global(interaction)
 
-    if status not in ("completed", "failed", "cancelled"):
-        try:
-            rc.interactions.cancel(interaction_id)
-        except Exception:
-            pass
-        raise TimeoutError(f"Interactions API 超时 ({timeout}s) model={model_id}")
+    if init_status in _INTERACTION_FAIL_STATES:
+        err = getattr(interaction, "error", init_status)
+        raise RuntimeError(
+            f"Interactions API job 立即失败 (status={init_status}): {err}"
+        )
 
-    # 从 interaction 对象中提取文本
-    def _get_text_from_obj(obj):
-        if obj is None:
-            return ""
-        if isinstance(obj, str):
-            return obj
-        if hasattr(obj, "text") and obj.text:
-            return str(obj.text)
-        if hasattr(obj, "parts"):
-            return " ".join(str(p.text) for p in (obj.parts or []) if hasattr(p, "text") and p.text)
-        if hasattr(obj, "outputs"):
-            texts = [_get_text_from_obj(o) for o in (obj.outputs or [])]
-            return "\n".join(t for t in texts if t)
-        return ""
+    if not interaction_id:
+        raise RuntimeError(
+            f"Interactions API 未返回有效的 interaction_id (model={model_id})"
+        )
 
-    text = _get_text_from_obj(getattr(interaction, "outputs", None)) or _get_text_from_obj(interaction)
-    return text.strip()
+    # 慢速路径：轮询等待（指数退避，含自动超时取消）
+    final_interaction = _poll_interaction(
+        rc,
+        interaction_id,
+        timeout=timeout,
+        initial_sleep=2.0,
+        backoff_multiplier=1.5,
+        max_sleep=30.0,
+        label=model_id,
+    )
+
+    text = _extract_interaction_text_global(final_interaction)
+    _log.info(
+        "[Interactions] 📄 提取文本 %d 字符 (model=%s)", len(text), model_id
+    )
+    return text
 
 
 def run_with_timeout(fn, timeout_seconds):
@@ -1571,34 +1872,6 @@ def _register_blueprints_deferred():
     except Exception as e:
         _app_logger.error(f"[HealthAPI] ❌ 健康检查 API 注册失败: {e}")
 
-    # ── 新拆分的路由蓝图（从 app.py 提取的路由模块）──────────────────────────
-    _new_blueprints = [
-        ("web.blueprints.sessions", "sessions_bp", "Sessions"),
-        ("web.blueprints.analytics", "analytics_bp", "Analytics"),
-        ("web.blueprints.proactive", "proactive_bp", "Proactive"),
-        ("web.blueprints.execution", "execution_bp", "Execution"),
-        ("web.blueprints.knowledge", "knowledge_bp", "Knowledge"),
-        ("web.blueprints.file_editor", "file_editor_bp", "FileEditor"),
-        ("web.blueprints.dev", "dev_bp", "Dev"),
-        ("web.blueprints.voice", "voice_bp", "Voice"),
-        ("web.blueprints.document", "document_bp", "Document"),
-        ("web.blueprints.file_organize", "file_organize_bp", "FileOrganize"),
-        ("web.blueprints.workspace", "workspace_bp", "Workspace"),
-        ("web.blueprints.settings", "settings_bp", "Settings"),
-        ("web.blueprints.misc_api", "misc_api_bp", "MiscAPI"),
-        ("web.blueprints.pages", "pages_bp", "Pages"),
-    ]
-    for mod_path, bp_attr, label in _new_blueprints:
-        try:
-            _mod = importlib.import_module(mod_path)
-            _bp = getattr(_mod, bp_attr)
-            app.register_blueprint(_bp)
-            _app_logger.info("[%s] ✅ 蓝图已注册", label)
-        except ImportError as e:
-            _app_logger.warning("[%s] ⚠️ 蓝图导入失败: %s", label, e)
-        except Exception as e:
-            _app_logger.error("[%s] ❌ 蓝图注册失败: %s", label, e)
-
     _app_logger.info("[INIT] ✅ 所有蓝图注册完成")
 
 
@@ -1766,6 +2039,23 @@ _NO_BACKGROUND_MODELS: set = set()
 # 当 Interactions API 也失败时的最终降级模型
 _INTERACTIONS_FALLBACK_MODEL = "gemini-2.5-flash"
 
+# ── Interactions API 轮询状态常量 ────────────────────────────────────────────
+_INTERACTION_TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "error"})
+_INTERACTION_SUCCESS_STATES  = frozenset({"completed"})
+_INTERACTION_FAIL_STATES     = frozenset({"failed", "cancelled", "error"})
+
+# 中间状态 → 人类可读日志（仅当状态变化时输出，避免日志洪水）
+_INTERACTION_STATUS_MSGS: dict = {
+    "active":      "Agent 工作中…",
+    "running":     "Agent 工作中…",
+    "queued":      "等待队列中，即将开始…",
+    "in_progress": "Agent 处理中…",
+    "thinking":    "Agent 深度思考中…",
+    "searching":   "Agent 正在检索互联网…",
+    "reading":     "Agent 正在阅读资料…",
+    "generating":  "Agent 正在生成回复…",
+}
+
 # 全局模型管理器实例（后台初始化）
 _model_manager = None
 
@@ -1791,7 +2081,33 @@ def _init_model_manager():
             SmartDispatcher._dependencies["MODEL_MAP"] = MODEL_MAP
         except Exception:
             pass
-        print(f"[ModelManager] ✅ 动态路由已加载: {len(dynamic_map)} 个任务")
+        _app_logger.info(f"[ModelManager] ✅ 动态路由已加载: {len(dynamic_map)} 个任务")
+        # ── 同步更新 ModelFallbackExecutor 的路由表 ──────────────────────────
+        try:
+            from app.core.llm.model_fallback import get_fallback_executor
+            get_fallback_executor().update_model_map(MODEL_MAP)
+            _app_logger.info("[ModelManager] ✅ ModelFallbackExecutor 路由表已同步")
+        except Exception as _fe:
+            _app_logger.warning(f"[ModelManager] ⚠️ ModelFallbackExecutor 同步失败（非致命）: {_fe}")
+        # ── 同步更新 AIRouter 的轻量路由模型 ────────────────────────────────
+        try:
+            from app.core.routing.ai_router import AIRouter
+            # 选取可用的非 interactions-only、速度最快的模型作为路由器
+            _available_caps = _model_manager._cached_caps
+            _fast_candidates = [
+                (mid, caps) for mid, caps in _available_caps.items()
+                if not caps.get("interactions_only", False)
+                and not caps.get("image_gen", False)
+                and mid != "local-executor"
+            ]
+            if _fast_candidates:
+                _router_candidate = max(
+                    _fast_candidates,
+                    key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1
+                )[0]
+                AIRouter.set_router_model(_router_candidate)
+        except Exception as _are:
+            _app_logger.warning(f"[ModelManager] ⚠️ AIRouter 路由模型更新失败（非致命）: {_are}")
     except Exception as _me:
         import traceback as _tb
 
@@ -2430,9 +2746,9 @@ class WebSearcher:
                 "1. 先用一句话说明查询的出发日期和路线（如有）。\n"
                 "2. 用 **Markdown 表格** 列出主要班次，列标题为：\n"
                 "   | 班次 | 出发站 | 到达站 | 出发时间 | 到达时间 | 历时 | 二等座 | 一等座 |\n"
-                "   至少列出 5 个代表性班次（早、中、晚各时段）。\n"
+                "   只列出搜索结果中明确出现的班次，不要自行补全或推测。\n"
                 "3. 表格后，提醒用户前往 12306 或铁路官方渠道查看实时余票并购票。\n"
-                "4. 若搜索结果信息不足，请尽量根据已知班次填写，并注明「以下为参考班次，请以12306实时信息为准」。\n"
+                "4. **严禁** 在搜索结果班次信息不足时自行编造、补全或推测班次数据。若搜索结果不足，明确告知用户『当前搜索结果班次信息有限』，并直接引导用户前往 12306 官网或 App 查询。\n"
                 "用中文输出，格式整洁，突出关键数据。"
             )
             return query, instruction
@@ -2738,34 +3054,37 @@ class WebSearcher:
         if preferred_model.startswith("deep-research-pro-preview"):
             try:
                 research_client = create_research_client()
-                interaction = research_client.interactions.create(
-                    agent=preferred_model,
-                    input=research_prompt,
-                    background=True,
-                    stream=False,
-                )
-                interaction_id = getattr(interaction, "id", None)
-                status = getattr(interaction, "status", "")
-                start_wait = time.time()
-                max_wait_time = 180  # 限制最大等待时间为 3 分钟
-                
-                while interaction_id and status not in ("completed", "failed", "cancelled") and (time.time() - start_wait) < max_wait_time:
-                    time.sleep(3)
-                    interaction = research_client.interactions.get(interaction_id)
-                    status = getattr(interaction, "status", "")
-
-                if status not in ("completed", "failed", "cancelled"):
-                    print(f"[PPT-RESEARCH] ⚠️ Interactions 超时 ({max_wait_time}s)，尝试取消并回退")
-                    try:
-                        research_client.interactions.cancel(interaction_id)
-                    except Exception:
-                        pass
+                _log_ppt = logging.getLogger(__name__)
+                _log_ppt.info("[PPT-RESEARCH] 🚀 提交 deep-research job (model=%s)", preferred_model)
+                _ppt_create_kwargs: dict = {
+                    "input":      research_prompt,
+                    "background": True,
+                    "stream":     False,
+                }
+                if _is_interactions_agent(preferred_model):
+                    _ppt_create_kwargs["agent"] = preferred_model
                 else:
-                    text = _extract_interaction_text(interaction)
-                    if text and len(text) > 200:
-                        print(f"[PPT-RESEARCH] ✅ 深度研究完成 ({preferred_model}), {len(text)} 字符")
-                        return text
-                    print(f"[PPT-RESEARCH] ⚠️ Interactions 返回空结果或过短，status={status}")
+                    _ppt_create_kwargs["model"] = preferred_model
+                interaction = research_client.interactions.create(**_ppt_create_kwargs)
+                interaction_id = getattr(interaction, "id", None)
+                init_status = str(getattr(interaction, "status", "") or "").lower()
+                if init_status in _INTERACTION_FAIL_STATES:
+                    raise RuntimeError(f"deep-research job 立即失败: {init_status}")
+
+                final_interaction = _poll_interaction(
+                    research_client,
+                    interaction_id,
+                    timeout=600.0,           # PPT 研究最多 10 分钟
+                    initial_sleep=3.0,
+                    backoff_multiplier=1.5,
+                    max_sleep=30.0,
+                    label="PPT-RESEARCH",
+                )
+                text = _extract_interaction_text(final_interaction)
+                if text and len(text) > 200:
+                    _app_logger.info(f"[PPT-RESEARCH] ✅ 深度研究完成 ({preferred_model}), {len(text)} 字符")
+                    return text
+                _app_logger.warning(f"[PPT-RESEARCH] ⚠️ Interactions 返回空结果或过短")
             except Exception as inter_err:
                 _app_logger.debug(f"[PPT-RESEARCH] Interactions 失败: {inter_err}")
 
@@ -2789,10 +3108,13 @@ class WebSearcher:
                     or model in _INTERACTIONS_ONLY_MODELS
                 ):
                     continue
+                # 备用路径必须启用 Google Search Grounding，避免模型在无实时数据的情况下
+                # 捏造统计数据、引用来源或市场数字（幻觉风险）
                 resp = client.models.generate_content(
                     model=model,
                     contents=research_prompt,
                     config=types.GenerateContentConfig(
+                        tools=[types.Tool(google_search=types.GoogleSearch())],
                         temperature=0.5,
                         max_output_tokens=16384,
                     ),
@@ -4922,7 +5244,7 @@ class TaskOrchestrator:
                 progress_callback(msg, detail)
 
         try:
-            model_id = MODEL_MAP.get("CODER", "gemini-3-pro-preview")
+            model_id = MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
             _report("启动代码生成...", f"模型: {model_id}")
 
             # 注入前步搜索/研究结果（如有）
@@ -5310,7 +5632,7 @@ class Utils:
                 return {"pass": False, "fix_prompt": fix}
             return {"pass": True, "fix_prompt": ""}
         except Exception as e:
-            print(f"[SELF_CHECK] Failed: {e}")
+            _app_logger.debug(f"[SELF_CHECK] Failed: {e}")
             return {"pass": True, "fix_prompt": ""}
 
     @staticmethod
@@ -5905,6 +6227,33 @@ def _start_memory_extraction(
             return resp.text or ""
         except Exception:
             return ""
+
+    def _llm_quality_sync(prompt: str) -> str:
+        """Higher-quality LLM call for PersonalityMatrix and evaluations.
+        Tries gemini-2.5-flash → gemini-2.0-flash → falls back to _llm_sync."""
+        _quality_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+        _model = "gemini-2.0-flash"  # safe default
+        try:
+            from app.core.llm.model_fallback import get_fallback_executor
+            _fbe = get_fallback_executor()
+            _model = next(
+                (m for m in _quality_models if _fbe.is_available(m)),
+                _quality_models[-1],
+            )
+        except Exception:
+            pass
+        try:
+            resp = client.models.generate_content(
+                model=_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.15,
+                    max_output_tokens=800,
+                )
+            )
+            return resp.text or ""
+        except Exception:
+            return _llm_sync(prompt)
 
     def _worker():
         # ── Existing MemoryIntegration (entity extraction) ────────────────
@@ -6558,7 +6907,7 @@ class KotoBrain:
                         if not accumulated_text:
                             raise ValueError("Interactions API 返回空响应")
                     except Exception as _ia_err:
-                        print(f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+                        _app_logger.info(f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}")
                         model_id = _INTERACTIONS_FALLBACK_MODEL
                         result["model"] = model_id
                         _fb_resp = client.models.generate_content(
@@ -6667,7 +7016,7 @@ class KotoBrain:
             err_str = str(e)
             # 自动降级：如果模型返回"只支持 Interactions API"错误，用 2.0-flash 重试一次
             if "Interactions API" in err_str and model_id not in (_INTERACTIONS_ONLY_MODELS | {_INTERACTIONS_FALLBACK_MODEL}):
-                print(f"[brain.chat] Interactions API 错误，自动降级 {model_id} → {_INTERACTIONS_FALLBACK_MODEL}")
+                _app_logger.info(f"[brain.chat] Interactions API 错误，自动降级 {model_id} → {_INTERACTIONS_FALLBACK_MODEL}")
                 try:
                     model_id = _INTERACTIONS_FALLBACK_MODEL
                     _fb = client.models.generate_content(
@@ -6707,7 +7056,35 @@ class KotoBrain:
                     f"原始错误: `{err_str[:200]}`"
                 )
             else:
-                result["response"] = f"❌ 发生错误: {err_str}"
+                # ── 模型本身不可用（404 / not-found / Interactions-only 等）──────────
+                # 尝试从 ModelFallbackExecutor 获取备选模型并静默重试一次。
+                _retried = False
+                try:
+                    from app.core.llm.model_fallback import get_fallback_executor, _is_model_unavailable_error as _mue_chk
+                    if _mue_chk(e) and model_id not in (None, _INTERACTIONS_FALLBACK_MODEL):
+                        _fbe = get_fallback_executor()
+                        _fbe.mark_unavailable(model_id)
+                        _fb_model = _fbe.get_best_available(task_type=target_key)
+                        if _fb_model and _fb_model != model_id and _fb_model not in _INTERACTIONS_ONLY_MODELS:
+                            _app_logger.info(f"[brain.chat] 模型不可用 {model_id} → 自动降级 {_fb_model} (task={target_key})")
+                            _fh = locals().get("formatted_history") or []
+                            _mi = locals().get("model_input") or original_input
+                            _si = locals().get("_brain_sys_instruction") or ""
+                            _fb_r = client.models.generate_content(
+                                model=_fb_model,
+                                contents=_fh + [types.Content(
+                                    role="user",
+                                    parts=[types.Part.from_text(text=_mi)]
+                                )],
+                                config=types.GenerateContentConfig(system_instruction=_si)
+                            )
+                            result["response"] = _fb_r.text if _fb_r.text else ""
+                            result["model"] = _fb_model
+                            _retried = True
+                except Exception as _r_err:
+                    _app_logger.info(f"[brain.chat] 降级重试失败: {_r_err}")
+                if not _retried:
+                    result["response"] = f"❌ 发生错误: {err_str}"
             result["total_time"] = time.time() - start_time
             return result
 
@@ -7063,7 +7440,17 @@ def chat_stream():
 
         if IntentAnalyzer.should_analyze(user_input):
             full_hist = session_manager.load_full(f"{session_name}.json")
-            rewritten_input = IntentAnalyzer.rewrite_intent(user_input, full_hist)
+            # 快速获取长期记忆上下文，帮助消解跨 session 的指代词
+            _intent_memory_ctx = ""
+            try:
+                _mm_for_intent = get_memory_manager()
+                if _mm_for_intent:
+                    _intent_memory_ctx = _mm_for_intent.get_context_string(user_input) or ""
+            except Exception:
+                pass
+            rewritten_input = IntentAnalyzer.rewrite_intent(
+                user_input, full_hist, memory_context=_intent_memory_ctx
+            )
             if rewritten_input and rewritten_input != user_input:
                 _app_logger.debug(f"[STREAM] 🔄 意图重写: '{user_input}' -> '{rewritten_input}'")
                 user_input = rewritten_input
@@ -7169,7 +7556,7 @@ def chat_stream():
         if _cw_paged_context:
             system_instruction += f"\n\n{_cw_paged_context}"
     except Exception as _cw_err:
-        print(f"[CWM] ⚠️ 上下文管理器异常: {_cw_err}")
+        _app_logger.warning(f"[CWM] ⚠️ 上下文管理器异常: {_cw_err}")
 
     # 🕵️‍♀️ 检测是否有最近上传的文件 (5分钟内)
     has_recent_upload = False
@@ -11814,7 +12201,7 @@ def chat_stream():
                     _max_tokens = 16384 if _is_complex else 8192
                     _doc_models = list(dict.fromkeys([
                         model_id,
-                        "gemini-3-pro-preview",
+                        "gemini-3.1-pro-preview",
                         "gemini-2.5-flash",
                         "gemini-3-flash-preview",
                     ]))
@@ -11986,7 +12373,7 @@ def chat_stream():
                 # 模型列表（主模型 + 备用模型）
                 file_gen_models = [
                     model_id,  # 主模型
-                    "gemini-3-pro-preview",  # 备用1 (更强的推理)
+                    "gemini-3.1-pro-preview",  # 备用1 (最强 generate_content 兼容)
                     "gemini-2.5-flash",  # 备用2
                     "gemini-3-flash-preview",  # 备用3
                 ]
@@ -12421,9 +12808,10 @@ def chat_stream():
                 return
 
             # === Regular Mode (流式输出) ===
-            # 根据任务类型选择系统指令
-            # CHAT/RESEARCH等使用简化指令，避免不必要的文件生成
-            use_instruction = _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION() if task_type in ["CHAT", "RESEARCH"] else _get_system_instruction()
+            # use_instruction 直接继承外层 system_instruction
+            # （已包含 CWM 长期记忆、知识库RAG、Graph RAG、Skills 注入）
+            # 不再从零重建，避免丢失所有 outer-scope 注入的上下文
+            use_instruction = system_instruction
 
             # 注入长期记忆上下文
             _memory_manager = get_memory_manager()
@@ -14236,7 +14624,13 @@ def chat_with_file():
                     task_type, has_image=bool(file_data)
                 )
         
-        print(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
+        # 最早拦截：文件分析不能使用 interactions-only 模型（不支持 generate_content 也不支持文件附件）
+        if model_to_use in _INTERACTIONS_ONLY_MODELS or str(model_to_use or "").startswith("deep-research-pro-preview"):
+            _orig_model = model_to_use
+            model_to_use = _INTERACTIONS_FALLBACK_MODEL
+            _app_logger.warning(f"[FILE UPLOAD] ⚠️ {_orig_model} 是 interactions-only，文件分析降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+
+        _app_logger.info(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
 
         # 安全兜底：locked_task 预设时 prefer_ppt 可能未定义
         if "prefer_ppt" not in locals():
@@ -14772,6 +15166,13 @@ def chat_with_file():
                     # 并将 PDF 字节附加到请求中，而不是依赖提取的文本
                     _stream_model = _captured_model
                     _stream_contents = formatted_message  # 默认：文本消息
+
+                    # 通用拦截：interactions-only 模型不支持 generate_content_stream
+                    # 覆盖所有情况（包括文本嵌入模式，不仅是 binary doc）
+                    if _stream_model in _INTERACTIONS_ONLY_MODELS or str(_stream_model).startswith("deep-research-pro-preview"):
+                        _app_logger.warning(f"[FILE STREAM] ⚠️ {_stream_model} 是 interactions-only，降级到 {_INTERACTIONS_FALLBACK_MODEL}")
+                        _stream_model = _INTERACTIONS_FALLBACK_MODEL
+
                     _has_binary_doc = (
                         file_data is not None
                         and not (file_data.get("mime_type") or "").lower().startswith("image/")
@@ -15078,6 +15479,30 @@ def get_ppt_session(session_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/info", methods=["GET"])
+def api_info():
+    """Application metadata and configuration info.
+    ---
+    tags: [Health]
+    responses:
+      200:
+        description: App metadata
+        schema:
+          properties:
+            version: {type: string}
+            deploy_mode: {type: string, enum: [local, cloud]}
+            auth_enabled: {type: boolean}
+    """
+    return jsonify(
+        {
+            "version": APP_VERSION,
+            "deploy_mode": os.environ.get("KOTO_DEPLOY_MODE", "local"),
+            "auth_enabled": os.environ.get("KOTO_AUTH_ENABLED", "false").lower()
+            == "true",
+        }
+    )
+
+
 @app.route("/api/v1/models", methods=["GET"])
 def api_list_models():
     """
@@ -15148,6 +15573,27 @@ def api_refresh_models():
     try:
         new_map = _model_manager.refresh()
         MODEL_MAP.update(new_map)
+        # 同步更新 ModelFallbackExecutor 路由表
+        try:
+            from app.core.llm.model_fallback import get_fallback_executor
+            get_fallback_executor().update_model_map(MODEL_MAP)
+        except Exception as _fe:
+            _app_logger.warning(f"[ModelRefresh] ⚠️ FallbackExecutor sync failed: {_fe}")
+        # 同步更新 AIRouter 轻量路由模型
+        try:
+            from app.core.routing.ai_router import AIRouter
+            _caps = _model_manager._cached_caps
+            _candidates = [
+                (mid, caps) for mid, caps in _caps.items()
+                if not caps.get("interactions_only", False)
+                and not caps.get("image_gen", False)
+                and mid != "local-executor"
+            ]
+            if _candidates:
+                _best = max(_candidates, key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1)[0]
+                AIRouter.set_router_model(_best)
+        except Exception as _are:
+            _app_logger.warning(f"[ModelRefresh] ⚠️ AIRouter update failed: {_are}")
         return jsonify({
             "status":    "ok",
             "model_map": _model_manager.get_model_map_with_scores(),
@@ -15233,18 +15679,372 @@ def analyze_task():
     )
 
 
+@app.route("/api/workspace/<path:filepath>")
+def get_workspace_file(filepath):
+    """获取 workspace 中的文件，支持子目录"""
+    _app_logger.debug(f"[API] Serving workspace file: {filepath}")
+    full_path = os.path.join(WORKSPACE_DIR, filepath)
+
+    # 安全检查：确保请求的路径在 WORKSPACE_DIR 下
+    try:
+        resolved_path = os.path.abspath(full_path)
+        resolved_workspace = os.path.abspath(WORKSPACE_DIR)
+        if not resolved_path.startswith(resolved_workspace):
+            _app_logger.debug(
+                f"[API] Security violation: {resolved_path} not under {resolved_workspace}"
+            )
+            return jsonify({"error": "Access denied"}), 403
+
+        if not os.path.exists(resolved_path):
+            _app_logger.debug(f"[API] File not found: {resolved_path}")
+            return jsonify({"error": "File not found"}), 404
+
+        _app_logger.debug(f"[API] Serving: {resolved_path}")
+        return send_from_directory(WORKSPACE_DIR, filepath)
+    except Exception as e:
+        _app_logger.debug(f"[API] Error serving {filepath}: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return jsonify({"error": "Server error", "detail": str(e)}), 500
+
+
+@app.route("/api/workspace", methods=["GET"])
+def list_workspace_files():
+    files = os.listdir(WORKSPACE_DIR)
+    return jsonify({"files": files})
+
+
+@app.route("/api/open-workspace", methods=["POST"])
+def open_workspace():
+    """打开 workspace 文件夹"""
+    try:
+        if sys.platform == "win32":
+            subprocess.Popen(
+                f'explorer "{WORKSPACE_DIR}"',
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", WORKSPACE_DIR])
+        else:
+            subprocess.Popen(["xdg-open", WORKSPACE_DIR])
+        return jsonify({"success": True, "path": WORKSPACE_DIR})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/open-file", methods=["POST"])
+def open_file_native():
+    """用系统默认程序打开文件（不经过浏览器）"""
+    try:
+        data = request.get_json()
+        filepath = data.get("filepath", "")
+        if not filepath:
+            return jsonify({"success": False, "error": "No filepath provided"}), 400
+
+        full_path = os.path.join(WORKSPACE_DIR, filepath)
+        resolved_path = os.path.abspath(full_path)
+        resolved_workspace = os.path.abspath(WORKSPACE_DIR)
+
+        if not resolved_path.startswith(resolved_workspace):
+            return jsonify({"success": False, "error": "Access denied"}), 403
+
+        if not os.path.exists(resolved_path):
+            return jsonify({"success": False, "error": "File not found"}), 404
+
+        _app_logger.debug(f"[API] Opening file natively: {resolved_path}")
+        if sys.platform == "win32":
+            os.startfile(resolved_path)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", resolved_path])
+        else:
+            subprocess.Popen(["xdg-open", resolved_path])
+
+        return jsonify({"success": True, "path": resolved_path})
+    except Exception as e:
+        _app_logger.debug(f"[API] Error opening file: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ================= Settings API =================
 
 # ─── 本地模型状态 API ─────────────────────────────────────────────────────────
 
 
+@app.route("/api/local-model/status", methods=["GET"])
+def local_model_status():
+    """返回当前本地模型配置和运行状态"""
+    try:
+        from app.core.llm.ollama_provider import get_local_model_info
+
+        info = get_local_model_info()
+        return jsonify({"success": True, **info})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/local-model/switch", methods=["POST"])
+def local_model_switch():
+    """切换 AI 模式（local / cloud）并热更新客户端缓存"""
+    global _client, _client_mode_key
+    try:
+        data = request.json or {}
+        mode = data.get("mode", "cloud")  # "local" 或 "cloud"
+        model_tag = data.get("model_tag")  # 本地模式时可指定模型
+
+        settings_path = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+        except Exception:
+            settings = {}
+
+        settings["model_mode"] = mode
+        if model_tag:
+            settings["local_model"] = model_tag
+
+        with open(settings_path, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+
+        # 清除缓存，下次 get_client() 调用时重建
+        _user_settings_cache.clear()
+        _client = None
+        _client_mode_key = (None, None)
+
+        return jsonify(
+            {
+                "success": True,
+                "mode": mode,
+                "model": model_tag or settings.get("local_model"),
+            }
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/local-model/setup", methods=["POST"])
+def local_model_setup():
+    """触发本地模型安装向导（异步，不阻塞 API 响应）"""
+
+    def _run_gui():
+        try:
+            from model_downloader import run_downloader_gui
+
+            run_downloader_gui()
+            # 安装完成后清除缓存
+            global _client, _client_mode_key
+            _user_settings_cache.clear()
+            _client = None
+            _client_mode_key = (None, None)
+        except Exception as e:
+            _app_logger.debug(f"[LocalModel] 安装向导失败: {e}")
+
+    import threading as _threading
+
+    _threading.Thread(target=_run_gui, daemon=True).start()
+    return jsonify({"success": True, "message": "安装向导已启动"})
+
+
 # GET /api/skills 已迁移至 skill_bp 蓝图（app/api/skill_routes.py），在此移除内联定义避免路由阻拦
+
+
+@app.route("/api/skills/<skill_id>/toggle", methods=["POST"])
+def toggle_skill(skill_id: str):
+    """启用/禁用某个技能"""
+    try:
+        from app.core.skills.skill_manager import SkillManager
+
+        data = request.json or {}
+        enabled = bool(data.get("enabled", False))
+        success = SkillManager.set_enabled(skill_id, enabled)
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/skills/<skill_id>/prompt", methods=["POST"])
+def update_skill_prompt(skill_id: str):
+    """更新某个技能的自定义 Prompt"""
+    try:
+        from app.core.skills.skill_manager import SkillManager
+
+        data = request.json or {}
+        prompt = data.get("prompt", "")
+        if not prompt.strip():
+            SkillManager.reset_prompt(skill_id)
+            return jsonify({"success": True, "reset": True})
+        success = SkillManager.update_prompt(skill_id, prompt)
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/skills/<skill_id>/reset", methods=["POST"])
+def reset_skill_prompt(skill_id: str):
+    """将技能 Prompt 恢复为默认值"""
+    try:
+        from app.core.skills.skill_manager import SkillManager
+
+        success = SkillManager.reset_prompt(skill_id)
+        return jsonify({"success": success})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ================= Settings API =================
 
 
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    """Get all application settings.
+    ---
+    tags:
+      - Settings
+    responses:
+      200:
+        description: All settings grouped by category
+        schema:
+          type: object
+    """
+    # 合并 appearance 主题（如有 cookie/参数可在此合并）
+    return jsonify(settings_manager.get_all())
+
+
+@app.route("/api/settings", methods=["POST"])
+def update_settings():
+    """Update an application setting.
+    ---
+    tags:
+      - Settings
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          required: [category, key, value]
+          properties:
+            category:
+              type: string
+              description: Settings category
+            key:
+              type: string
+              description: Setting key
+            value:
+              description: New value
+    responses:
+      200:
+        description: Update result
+        schema:
+          type: object
+          properties:
+            success:
+              type: boolean
+    """
+    data = request.json
+    category = data.get("category")
+    key = data.get("key")
+    value = data.get("value")
+
+    if category and key:
+        success = settings_manager.set(category, key, value)
+        settings_manager.ensure_directories()
+        # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
+        _user_settings_cache.clear()
+        # 代理设置变更时立即重新检测
+        if category == "proxy":
+            global _proxy_checked, _detected_proxy
+            _proxy_checked = False
+            _detected_proxy = None
+            threading.Thread(target=lambda: get_detected_proxy(), daemon=True).start()
+        return jsonify({"success": success})
+    return jsonify({"success": False, "error": "Missing category or key"})
+
+
+@app.route("/api/settings/reset", methods=["POST"])
+def reset_settings():
+    success = settings_manager.reset()
+    # 同样清除缓存
+    _user_settings_cache.clear()
+    global _proxy_checked, _detected_proxy
+    _proxy_checked = False
+    _detected_proxy = None
+    return jsonify({"success": success})
+
 # ================= Mini Mode Switch API =================
+
+
+@app.route("/api/switch-to-mini", methods=["POST"])
+def switch_to_mini():
+    """切换到迷你模式"""
+    import subprocess
+    import sys
+
+    # 打包版无法以脚本方式启动 mini_koto.py
+    if getattr(sys, "frozen", False):
+        return jsonify(
+            {"success": False, "error": "打包版暂不支持迷你模式，请使用窗口顶栏按钮"}
+        )
+
+    try:
+        # 启动迷你窗口
+        mini_koto_path = os.path.join(PROJECT_ROOT, "web", "mini_koto.py")
+        if os.path.exists(mini_koto_path):
+            # 在新进程中启动迷你窗口
+            subprocess.Popen(
+                [sys.executable, mini_koto_path],
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                ),
+                cwd=PROJECT_ROOT,
+            )
+            return jsonify({"success": True, "message": "迷你模式已启动"})
+        else:
+            return jsonify({"success": False, "error": "找不到迷你模式程序"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/switch-to-main", methods=["POST"])
+def switch_to_main():
+    """切换到主程序"""
+    import subprocess
+    import sys
+
+    # 打包版已在主程序窗口中运行，直接返回成功
+    if getattr(sys, "frozen", False):
+        return jsonify({"success": True, "message": "已在主程序中运行"})
+
+    try:
+        # 启动主窗口
+        main_app_path = os.path.join(PROJECT_ROOT, "koto_app.py")
+        if os.path.exists(main_app_path):
+            subprocess.Popen(
+                [sys.executable, main_app_path],
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                ),
+                cwd=PROJECT_ROOT,
+            )
+            return jsonify({"success": True, "message": "主程序已启动"})
+        else:
+            return jsonify({"success": False, "error": "找不到主程序"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/mini")
+def mini_page():
+    """迷你模式页面（浏览器访问用）"""
+    return render_template("mini_koto.html")
+
+
+@app.route("/m")
+@app.route("/mobile")
+def mobile_page():
+    """移动端优化页面"""
+    return render_template("mobile.html")
 
 
 @app.route("/api/mini/chat", methods=["POST"])
@@ -15411,88 +16211,109 @@ def mini_chat():
 # ================= Setup & Initialization API =================
 
 
-@app.route('/api/setup/apikey', methods=['POST'])
+@app.route("/api/setup/status", methods=["GET"])
+def get_setup_status():
+    """检查首次设置状态"""
+    config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
+    has_api_key = bool(API_KEY and len(API_KEY) > 10)
+    has_workspace = os.path.exists(WORKSPACE_DIR)
+
+    return jsonify(
+        {
+            "initialized": has_api_key and has_workspace,
+            "has_api_key": has_api_key,
+            "has_workspace": has_workspace,
+            "workspace_path": os.path.abspath(WORKSPACE_DIR),
+            "config_path": os.path.abspath(config_path),
+        }
+    )
+
+
+@app.route("/api/setup/apikey", methods=["POST"])
 def setup_api_key():
     """设置 API Key"""
     data = request.json
-    api_key = data.get('api_key', '').strip()
-    
+    api_key = data.get("api_key", "").strip()
+
     if not api_key or len(api_key) < 10:
         return jsonify({"success": False, "error": "Invalid API key"})
-    
+
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    
+
     try:
         # 写入配置文件（同时写入两个变量名，避免优先级错乱）
-        with open(config_path, 'w', encoding='utf-8') as f:
-            f.write(f"# Koto Configuration\nGEMINI_API_KEY={api_key}\nAPI_KEY={api_key}\n")
-        
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"# Koto Configuration\nGEMINI_API_KEY={api_key}\nAPI_KEY={api_key}\n"
+            )
+
         # 更新环境变量
-        os.environ['GEMINI_API_KEY'] = api_key
-        os.environ['API_KEY'] = api_key
+        os.environ["GEMINI_API_KEY"] = api_key
+        os.environ["API_KEY"] = api_key
         global API_KEY, client
         API_KEY = api_key
         client = create_client()
-        
+
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
-@app.route('/api/setup/workspace', methods=['POST'])
+
+@app.route("/api/setup/workspace", methods=["POST"])
 def setup_workspace():
     """设置工作区目录"""
     data = request.json
-    workspace_path = data.get('path', '').strip()
-    
+    workspace_path = data.get("path", "").strip()
+
     if not workspace_path:
         workspace_path = os.path.join(PROJECT_ROOT, "workspace")
-    
+
     try:
         os.makedirs(workspace_path, exist_ok=True)
         os.makedirs(os.path.join(workspace_path, "documents"), exist_ok=True)
         os.makedirs(os.path.join(workspace_path, "images"), exist_ok=True)
         os.makedirs(os.path.join(workspace_path, "code"), exist_ok=True)
-        
+
         # 更新设置
-        settings_manager.set('storage', 'workspace_dir', workspace_path)
-        
+        settings_manager.set("storage", "workspace_dir", workspace_path)
+
         return jsonify({"success": True, "path": workspace_path})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
-@app.route('/api/setup/test', methods=['GET'])
+
+@app.route("/api/setup/test", methods=["GET"])
 def test_api_connection():
     """测试 API 连接"""
     try:
         start = time.time()
         response = client.models.generate_content(
             model="gemini-3-flash-preview",
-            contents="Say 'Koto is ready!' in one short sentence."
+            contents="Say 'Koto is ready!' in one short sentence.",
         )
         latency = time.time() - start
-        return jsonify({
-            "success": True,
-            "message": response.text,
-            "latency": round(latency, 2)
-        })
+        return jsonify(
+            {"success": True, "message": response.text, "latency": round(latency, 2)}
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
-@app.route('/api/diagnose', methods=['GET'])
+
+@app.route("/api/diagnose", methods=["GET"])
 def diagnose_models():
     """诊断所有模型的可用性"""
     import threading
-    
+
     results = {
         "proxy": {
             "detected": get_detected_proxy(),
             "force": FORCE_PROXY or None,
-            "custom_endpoint": GEMINI_API_BASE or None
+            "custom_endpoint": GEMINI_API_BASE or None,
         },
-        "models": {}
+        "models": {},
     }
-    
+
     # 测试模型列表
     test_models = [
         ("gemini-2.0-flash-lite", "路由分类"),
@@ -15501,7 +16322,7 @@ def diagnose_models():
         ("gemini-2.5-flash", "联网搜索"),
         ("gemini-3.1-flash-image-preview", "图像生成"),
     ]
-    
+
     def test_model(model_id, purpose):
         try:
             start = time.time()
@@ -15510,23 +16331,19 @@ def diagnose_models():
                 response = client.models.generate_content(
                     model=model_id,
                     contents="test",
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=10
-                    )
+                    config=types.GenerateContentConfig(max_output_tokens=10),
                 )
             else:
                 response = client.models.generate_content(
                     model=model_id,
                     contents="Reply with only: OK",
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=10
-                    )
+                    config=types.GenerateContentConfig(max_output_tokens=10),
                 )
             latency = time.time() - start
             return {
                 "status": "✅ 可用",
                 "latency": round(latency, 2),
-                "purpose": purpose
+                "purpose": purpose,
             }
         except Exception as e:
             error_msg = str(e)
@@ -15540,48 +16357,49 @@ def diagnose_models():
                 status = "⚠️ 超时"
             else:
                 status = f"❌ 错误"
-            return {
-                "status": status,
-                "error": error_msg[:150],
-                "purpose": purpose
-            }
-    
+            return {"status": status, "error": error_msg[:150], "purpose": purpose}
+
     # 并行测试（带超时）
     threads = []
     for model_id, purpose in test_models:
+
         def run_test(m=model_id, p=purpose):
             results["models"][m] = test_model(m, p)
+
         t = threading.Thread(target=run_test, daemon=True)
         threads.append(t)
         t.start()
-    
+
     # 等待所有线程完成（最多 15 秒）
     for t in threads:
         t.join(timeout=15)
-    
+
     # 检查是否所有模型都不可用
     all_failed = all(
-        "❌" in results["models"].get(m, {}).get("status", "")
-        for m, _ in test_models
+        "❌" in results["models"].get(m, {}).get("status", "") for m, _ in test_models
     )
-    
+
     if all_failed:
-        results["recommendation"] = "所有模型均不可用。建议：\n1. 检查代理配置是否正确\n2. 考虑使用 API 中转服务\n3. 在 gemini_config.env 中配置 GEMINI_API_BASE"
-    
+        results["recommendation"] = (
+            "所有模型均不可用。建议：\n1. 检查代理配置是否正确\n2. 考虑使用 API 中转服务\n3. 在 gemini_config.env 中配置 GEMINI_API_BASE"
+        )
+
     return jsonify(results)
 
-@app.route('/api/browse', methods=['GET'])
+
+@app.route("/api/browse", methods=["GET"])
 def browse_folders():
     import os
-    path = request.args.get('path', 'C:\\')
-    
+
+    path = request.args.get("path", "C:\\")
+
     try:
         if not os.path.exists(path):
             return jsonify({"error": "路径不存在", "folders": [], "parent": None})
-        
+
         if not os.path.isdir(path):
             return jsonify({"error": "不是文件夹", "folders": [], "parent": None})
-        
+
         folders = []
         try:
             for item in os.listdir(path):
@@ -15590,24 +16408,20 @@ def browse_folders():
                     folders.append({"name": item, "path": item_path})
         except PermissionError:
             return jsonify({"error": "没有权限访问", "folders": [], "parent": None})
-        
-        folders.sort(key=lambda x: x['name'].lower())
-        
+
+        folders.sort(key=lambda x: x["name"].lower())
+
         # Get parent path
         parent = os.path.dirname(path)
         if parent == path:  # Root drive
             parent = None
-        
-        return jsonify({
-            "folders": folders,
-            "parent": parent,
-            "current": path
-        })
+
+        return jsonify({"folders": folders, "parent": parent, "current": path})
     except Exception as e:
         return jsonify({"error": str(e), "folders": [], "parent": None})
 
 
-@app.route('/api/chat/interrupt', methods=['POST'])
+@app.route("/api/chat/interrupt", methods=["POST"])
 def interrupt_chat():
     """中断当前对话生成"""
     payload = request.json or {}
@@ -15655,9 +16469,222 @@ def reset_interrupt():
 
 
 # === 快速笔记 API ===
+@app.route("/api/notes/add", methods=["POST"])
+def add_note():
+    """添加笔记"""
+    from note_manager import get_note_manager
+
+    data = request.json
+    title = data.get("title", "")
+    content = data.get("content", "")
+    category = data.get("category", "default")
+    tags = data.get("tags", [])
+
+    note_manager = get_note_manager()
+    note_id = note_manager.add_note(title, content, category, tags)
+
+    return jsonify({"success": True, "note_id": note_id})
+
+
+@app.route("/api/notes/list", methods=["GET"])
+def list_notes():
+    """列出最近笔记"""
+    from note_manager import get_note_manager
+
+    limit = int(request.args.get("limit", 20))
+    category = request.args.get("category")
+
+    note_manager = get_note_manager()
+    notes = note_manager.get_recent_notes(limit, category)
+
+    return jsonify({"notes": notes})
+
+
+@app.route("/api/notes/search", methods=["GET"])
+def search_notes():
+    """搜索笔记"""
+    from note_manager import get_note_manager
+
+    query = request.args.get("query", "")
+    note_manager = get_note_manager()
+    results = note_manager.search_notes(query)
+
+    return jsonify({"results": results})
+
+
+@app.route("/api/notes/<note_id>", methods=["DELETE"])
+def delete_note(note_id):
+    """删除笔记"""
+    from note_manager import get_note_manager
+
+    note_manager = get_note_manager()
+    success = note_manager.delete_note(note_id)
+
+    return jsonify({"success": success})
+
+
 # === 本地提醒 API（Windows 系统通知） ===
+@app.route("/api/reminders/add", methods=["POST"])
+def add_reminder():
+    """创建本地系统提醒
+    请求体: {"title": str, "message": str, "time": ISO8601, "seconds": int}
+    - 传 time (ISO 时间) 或 seconds (相对秒数) 任选其一
+    """
+    from datetime import datetime
+
+    from reminder_manager import get_reminder_manager
+
+    data = request.json or {}
+    title = data.get("title") or "提醒"
+    message = data.get("message") or ""
+    icon = data.get("icon")
+    remind_time = data.get("time")
+    seconds = data.get("seconds")
+
+    mgr = get_reminder_manager()
+    if remind_time:
+        try:
+            dt = datetime.fromisoformat(remind_time)
+        except Exception:
+            return jsonify({"success": False, "error": "时间格式需为 ISO8601"}), 400
+        rid = mgr.add_reminder(title, message, dt, icon)
+    elif seconds is not None:
+        try:
+            sec = int(seconds)
+        except Exception:
+            return jsonify({"success": False, "error": "seconds 需为整数"}), 400
+        rid = mgr.add_reminder_in(title, message, sec, icon)
+    else:
+        return jsonify({"success": False, "error": "需提供 time 或 seconds"}), 400
+
+    return jsonify({"success": True, "reminder_id": rid})
+
+
+@app.route("/api/reminders/list", methods=["GET"])
+def list_reminders_api():
+    """列出所有提醒"""
+    from reminder_manager import get_reminder_manager
+
+    mgr = get_reminder_manager()
+    return jsonify({"reminders": mgr.list_reminders()})
+
+
+@app.route("/api/reminders/<reminder_id>", methods=["DELETE"])
+def cancel_reminder(reminder_id):
+    """取消提醒"""
+    from reminder_manager import get_reminder_manager
+
+    mgr = get_reminder_manager()
+    ok = mgr.cancel_reminder(reminder_id)
+    return jsonify({"success": ok})
+
+
 # === 日程（本地日历） API ===
+@app.route("/api/calendar/add", methods=["POST"])
+def add_calendar_event():
+    """新增日程并自动创建本地提醒
+    请求体: {"title": str, "description": str, "start": ISO8601, "end": ISO8601?, "remind_before_minutes": int?}
+    """
+    from datetime import datetime
+
+    from calendar_manager import get_calendar_manager
+
+    data = request.json or {}
+    title = data.get("title") or "日程"
+    description = data.get("description") or ""
+    start = data.get("start")
+    end = data.get("end")
+    remind_before_minutes = int(data.get("remind_before_minutes") or 0)
+
+    if not start:
+        return jsonify({"success": False, "error": "start 不能为空 (ISO8601)"}), 400
+    try:
+        start_dt = datetime.fromisoformat(start)
+    except Exception:
+        return jsonify({"success": False, "error": "start 必须是 ISO8601 时间"}), 400
+    end_dt = None
+    if end:
+        try:
+            end_dt = datetime.fromisoformat(end)
+        except Exception:
+            return jsonify({"success": False, "error": "end 必须是 ISO8601 时间"}), 400
+
+    mgr = get_calendar_manager()
+    event_id = mgr.add_event(
+        title, description, start_dt, end_dt, remind_before_minutes
+    )
+    return jsonify({"success": True, "event_id": event_id})
+
+
+@app.route("/api/calendar/list", methods=["GET"])
+def list_calendar_events():
+    from calendar_manager import get_calendar_manager
+
+    limit = int(request.args.get("limit", 100))
+    mgr = get_calendar_manager()
+    return jsonify({"events": mgr.list_events(limit)})
+
+
+@app.route("/api/calendar/<event_id>", methods=["DELETE"])
+def delete_calendar_event(event_id):
+    from calendar_manager import get_calendar_manager
+
+    mgr = get_calendar_manager()
+    ok = mgr.delete_event(event_id)
+    return jsonify({"success": ok})
+
+
 # === 剪贴板 API ===
+@app.route("/api/clipboard/history", methods=["GET"])
+def get_clipboard_history():
+    """获取剪贴板历史"""
+    from clipboard_manager import get_clipboard_manager
+
+    limit = int(request.args.get("limit", 50))
+    type_filter = request.args.get("type")
+    clipboard_manager = get_clipboard_manager()
+    history = clipboard_manager.get_history(limit)
+    if type_filter:
+        history = [item for item in history if item.get("type") == type_filter]
+
+    return jsonify({"history": history})
+
+
+@app.route("/api/clipboard/search", methods=["GET"])
+def search_clipboard():
+    """搜索剪贴板历史"""
+    from clipboard_manager import get_clipboard_manager
+
+    query = request.args.get("query", "")
+    type_filter = request.args.get("type")
+    clipboard_manager = get_clipboard_manager()
+    results = clipboard_manager.search(query)
+    if type_filter:
+        results = [item for item in results if item.get("type") == type_filter]
+
+    return jsonify({"results": results})
+
+
+@app.route("/api/clipboard/copy", methods=["POST"])
+def copy_from_history():
+    """从历史中复制"""
+    from clipboard_manager import get_clipboard_manager
+
+    content = request.json.get("content")
+    index = request.json.get("index")
+    clipboard_manager = get_clipboard_manager()
+    if index is not None:
+        try:
+            index = int(index)
+        except Exception:
+            return jsonify({"success": False, "error": "index 必须是整数"}), 400
+        success = clipboard_manager.copy_from_history(index)
+    else:
+        success = clipboard_manager.copy_from_history(content or "")
+
+    return jsonify({"success": success})
+
+
 # === 任务调度 API（已迁移至 task_bp 蓝图 app/api/task_routes.py）===
 # 原内联路由依赖不存在的 task_scheduler 模块，已移除以解除对 task_bp 的路由阻拦。
 # task_bp 提供：GET /api/tasks, GET /api/tasks/<id>, POST /api/tasks/<id>/cancel,
@@ -15665,110 +16692,285 @@ def reset_interrupt():
 
 
 # === 邮件 API ===
+@app.route("/api/email/accounts", methods=["GET"])
+def list_email_accounts():
+    """列出邮箱账户"""
+    from email_manager import get_email_manager
+
+    email_manager = get_email_manager()
+    accounts = list(email_manager.accounts.keys())
+    default = email_manager.default_account
+
+    return jsonify({"accounts": accounts, "default": default})
+
+
+@app.route("/api/email/accounts/add", methods=["POST"])
+def add_email_account():
+    """添加邮箱账户"""
+    from email_manager import get_email_manager
+
+    data = request.json
+    email_address = data.get("email")
+    password = data.get("password")
+    smtp_server = data.get("smtp_server")
+    smtp_port = data.get("smtp_port", 587)
+    imap_server = data.get("imap_server")
+    set_as_default = data.get("set_as_default", False)
+
+    email_manager = get_email_manager()
+    success = email_manager.add_account(
+        email_address=email_address,
+        password=password,
+        smtp_server=smtp_server,
+        smtp_port=smtp_port,
+        imap_server=imap_server,
+        set_as_default=set_as_default,
+    )
+
+    return jsonify({"success": success})
+
+
+@app.route("/api/email/send", methods=["POST"])
+def send_email():
+    """发送邮件"""
+    from email_manager import get_email_manager
+
+    data = request.json
+    to_addrs = data.get("to", [])
+    subject = data.get("subject", "")
+    body = data.get("body", "")
+    cc_addrs = data.get("cc", [])
+    attachments = data.get("attachments", [])
+    html = data.get("html", False)
+
+    email_manager = get_email_manager()
+    success = email_manager.send_email(
+        to_addrs=to_addrs,
+        subject=subject,
+        body=body,
+        cc_addrs=cc_addrs,
+        attachments=attachments,
+        html=html,
+    )
+
+    return jsonify({"success": success})
+
+
+@app.route("/api/email/fetch", methods=["GET"])
+def fetch_emails():
+    """获取邮件列表"""
+    from email_manager import get_email_manager
+
+    folder = request.args.get("folder", "INBOX")
+    limit = int(request.args.get("limit", 20))
+    unread_only = request.args.get("unread_only", "false").lower() == "true"
+
+    email_manager = get_email_manager()
+    emails = email_manager.fetch_emails(
+        folder=folder, limit=limit, unread_only=unread_only
+    )
+
+    return jsonify({"emails": emails})
+
+
+@app.route("/api/email/search", methods=["GET"])
+def search_emails():
+    """搜索邮件"""
+    from email_manager import get_email_manager
+
+    keyword = request.args.get("query", "")
+    folder = request.args.get("folder", "INBOX")
+
+    email_manager = get_email_manager()
+    results = email_manager.search_emails(keyword, folder=folder)
+
+    return jsonify({"results": results})
+
+
 # === 浏览器自动化 API ===
+@app.route("/api/browser/open", methods=["POST"])
+def browser_open():
+    """打开 URL"""
+    from browser_automation import get_browser_automation
+
+    url = request.json.get("url", "")
+    browser = get_browser_automation()
+    success = browser.open_url(url)
+
+    return jsonify({"success": success})
+
+
+@app.route("/api/browser/search", methods=["POST"])
+def browser_search():
+    """Google 搜索"""
+    from browser_automation import get_browser_automation
+
+    query = request.json.get("query", "")
+    browser = get_browser_automation()
+    results = browser.search_google(query)
+
+    return jsonify({"results": results})
+
+
+@app.route("/api/browser/screenshot", methods=["POST"])
+def browser_screenshot():
+    """截图"""
+    import os
+
+    from browser_automation import get_browser_automation
+
+    filename = request.json.get("filename", f"screenshot_{int(time.time())}.png")
+    file_path = os.path.join(WORKSPACE_DIR, "images", filename)
+
+    browser = get_browser_automation()
+    success = browser.take_screenshot(file_path)
+
+    return jsonify({"success": success, "path": file_path})
+
+
 # === 智能搜索 API ===
+@app.route("/api/search/all", methods=["GET"])
+def search_all():
+    """全局搜索"""
+    from search_engine import get_search_engine
+
+    query = request.args.get("query", "")
+    max_results = int(request.args.get("max_results", 50))
+
+    search_engine = get_search_engine()
+    results = search_engine.search_all(query, max_results)
+
+    return jsonify(results)
+
+
+@app.route("/api/search/files", methods=["GET"])
+def search_files():
+    """搜索文件"""
+    from search_engine import get_search_engine
+
+    query = request.args.get("query", "")
+    max_results = int(request.args.get("max_results", 20))
+
+    search_engine = get_search_engine()
+    results = search_engine.search_files(query, max_results)
+
+    return jsonify({"results": results})
+
+
 # ================= 语音识别 API (新架构) =================
-@app.route('/api/voice/engines', methods=['GET'])
+@app.route("/api/voice/engines", methods=["GET"])
 def voice_engines():
     """获取可用语音引擎列表"""
     try:
         from web.voice_fast import get_available_engines
+
         result = get_available_engines()
         return jsonify(result)
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "engines": [],
-            "message": f"获取引擎列表失败: {str(e)}"
-        }), 500
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "engines": [],
+                    "message": f"获取引擎列表失败: {str(e)}",
+                }
+            ),
+            500,
+        )
 
-@app.route('/api/voice/record', methods=['POST'])
+
+@app.route("/api/voice/record", methods=["POST"])
 def voice_record():
     """录制音频"""
     try:
         data = request.json or {}
-        duration = data.get('duration', 5)
-        
+        duration = data.get("duration", 5)
+
         from web.voice_input import record_audio
+
         result = record_audio(duration=int(duration))
-        
+
         return jsonify(result)
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": f"录音失败: {str(e)}",
-            "audio_file": None
-        }), 500
+        return (
+            jsonify(
+                {"success": False, "message": f"录音失败: {str(e)}", "audio_file": None}
+            ),
+            500,
+        )
 
-@app.route('/api/voice/recognize', methods=['POST'])
+
+@app.route("/api/voice/recognize", methods=["POST"])
 def voice_recognize():
     """识别音频文件"""
     try:
         data = request.json or {}
-        audio_path = data.get('audio_path')
-        engine = data.get('engine', None)
-        
+        audio_path = data.get("audio_path")
+        engine = data.get("engine", None)
+
         if not audio_path:
-            return jsonify({
-                "success": False,
-                "message": "缺少音频文件路径"
-            }), 400
-        
+            return jsonify({"success": False, "message": "缺少音频文件路径"}), 400
+
         from web.voice_input import recognize_audio
+
         result = recognize_audio(audio_path, engine)
-        
+
         return jsonify(result)
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": f"识别失败: {str(e)}"
-        }), 500
+        return jsonify({"success": False, "message": f"识别失败: {str(e)}"}), 500
 
-@app.route('/api/voice/listen', methods=['POST'])
+
+@app.route("/api/voice/listen", methods=["POST"])
 def voice_listen():
     """一键麦克风识别（本地模式 - 优化版：立即启动）"""
     try:
         data = request.json or {}
-        timeout = data.get('timeout', 5)
-        language = data.get('language', 'zh-CN')
-        
+        timeout = data.get("timeout", 5)
+        language = data.get("language", "zh-CN")
+
         # 使用快速本地识别
         from web.voice_fast import recognize_voice
+
         result = recognize_voice(timeout=int(timeout), language=language)
-        
+
         # 优化：设置响应头加快传输
         response = jsonify(result)
-        response.headers['Cache-Control'] = 'no-cache, no-store'
-        response.headers['Content-Type'] = 'application/json; charset=utf-8'
+        response.headers["Cache-Control"] = "no-cache, no-store"
+        response.headers["Content-Type"] = "application/json; charset=utf-8"
         return response
-            
+
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        response = jsonify({
-            "success": False,
-            "text": "",
-            "message": f"语音识别出错: {str(e)}",
-            "engine": "error"
-        })
+        response = jsonify(
+            {
+                "success": False,
+                "text": "",
+                "message": f"语音识别出错: {str(e)}",
+                "engine": "error",
+            }
+        )
         response.status_code = 500
-        response.headers['Cache-Control'] = 'no-cache'
+        response.headers["Cache-Control"] = "no-cache"
         return response
 
 
-@app.route('/api/voice/stream')
+@app.route("/api/voice/stream")
 def voice_stream():
     """流式语音识别 - Vosk 本地离线，实时返回部分/最终结果（SSE）"""
     import json as _json
+
     from flask import Response, stream_with_context
 
     @stream_with_context
     def generate():
         try:
             from web.voice_engine import recognize_stream
+
             for event in recognize_stream(max_wait=8.0, max_speech=30.0):
                 yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
-                if event.get('type') in ('final', 'error'):
+                if event.get("type") in ("final", "error"):
                     break
         except GeneratorExit:
             pass
@@ -15777,57 +16979,61 @@ def voice_stream():
 
     return Response(
         generate(),
-        mimetype='text/event-stream',
+        mimetype="text/event-stream",
         headers={
-            'Cache-Control': 'no-cache, no-transform',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no',
-            'Transfer-Encoding': 'chunked',
-        }
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Transfer-Encoding": "chunked",
+        },
     )
 
 
-@app.route('/api/voice/stop', methods=['POST'])
+@app.route("/api/voice/stop", methods=["POST"])
 def voice_stop():
     """停止当前语音识别流（通知 voice_engine 停止）"""
     try:
         from web.voice_engine import request_stop
+
         request_stop()
     except Exception:
         pass
     return jsonify({"success": True, "message": "已发送停止信号"})
 
 
-@app.route('/api/voice/commands', methods=['GET'])
+@app.route("/api/voice/commands", methods=["GET"])
 def voice_commands():
     """返回内置语音命令列表（供语音面板展示）"""
     commands = [
-        {"name": "发送消息", "description": "说出消息后自动发送",        "keyword": ""},
-        {"name": "新对话",   "description": "说'新对话'开始新聊天",     "keyword": "新对话"},
-        {"name": "清空输入", "description": "说'清空'清除输入框",        "keyword": "清空"},
-        {"name": "重新识别", "description": "再次点击麦克风重新说",      "keyword": ""},
+        {"name": "发送消息", "description": "说出消息后自动发送", "keyword": ""},
+        {"name": "新对话", "description": "说'新对话'开始新聊天", "keyword": "新对话"},
+        {"name": "清空输入", "description": "说'清空'清除输入框", "keyword": "清空"},
+        {"name": "重新识别", "description": "再次点击麦克风重新说", "keyword": ""},
     ]
     return jsonify({"success": True, "commands": commands})
 
 
-@app.route('/api/voice/stt_status', methods=['GET'])
+@app.route("/api/voice/stt_status", methods=["GET"])
 def voice_stt_status():
     """查询当前语音引擎状态（使用新 voice_engine）。"""
     try:
         from web.voice_engine import get_status
+
         fast = get_status()
     except Exception:
         fast = {"available": False, "engine": "unavailable", "label": "无引擎"}
 
-    return jsonify({
-        "fast":   fast,
-        "local":  fast,   # 兼容前端旧字段
-        "active": fast.get("engine", "none"),
-    })
+    return jsonify(
+        {
+            "fast": fast,
+            "local": fast,  # 兼容前端旧字段
+            "active": fast.get("engine", "none"),
+        }
+    )
 
 
-@app.route('/api/voice/gemini_stt', methods=['POST'])
-@app.route('/api/voice/stt',        methods=['POST'])   # 统一入口别名
+@app.route("/api/voice/gemini_stt", methods=["POST"])
+@app.route("/api/voice/stt", methods=["POST"])  # 统一入口别名
 def voice_gemini_stt():
     """
     统一语音转文字 (STT) 入口：本地 Whisper 优先 → Gemini STT 备用。
@@ -15837,80 +17043,220 @@ def voice_gemini_stt():
     - 始终返回 JSON，绝不返回 HTML 错误页面。
     """
     try:
-        data      = request.get_json(silent=True) or {}
-        audio_b64 = data.get('audio', '')
-        mime_type = data.get('mime', 'audio/webm')
+        data = request.get_json(silent=True) or {}
+        audio_b64 = data.get("audio", "")
+        mime_type = data.get("mime", "audio/webm")
 
         if not audio_b64:
-            return jsonify({"success": False, "text": "", "message": "缺少 audio 字段"}), 400
+            return (
+                jsonify({"success": False, "text": "", "message": "缺少 audio 字段"}),
+                400,
+            )
 
         import base64 as _b64
+
         try:
             audio_bytes = _b64.b64decode(audio_b64)
         except Exception:
-            return jsonify({"success": False, "text": "", "message": "音频 base64 解码失败"}), 400
+            return (
+                jsonify(
+                    {"success": False, "text": "", "message": "音频 base64 解码失败"}
+                ),
+                400,
+            )
 
         if len(audio_bytes) < 300:
-            return jsonify({"success": False, "text": "", "message": "录音太短，请重新说话"})
+            return jsonify(
+                {"success": False, "text": "", "message": "录音太短，请重新说话"}
+            )
 
-        print(f"[STT] 收到音频 {len(audio_bytes)/1024:.1f}KB  MIME={mime_type}")
+        _app_logger.debug(f"[STT] 收到音频 {len(audio_bytes)/1024:.1f}KB  MIME={mime_type}")
 
         # ── 优先尝试本地 Whisper ──────────────────────────────────────────────
         try:
             from web.local_stt import is_available, transcribe
+
             if is_available():
                 ok, text, engine = transcribe(audio_bytes, mime_type)
                 if ok and text:
-                    return jsonify({"success": True,  "text": text,
-                                    "engine": engine, "message": "识别成功（本地）"})
+                    return jsonify(
+                        {
+                            "success": True,
+                            "text": text,
+                            "engine": engine,
+                            "message": "识别成功（本地）",
+                        }
+                    )
                 # 本地识别出空文本 → 也直接返回（不回退，避免重复计费）
-                return jsonify({"success": False, "text": "",
-                                "engine": engine, "message": "未检测到语音"})
+                return jsonify(
+                    {
+                        "success": False,
+                        "text": "",
+                        "engine": engine,
+                        "message": "未检测到语音",
+                    }
+                )
         except Exception as _le:
-            print(f"[STT] 本地 STT 异常，回退 Gemini: {_le}")
+            _app_logger.debug(f"[STT] 本地 STT 异常，回退 Gemini: {_le}")
 
         # ── 回退：Gemini STT ──────────────────────────────────────────────────
         if client is None:
-            return jsonify({"success": False, "text": "",
-                            "message": "Gemini 客户端未初始化，请检查 API Key；"
-                                       "或安装 faster-whisper 使用本地识别"}), 503
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "text": "",
+                        "message": "Gemini 客户端未初始化，请检查 API Key；"
+                        "或安装 faster-whisper 使用本地识别",
+                    }
+                ),
+                503,
+            )
 
         stt_model = "gemini-2.0-flash-lite"
         prompt_parts = [
             types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
-            types.Part.from_text(text=(
-                "请将上面音频中的语音内容完整转写为文字。"
-                "只输出转写结果，不要加任何解释、标点修饰或前缀（如「转写：」等）。"
-                "如果听不清或没有语音，只输出空字符串。"
-            )),
+            types.Part.from_text(
+                text=(
+                    "请将上面音频中的语音内容完整转写为文字。"
+                    "只输出转写结果，不要加任何解释、标点修饰或前缀（如「转写：」等）。"
+                    "如果听不清或没有语音，只输出空字符串。"
+                )
+            ),
         ]
 
         resp = client.models.generate_content(
             model=stt_model,
             contents=[types.Content(role="user", parts=prompt_parts)],
-            config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=512)
+            config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=512),
         )
 
         text = (resp.text or "").strip()
         for prefix in ("转写：", "转写:", "识别：", "识别:", "文字：", "文字:"):
             if text.startswith(prefix):
-                text = text[len(prefix):].strip()
+                text = text[len(prefix) :].strip()
 
-        print(f"[STT] Gemini 识别结果: {text[:80]!r}")
-        return jsonify({
-            "success": bool(text),
-            "text":    text,
-            "engine":  f"Gemini/{stt_model}",
-            "message": "识别成功" if text else "未检测到语音内容"
-        })
+        _app_logger.debug(f"[STT] Gemini 识别结果: {text[:80]!r}")
+        return jsonify(
+            {
+                "success": bool(text),
+                "text": text,
+                "engine": f"Gemini/{stt_model}",
+                "message": "识别成功" if text else "未检测到语音内容",
+            }
+        )
 
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        return jsonify({"success": False, "text": "", "message": f"STT 失败: {str(e)[:200]}"}), 500
+        return (
+            jsonify(
+                {"success": False, "text": "", "message": f"STT 失败: {str(e)[:200]}"}
+            ),
+            500,
+        )
 
 
 # ================= 增强功能 API (场景1-3) =================
+
+
+@app.route("/api/data/extract-transform", methods=["POST"])
+def data_extract_transform():
+    """数据提取与转换 - 场景1：跨应用数据搬运"""
+    try:
+        data = request.json
+        source_type = data.get("source_type", "wechat_contact")
+        source_data = data.get("source_data")
+        target_format = data.get("target_format", "excel")
+        output_filename = data.get(
+            "output_filename", f'提取数据_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+        )
+
+        # 确定输出路径
+        if target_format == "excel":
+            ext = ".xlsx"
+        elif target_format == "csv":
+            ext = ".csv"
+        else:
+            ext = ".json"
+
+        output_path = os.path.join(
+            WORKSPACE_DIR, "documents", f"{output_filename}{ext}"
+        )
+
+        # 执行数据管道
+        from web.data_pipeline import CrossAppDataPipeline
+
+        pipeline = CrossAppDataPipeline()
+        result = pipeline.run_pipeline(
+            source_type, source_data, target_format, output_path
+        )
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/code/generate", methods=["POST"])
+def code_generate():
+    """代码生成 - 场景2：帮助用户完成编程任务"""
+    try:
+        data = request.json
+        template_name = data.get("template_name")
+        description = data.get("description")
+        language = data.get("language", "python")
+        output_filename = data.get("output_filename")
+
+        from web.code_generator import CodeGenerator
+
+        generator = CodeGenerator()
+
+        # 确定输出路径
+        output_path = None
+        if output_filename:
+            output_path = os.path.join(WORKSPACE_DIR, "code", output_filename)
+
+        # 生成代码
+        if template_name:
+            result = generator.generate(
+                template_name, output_path, **data.get("params", {})
+            )
+        elif description:
+            # 使用AI生成（如果可用）
+            result = generator.generate_from_description(description, language)
+        else:
+            return (
+                jsonify(
+                    {"success": False, "error": "需要提供template_name或description"}
+                ),
+                400,
+            )
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/code/templates", methods=["GET"])
+def code_templates():
+    """获取可用代码模板列表"""
+    try:
+        from web.code_generator import CodeGenerator
+
+        generator = CodeGenerator()
+
+        language = request.args.get("language")
+        templates = generator.list_templates(language)
+
+        return jsonify(
+            {"success": True, "templates": templates, "count": len(templates)}
+        )
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/ppt/generate", methods=["POST"])
@@ -15951,6 +17297,64 @@ def ppt_generate():
 
 
 # ==================== 智能文档处理路由 ====================
+
+
+def _should_use_annotation_system(requirement: str, has_file: bool = False) -> bool:
+    """
+    严格判断是否使用文档标注系统（在原文上标红修改）
+
+    标注系统仅适用于：用户明确要求在原文上做标记/批注/标红/Track Changes
+
+    注意："修改"、"优化"、"改善"等词太宽泛，不能单独触发标注。
+    只有与"在原文上"、"标出来"、"标红"等定位词组合才触发。
+    """
+    if not requirement:
+        return False
+
+    requirement_lower = requirement.lower()
+
+    # 第一层：明确的标注/批注关键词 — 直接触发
+    explicit_annotation = [
+        "标注",
+        "标记",
+        "批注",
+        "标出",
+        "标红",
+        "track changes",
+        "批改",
+    ]
+    if any(kw in requirement_lower for kw in explicit_annotation):
+        return True
+
+    # 第二层：编辑意图 + 定位词组合才触发
+    # "修改"单独出现 ≠ 标注，"修改+标出来" = 标注
+    edit_words = ["修改", "改正", "纠正", "校对", "审校", "纠错"]
+    location_words = [
+        "在原文",
+        "原文上",
+        "标出",
+        "标记出",
+        "指出.*位置",
+        "哪些地方",
+        "哪些位置",
+    ]
+    has_edit = any(kw in requirement_lower for kw in edit_words)
+    has_location = any(re.search(kw, requirement_lower) for kw in location_words)
+
+    if has_edit and has_location:
+        return True
+
+    # 第三层：审查/修改+质量描述组合
+    review_words = ["审查", "评审", "审核", "改善", "优化", "修改", "润色", "调整"]
+    quality_words = ["不合适", "生硬", "翻译腔", "语序", "用词", "逻辑", "问题"]
+    has_review = any(kw in requirement_lower for kw in review_words)
+    has_quality = any(kw in requirement_lower for kw in quality_words)
+
+    if has_review and has_quality:
+        return True
+
+    # 默认不触发 — 宁可漏判也不误判
+    return False
 
 
 def _is_analysis_request(requirement: str) -> bool:
@@ -16118,7 +17522,7 @@ def _is_explicit_file_gen_request(requirement: str) -> bool:
     return any(kw in requirement_lower for kw in gen_keywords)
 
 
-@app.route('/api/document/smart-process', methods=['POST'])
+@app.route("/api/document/smart-process", methods=["POST"])
 def document_smart_process():
     """
     智能文档处理入口
@@ -16126,37 +17530,32 @@ def document_smart_process():
     """
     try:
         data = request.json
-        file_path = data.get('file_path')
-        requirement = data.get('requirement', '')
-        
+        file_path = data.get("file_path")
+        requirement = data.get("requirement", "")
+
         if not file_path:
-            return jsonify({
-                "success": False,
-                "error": "缺少file_path参数"
-            }), 400
-        
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
         # 智能判断应该用哪个系统
         use_annotation = _should_use_annotation_system(requirement)
-        
-        print(f"[SmartProcess] 智能判断: use_annotation={use_annotation}")
-        print(f"[SmartProcess] 需求: {requirement[:100]}")
-        
+
+        _app_logger.debug(f"[SmartProcess] 智能判断: use_annotation={use_annotation}")
+        _app_logger.debug(f"[SmartProcess] 需求: {requirement[:100]}")
+
         if use_annotation:
             # 使用文档标注系统
-            print(f"[SmartProcess] 路由到: 文档自动标注系统")
+            _app_logger.debug(f"[SmartProcess] 路由到: 文档自动标注系统")
             return _call_document_annotate(file_path, requirement)
         else:
             # 使用传统的文件分析系统
-            print(f"[SmartProcess] 路由到: 文件分析系统")
+            _app_logger.debug(f"[SmartProcess] 路由到: 文件分析系统")
             return _call_document_analysis(file_path, requirement)
-    
+
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 def _call_document_annotate(file_path: str, requirement: str):
@@ -16164,35 +17563,33 @@ def _call_document_annotate(file_path: str, requirement: str):
     try:
         # 转换为绝对路径
         if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, 'documents', file_path)
-        
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
         if not os.path.exists(file_path):
-            return jsonify({
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }), 404
-        
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
         from web.document_feedback import DocumentFeedbackSystem
         feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         result = feedback_system.full_annotation_loop(
             file_path=file_path,
             user_requirement=requirement,
-            model_id="gemini-3-pro-preview"
+            model_id="gemini-3.1-pro-preview"
         )
-        
+
         # 添加处理模式标记
-        result['processing_mode'] = 'annotation'
-        result['mode_description'] = '文档自动标注'
-        
+        result["processing_mode"] = "annotation"
+        result["mode_description"] = "文档自动标注"
+
         return jsonify(result)
-    
+
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "processing_mode": "annotation"
-        }), 500
+        return (
+            jsonify(
+                {"success": False, "error": str(e), "processing_mode": "annotation"}
+            ),
+            500,
+        )
 
 
 def _call_document_analysis(file_path: str, requirement: str):
@@ -16200,46 +17597,44 @@ def _call_document_analysis(file_path: str, requirement: str):
     try:
         # 这里调用现有的文件分析逻辑
         # 临时返回说明（实际应该调用现有的分析端点）
-        return jsonify({
-            "success": False,
-            "error": "文件分析系统需要单独实现",
-            "processing_mode": "analysis",
-            "mode_description": "文件分析"
-        }), 501
-    
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "文件分析系统需要单独实现",
+                    "processing_mode": "analysis",
+                    "mode_description": "文件分析",
+                }
+            ),
+            501,
+        )
+
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "processing_mode": "analysis"
-        }), 500
+        return (
+            jsonify({"success": False, "error": str(e), "processing_mode": "analysis"}),
+            500,
+        )
 
 
-@app.route('/api/document/feedback', methods=['POST'])
+@app.route("/api/document/feedback", methods=["POST"])
 def document_feedback():
     """文档智能反馈：读取文档 → AI分析 → 应用修改"""
     try:
         data = request.json
-        file_path = data.get('file_path')
-        user_requirement = data.get('requirement', '')
-        auto_apply = data.get('auto_apply', True)
-        
+        file_path = data.get("file_path")
+        user_requirement = data.get("requirement", "")
+        auto_apply = data.get("auto_apply", True)
+
         if not file_path:
-            return jsonify({
-                "success": False,
-                "error": "缺少file_path参数"
-            }), 400
-        
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
         # 转换为绝对路径
         if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, 'documents', file_path)
-        
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
         if not os.path.exists(file_path):
-            return jsonify({
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }), 404
-        
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
         feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
@@ -16248,184 +17643,152 @@ def document_feedback():
         result = feedback_system.full_feedback_loop(
             file_path=file_path,
             user_requirement=user_requirement,
-            auto_apply=auto_apply
+            auto_apply=auto_apply,
         )
-        
+
         return jsonify(result)
-        
+
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/document/analyze', methods=['POST'])
+@app.route("/api/document/analyze", methods=["POST"])
 def document_analyze():
     """仅分析文档，不应用修改"""
     try:
         data = request.json
-        file_path = data.get('file_path')
-        user_requirement = data.get('requirement', '')
-        
+        file_path = data.get("file_path")
+        user_requirement = data.get("requirement", "")
+
         if not file_path:
-            return jsonify({
-                "success": False,
-                "error": "缺少file_path参数"
-            }), 400
-        
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
         # 转换为绝对路径
         if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, 'documents', file_path)
-        
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
         if not os.path.exists(file_path):
-            return jsonify({
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }), 404
-        
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
         feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         # 仅分析
         result = feedback_system.analyze_and_suggest(
-            file_path=file_path,
-            user_requirement=user_requirement
+            file_path=file_path, user_requirement=user_requirement
         )
-        
+
         return jsonify(result)
-        
+
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/document/apply', methods=['POST'])
+@app.route("/api/document/apply", methods=["POST"])
 def document_apply():
     """应用修改建议到文档"""
     try:
         data = request.json
-        file_path = data.get('file_path')
-        modifications = data.get('modifications', [])
-        
+        file_path = data.get("file_path")
+        modifications = data.get("modifications", [])
+
         if not file_path or not modifications:
-            return jsonify({
-                "success": False,
-                "error": "缺少file_path或modifications参数"
-            }), 400
-        
+            return (
+                jsonify(
+                    {"success": False, "error": "缺少file_path或modifications参数"}
+                ),
+                400,
+            )
+
         # 转换为绝对路径
         if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, 'documents', file_path)
-        
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
         if not os.path.exists(file_path):
-            return jsonify({
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }), 404
-        
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
         # 应用修改
         from web.document_feedback import DocumentFeedbackSystem
         feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         result = feedback_system.apply_suggestions(
-            file_path=file_path,
-            modifications=modifications
+            file_path=file_path, modifications=modifications
         )
-        
+
         return jsonify(result)
-        
+
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/document/annotate', methods=['POST'])
+@app.route("/api/document/annotate", methods=["POST"])
 def document_annotate():
     """文档自动标注：AI分析 -> 生成标注 -> 应用到副本"""
     try:
         data = request.json
         file_path = data.get('file_path')
         user_requirement = data.get('requirement', '')
-        model_id = data.get('model_id', 'gemini-3-pro-preview')
+        model_id = data.get('model_id', 'gemini-3.1-pro-preview')
         
         if not file_path:
-            return jsonify({
-                "success": False,
-                "error": "缺少file_path参数"
-            }), 400
-        
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
         # 转换为绝对路径
         if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, 'documents', file_path)
-        
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
         if not os.path.exists(file_path):
-            return jsonify({
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }), 404
-        
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
         # 初始化反馈系统
         from web.document_feedback import DocumentFeedbackSystem
         feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         # 执行完整标注闭环
         result = feedback_system.full_annotation_loop(
-            file_path=file_path,
-            user_requirement=user_requirement,
-            model_id=model_id
+            file_path=file_path, user_requirement=user_requirement, model_id=model_id
         )
-        
+
         return jsonify(result)
-        
+
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/document/analyze-annotations', methods=['POST'])
+@app.route("/api/document/analyze-annotations", methods=["POST"])
 def document_analyze_annotations():
     """仅分析文档并生成标注建议（不应用）- 已弃用，请使用 /api/document/batch-annotate-stream"""
     try:
         data = request.json
-        file_path = data.get('file_path')
-        user_requirement = data.get('requirement', '')
-        
+        file_path = data.get("file_path")
+        user_requirement = data.get("requirement", "")
+
         if not file_path:
-            return jsonify({
-                "success": False,
-                "error": "缺少file_path参数"
-            }), 400
-        
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
         # 转换为绝对路径
         if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, 'documents', file_path)
-        
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
         if not os.path.exists(file_path):
-            return jsonify({
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }), 404
-        
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
         # 使用V2批量标注系统（立即返回结果，不流式）
         from web.document_direct_edit import ImprovedBatchAnnotator
+
         annotator = ImprovedBatchAnnotator(gemini_client=client, batch_size=5)
-        
+
         # 收集所有事件（非流式）
         events = []
         final_result = None
-        
+
         for event in annotator.annotate_document_streaming(file_path, user_requirement):
             # 解析事件
             if event.startswith("event: complete"):
@@ -16433,35 +17796,26 @@ def document_analyze_annotations():
                 if data_line.startswith("data: "):
                     final_result = json.loads(data_line[6:])
             events.append(event)
-        
+
         if final_result:
-            return jsonify({
-                "success": True,
-                **final_result
-            })
+            return jsonify({"success": True, **final_result})
         else:
-            return jsonify({
-                "success": False,
-                "error": "处理失败，未收到完成事件"
-            }), 500
-        
+            return jsonify({"success": False, "error": "处理失败，未收到完成事件"}), 500
+
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/document/batch-annotate-stream', methods=['POST'])
+@app.route("/api/document/batch-annotate-stream", methods=["POST"])
 def document_batch_annotate_stream():
     """
     批量标注文档（SSE流式返回，实时反馈进度）
-    
+
     接收参数:
         file_path: 文档路径
         requirement: 用户需求（可选）
         batch_size: 每批处理段落数（默认5）
-    
+
     返回: SSE事件流
         event: progress - 进度更新
         event: batch_complete - 批次完成
@@ -16470,91 +17824,77 @@ def document_batch_annotate_stream():
     """
     try:
         data = request.json
-        file_path = data.get('file_path')
-        user_requirement = data.get('requirement', '')
-        batch_size = data.get('batch_size', 5)
-        
+        file_path = data.get("file_path")
+        user_requirement = data.get("requirement", "")
+        batch_size = data.get("batch_size", 5)
+
         if not file_path:
-            return jsonify({
-                "success": False,
-                "error": "缺少file_path参数"
-            }), 400
-        
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
         # 转换为绝对路径
         if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, 'documents', file_path)
-        
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
         if not os.path.exists(file_path):
-            return jsonify({
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }), 404
-        
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
         # 导入V2批量标注系统
         from web.document_batch_annotator_v2 import annotate_large_document
-        
+
         # 返回SSE流
         return Response(
             annotate_large_document(
                 file_path=file_path,
                 user_requirement=user_requirement,
                 gemini_client=client,
-                batch_size=batch_size
+                batch_size=batch_size,
             ),
-            mimetype='text/event-stream',
+            mimetype="text/event-stream",
             headers={
-                'Cache-Control': 'no-cache',
-                'X-Accel-Buffering': 'no',
-                'Connection': 'keep-alive'
-            }
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
         )
-        
+
     except Exception as e:
         import traceback
+
         traceback.print_exc()
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route('/api/document/apply-annotations', methods=['POST'])
+@app.route("/api/document/apply-annotations", methods=["POST"])
 def document_apply_annotations():
     """应用标注建议到文档"""
     try:
         data = request.json
-        file_path = data.get('file_path')
-        annotations = data.get('annotations', [])
-        
+        file_path = data.get("file_path")
+        annotations = data.get("annotations", [])
+
         if not file_path or not annotations:
-            return jsonify({
-                "success": False,
-                "error": "缺少file_path或annotations参数"
-            }), 400
-        
+            return (
+                jsonify({"success": False, "error": "缺少file_path或annotations参数"}),
+                400,
+            )
+
         # 转换为绝对路径
         if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, 'documents', file_path)
-        
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
         if not os.path.exists(file_path):
-            return jsonify({
-                "success": False,
-                "error": f"文件不存在: {file_path}"
-            }), 404
-        
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
         # 应用标注
         from web.document_feedback import DocumentFeedbackSystem
         feedback_system = DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-3.1-pro-preview")
         
         result = feedback_system.annotate_document(file_path, annotations)
-        
+
         return jsonify(result)
-        
+
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ==================== 新功能 API 路由 ====================
@@ -16562,16 +17902,668 @@ def document_apply_annotations():
 # ==================== 改进的建议式标注 API ====================
 
 
+@app.route("/api/document/suggest-stream", methods=["POST"])
+def document_suggest_stream():
+    """
+    生成修改建议流（SSE）
+
+    请求参数:
+        file_path: 文档路径
+        requirement: 用户需求（可选）
+
+    返回: SSE事件流
+        event: progress - 进度
+        event: suggestion - 单个建议
+        event: suggestions_complete - 所有建议完成
+        event: complete - 完成
+    """
+    try:
+        data = request.json
+        file_path = data.get("file_path")
+        user_requirement = data.get("requirement", "")
+
+        if not file_path:
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
+        # 转换为绝对路径
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
+        if not os.path.exists(file_path):
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
+        # 使用建议式标注器
+        from web.suggestion_annotator import SuggestionAnnotator
+
+        annotator = SuggestionAnnotator(batch_size=3)
+
+        # 返回SSE流
+        return Response(
+            annotator.analyze_document_streaming(file_path, user_requirement),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/document/apply-suggestions", methods=["POST"])
+def document_apply_suggestions():
+    """
+    根据用户选择应用修改建议
+
+    请求参数:
+        file_path: 原始文档路径
+        suggestions: 用户的选择列表
+            [
+                {
+                    "id": "s_5_0",
+                    "原文": "在被记录的",
+                    "修改": "在记录的",
+                    "接受": True/False
+                },
+                ...
+            ]
+
+    返回:
+        {
+            "success": True,
+            "output_file": "修改后的文件路径",
+            "applied_count": 实际应用的修改数,
+            "accepted_count": 用户接受的数量
+        }
+    """
+    try:
+        from docx import Document
+
+        data = request.json
+        file_path = data.get("file_path")
+        suggestions = data.get("suggestions", [])
+
+        if not file_path:
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
+        # 转换为绝对路径
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+
+        if not os.path.exists(file_path):
+            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
+
+        # 读取文档
+        doc = Document(file_path)
+
+        # 筛选用户接受的建议
+        accepted_suggestions = [s for s in suggestions if s.get("接受", False)]
+
+        applied_count = 0
+
+        # 应用修改（直接在段落中查找并替换）
+        for suggestion in accepted_suggestions:
+            original = suggestion.get("原文", "")
+            modified = suggestion.get("修改", "")
+
+            if not original or not modified:
+                continue
+
+            # 在所有段落中查找并替换
+            for para in doc.paragraphs:
+                if original in para.text:
+                    # 替换文本
+                    full_text = para.text
+                    new_text = full_text.replace(original, modified, 1)
+
+                    if new_text != full_text:
+                        # 清空并重新添加（保留格式）
+                        para.clear()
+                        para.add_run(new_text)
+                        applied_count += 1
+                        break  # 每个建议只应用一次
+
+            # 检查表格中的文本
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for para in cell.paragraphs:
+                            if original in para.text:
+                                full_text = para.text
+                                new_text = full_text.replace(original, modified, 1)
+                                if new_text != full_text:
+                                    para.clear()
+                                    para.add_run(new_text)
+                                    applied_count += 1
+
+        # 保存为新文件
+        base_name = os.path.splitext(file_path)[0]
+        output_path = f"{base_name}_accepted.docx"
+        doc.save(output_path)
+
+        return jsonify(
+            {
+                "success": True,
+                "output_file": output_path,
+                "applied_count": applied_count,
+                "accepted_count": len(accepted_suggestions),
+                "message": f"已应用 {applied_count} 处修改（用户接受了 {len(accepted_suggestions)} 个建议）",
+            }
+        )
+
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# 知识库 API
+@app.route("/api/knowledge-base/add", methods=["POST"])
+def kb_add_document():
+    """添加文档到知识库"""
+    try:
+        from web.knowledge_base import KnowledgeBase
+
+        data = request.json
+        file_path = data.get("file_path")
+
+        if not file_path:
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
+        kb = KnowledgeBase()
+        result = kb.add_document(file_path)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/knowledge-base/search", methods=["POST"])
+def kb_search():
+    """搜索知识库"""
+    try:
+        from web.knowledge_base import KnowledgeBase
+
+        data = request.json
+        query = data.get("query")
+        max_results = data.get("max_results", 10)
+
+        if not query:
+            return jsonify({"success": False, "error": "缺少query参数"}), 400
+
+        kb = KnowledgeBase()
+        results = kb.search(query, max_results=max_results)
+
+        return jsonify({"success": True, "results": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/knowledge-base/stats", methods=["GET"])
+def kb_stats():
+    """获取知识库统计"""
+    try:
+        from web.knowledge_base import KnowledgeBase
+
+        kb = KnowledgeBase()
+        stats = kb.get_stats()
+
+        return jsonify({"success": True, "stats": stats})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ==================== 文件网络索引 API ====================
 
 
+@app.route("/api/file-network/search", methods=["POST"])
+def file_network_search():
+    """多维查询文件
+
+    请求参数:
+        query: 文本搜索查询（可选）
+        file_type: 文件类型（docx, pdf等，可选）
+        tags: 标签列表（可选）
+        operation: 处理操作（annotate, edit等，可选）
+        date_from: 开始日期（ISO格式，可选）
+        date_to: 结束日期（ISO格式，可选）
+        limit: 返回数量限制（默认50）
+    """
+    try:
+        from web.processed_file_network import get_file_network
+
+        data = request.json or {}
+        file_network = get_file_network()
+
+        result = file_network.search_files(
+            query=data.get("query"),
+            file_type=data.get("file_type"),
+            tags=data.get("tags"),
+            operation=data.get("operation"),
+            date_from=data.get("date_from"),
+            date_to=data.get("date_to"),
+            limit=data.get("limit", 50),
+        )
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/file-network/open", methods=["POST"])
+def file_network_open():
+    """快速打开文件
+
+    请求参数:
+        file_id: 文件ID
+    """
+    try:
+        from web.processed_file_network import get_file_network
+
+        data = request.json
+        file_id = data.get("file_id")
+
+        if not file_id:
+            return jsonify({"success": False, "error": "缺少file_id参数"}), 400
+
+        file_network = get_file_network()
+        result = file_network.open_file(file_id)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/file-network/network", methods=["POST"])
+def file_network_get_network():
+    """获取文件关系网络
+
+    请求参数:
+        file_id: 文件ID
+        depth: 关系深度（1=直接关系，2=二级关系，默认2）
+    """
+    try:
+        from web.processed_file_network import get_file_network
+
+        data = request.json
+        file_id = data.get("file_id")
+        depth = data.get("depth", 2)
+
+        if not file_id:
+            return jsonify({"success": False, "error": "缺少file_id参数"}), 400
+
+        file_network = get_file_network()
+        result = file_network.get_file_network(file_id, depth)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/file-network/statistics", methods=["GET"])
+def file_network_statistics():
+    """获取文件网络统计信息"""
+    try:
+        from web.processed_file_network import get_file_network
+
+        file_network = get_file_network()
+        result = file_network.get_statistics()
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/file-network/register", methods=["POST"])
+def file_network_register():
+    """手动注册文件到网络
+
+    请求参数:
+        file_path: 文件路径
+        tags: 标签列表（可选）
+        extract_snippets: 是否提取文本片段（默认true）
+    """
+    try:
+        from web.processed_file_network import get_file_network
+
+        data = request.json
+        file_path = data.get("file_path")
+
+        if not file_path:
+            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
+
+        file_network = get_file_network()
+        result = file_network.register_file(
+            file_path=file_path,
+            tags=data.get("tags"),
+            extract_snippets=data.get("extract_snippets", True),
+        )
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # 批量处理 API
+@app.route("/api/batch/rename", methods=["POST"])
+def batch_rename():
+    """批量重命名文件"""
+    try:
+        from web.batch_processor import BatchFileProcessor
+
+        data = request.json
+        directory = data.get("directory")
+        pattern = data.get("pattern")
+
+        processor = BatchFileProcessor()
+        result = processor.batch_rename(directory, **pattern)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/batch/convert", methods=["POST"])
+def batch_convert():
+    """批量格式转换"""
+    try:
+        from web.batch_processor import BatchFileProcessor
+
+        data = request.json
+        directory = data.get("directory")
+        from_format = data.get("from_format")
+        to_format = data.get("to_format")
+
+        processor = BatchFileProcessor()
+        result = processor.batch_convert(directory, from_format, to_format)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # 模板库 API
+@app.route("/api/template/list", methods=["GET"])
+def template_list():
+    """获取模板列表"""
+    try:
+        from web.template_library import TemplateLibrary
+
+        library = TemplateLibrary()
+        templates = library.list_templates()
+
+        return jsonify({"success": True, "templates": templates})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/template/generate", methods=["POST"])
+def template_generate():
+    """从模板生成文档"""
+    try:
+        from web.template_library import TemplateLibrary
+
+        data = request.json
+        template_name = data.get("template_id") or data.get("template_name")
+        variables = data.get("variables", {})
+        output_dir = data.get("output_dir")
+        output_file = data.get("output_file")
+        if output_file and not output_dir:
+            if os.path.isdir(output_file):
+                output_dir = output_file
+            else:
+                output_dir = os.path.dirname(output_file) or None
+
+        library = TemplateLibrary()
+        result = library.generate_from_template(template_name, variables, output_dir)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # 一致性检查 API
+@app.route("/api/check/consistency", methods=["POST"])
+def check_consistency():
+    """检查文档一致性"""
+    try:
+        from web.consistency_checker import ConsistencyChecker
+
+        data = request.json
+        file_path = data.get("file_path")
+
+        checker = ConsistencyChecker()
+        result = checker.check_document(file_path)
+        report = checker.generate_report(result)
+
+        return jsonify({"success": True, "result": result, "report": report})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # 文档对比 API
+@app.route("/api/compare/documents", methods=["POST"])
+def compare_documents():
+    """对比文档"""
+    try:
+        from web.document_comparator import DocumentComparator
+
+        data = request.json
+        file_a = data.get("file_a")
+        file_b = data.get("file_b")
+        output_format = data.get("output_format", "markdown")
+
+        comparator = DocumentComparator()
+        result = comparator.compare_documents(file_a, file_b, output_format)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # OCR 助手 API
+@app.route("/api/ocr/screenshot", methods=["POST"])
+def ocr_screenshot():
+    """截图并OCR"""
+    try:
+        from web.clipboard_ocr_assistant import ClipboardOCRAssistant
+
+        data = request.json
+        save_image = data.get("save_image", True)
+        auto_index = data.get("auto_index", False)
+
+        assistant = ClipboardOCRAssistant()
+        result = assistant.capture_and_ocr(source="screenshot", save_image=save_image)
+
+        if auto_index and result.get("ocr_success"):
+            assistant.auto_index_to_knowledge_base(result)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/ocr/clipboard", methods=["POST"])
+def ocr_clipboard():
+    """剪贴板图片OCR"""
+    try:
+        from web.clipboard_ocr_assistant import ClipboardOCRAssistant
+
+        data = request.json
+        save_image = data.get("save_image", True)
+        auto_index = data.get("auto_index", False)
+
+        assistant = ClipboardOCRAssistant()
+        result = assistant.capture_and_ocr(source="clipboard", save_image=save_image)
+
+        if auto_index and result.get("ocr_success"):
+            assistant.auto_index_to_knowledge_base(result)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # 操作历史 API
+@app.route("/api/history/list", methods=["GET"])
+def history_list():
+    """获取操作历史"""
+    try:
+        from web.operation_history import OperationHistory
+
+        limit = request.args.get("limit", 50, type=int)
+        file_path = request.args.get("file_path")
+
+        history = OperationHistory()
+        operations = history.get_history(limit=limit, file_path=file_path)
+
+        return jsonify({"success": True, "operations": operations})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/history/rollback/<op_id>", methods=["POST"])
+def history_rollback(op_id):
+    """回滚操作"""
+    try:
+        from web.operation_history import OperationHistory
+
+        history = OperationHistory()
+        result = history.rollback(op_id)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/history/stats", methods=["GET"])
+def history_stats():
+    """获取历史统计"""
+    try:
+        from web.operation_history import OperationHistory
+
+        history = OperationHistory()
+        stats = history.get_statistics()
+
+        return jsonify({"success": True, "stats": stats})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # 语音转写 API
+@app.route("/api/speech/transcribe-file", methods=["POST"])
+def speech_transcribe_file():
+    """转写音频文件"""
+    try:
+        from web.speech_transcriber import SpeechTranscriber
+
+        data = request.json
+        audio_path = data.get("audio_path")
+        language = data.get("language", "zh-CN")
+        output_format = data.get("output_format", "txt")
+        title = data.get("title")
+        auto_summary = data.get("auto_summary", True)
+
+        if not audio_path:
+            return jsonify({"success": False, "error": "缺少audio_path参数"}), 400
+
+        transcriber = SpeechTranscriber()
+        result = transcriber.process_audio_complete(
+            audio_path,
+            language=language,
+            output_format=output_format,
+            title=title,
+            auto_summary=auto_summary,
+        )
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/speech/transcribe-microphone", methods=["POST"])
+def speech_transcribe_microphone():
+    """从麦克风录音并转写"""
+    try:
+        from web.speech_transcriber import SpeechTranscriber
+
+        data = request.json
+        duration = data.get("duration", 30)
+        language = data.get("language", "zh-CN")
+        output_format = data.get("output_format", "txt")
+        title = data.get("title")
+
+        transcriber = SpeechTranscriber()
+
+        # 录音
+        mic_result = transcriber.transcribe_microphone(
+            duration=duration, language=language
+        )
+
+        if not mic_result["success"]:
+            return jsonify(mic_result), 400
+
+        text = mic_result["text"]
+
+        # 提取总结
+        summary_result = transcriber.extract_keywords_and_summary(text)
+        keywords = (
+            summary_result.get("keywords", []) if summary_result["success"] else []
+        )
+        summary = summary_result.get("summary", []) if summary_result["success"] else []
+
+        # 生成文档
+        output_file = transcriber.generate_transcript_document(
+            text,
+            keywords=keywords,
+            summary=summary,
+            title=title,
+            output_format=output_format,
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "text": text,
+                "keywords": keywords,
+                "summary": summary,
+                "output_file": output_file,
+                "format": output_format,
+            }
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/speech/extract-summary", methods=["POST"])
+def speech_extract_summary():
+    """从文本提取关键词和总结"""
+    try:
+        from web.speech_transcriber import SpeechTranscriber
+
+        data = request.json
+        text = data.get("text")
+        max_keywords = data.get("max_keywords", 10)
+
+        if not text:
+            return jsonify({"success": False, "error": "缺少text参数"}), 400
+
+        transcriber = SpeechTranscriber()
+        result = transcriber.extract_keywords_and_summary(
+            text, max_keywords=max_keywords
+        )
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 # ================= 主程序入口 =================
 
 # ================= NotebookLM 功能复刻 API =================
@@ -17053,47 +19045,1583 @@ def get_trigger_system():
     return _trigger_system_cache["system"]
 
 
+@app.route("/api/batch/submit", methods=["POST"])
+def batch_submit():
+    """提交批量文件处理任务"""
+    try:
+        data = request.json or {}
+        command = data.get("command", "")
+        manager = get_batch_ops_manager()
+
+        if command:
+            parsed = manager.parse_command(command)
+            if not parsed.get("success"):
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": parsed.get("error"),
+                            "hint": parsed.get("hint"),
+                        }
+                    ),
+                    400,
+                )
+            operation = parsed.get("operation")
+            input_dir = parsed.get("input_dir")
+            output_dir = parsed.get("output_dir")
+            options = parsed.get("options", {})
+        else:
+            operation = data.get("operation")
+            input_dir = data.get("input_dir")
+            output_dir = data.get("output_dir")
+            options = data.get("options", {})
+
+        if not operation or not input_dir or not output_dir:
+            return jsonify({"success": False, "error": "缺少必要参数"}), 400
+
+        job = manager.create_job(
+            name=f"batch_{operation}",
+            operation=operation,
+            input_dir=input_dir,
+            output_dir=output_dir,
+            options=options,
+        )
+        manager.start_job(job.job_id)
+        return jsonify(
+            {"success": True, "job_id": job.job_id, "job": manager.get_job(job.job_id)}
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/batch/jobs", methods=["GET"])
+def batch_list_jobs():
+    """列出批量任务"""
+    manager = get_batch_ops_manager()
+    return jsonify({"success": True, "jobs": manager.list_jobs()})
+
+
+@app.route("/api/batch/jobs/<job_id>", methods=["GET"])
+def batch_get_job(job_id):
+    """获取单个任务详情"""
+    manager = get_batch_ops_manager()
+    job = manager.get_job(job_id)
+    if not job:
+        return jsonify({"success": False, "error": "任务不存在"}), 404
+    return jsonify({"success": True, "job": job})
+
+
+@app.route("/api/batch/stream/<job_id>", methods=["GET"])
+def batch_stream_job(job_id):
+    """批量任务进度流"""
+    manager = get_batch_ops_manager()
+    return Response(manager.stream_job(job_id), mimetype="text/event-stream")
+
+
+@app.route("/api/organize/scan-file", methods=["POST"])
+def organize_scan_file():
+    """扫描和分析单个文件"""
+    try:
+        data = request.json
+        file_path = data.get("file_path")
+
+        if not file_path:
+            return jsonify({"error": "缺少 file_path 参数"}), 400
+
+        if not os.path.exists(file_path):
+            return jsonify({"error": f"文件不存在: {file_path}"}), 404
+
+        analyzer = get_file_analyzer()
+        analysis_result = analyzer.analyze_file(file_path)
+
+        return jsonify(
+            {
+                "success": True,
+                "file": os.path.basename(file_path),
+                "analysis": analysis_result,
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"分析失败: {str(e)}"}), 500
+
+
+@app.route("/api/organize/auto-organize", methods=["POST"])
+def organize_auto_organize():
+    """自动组织文件（分析+移动）"""
+    try:
+        data = request.json
+        file_path = data.get("file_path")
+        auto_confirm = data.get("auto_confirm", True)
+
+        if not file_path:
+            return jsonify({"error": "缺少 file_path 参数"}), 400
+
+        if not os.path.exists(file_path):
+            return jsonify({"error": f"文件不存在: {file_path}"}), 404
+
+        # 第一步：分析文件
+        analyzer = get_file_analyzer()
+        analysis = analyzer.analyze_file(file_path)
+        suggested_folder = analysis.get("suggested_folder")
+
+        if not suggested_folder:
+            return jsonify({"error": "无法确定文件分类", "analysis": analysis}), 400
+
+        # 第二步：组织文件
+        organizer = get_file_organizer()
+        org_result = organizer.organize_file(
+            file_path, suggested_folder, auto_confirm=auto_confirm
+        )
+
+        if org_result.get("success"):
+            return jsonify(
+                {
+                    "success": True,
+                    "file": os.path.basename(file_path),
+                    "analysis": analysis,
+                    "organized": org_result,
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {"error": org_result.get("error", "组织失败"), "analysis": analysis}
+                ),
+                500,
+            )
+
+    except Exception as e:
+        return jsonify({"error": f"自动组织失败: {str(e)}"}), 500
+
+
+@app.route("/api/organize/list-categories", methods=["GET"])
+def organize_list_categories():
+    """列出所有分类和文件夹"""
+    try:
+        organizer = get_file_organizer()
+        folders = organizer.list_organized_folders()
+        stats = organizer.get_categories_stats()
+
+        return jsonify(
+            {
+                "success": True,
+                "folders": folders,
+                "stats": stats,
+                "total_files": len(organizer.get_index().get("files", [])),
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"获取分类失败: {str(e)}"}), 500
+
+
+@app.route("/api/organize/search", methods=["POST"])
+def organize_search():
+    """搜索已组织的文件"""
+    try:
+        data = request.json
+        keyword = data.get("keyword", "")
+
+        if not keyword:
+            return jsonify({"error": "缺少搜索关键词"}), 400
+
+        organizer = get_file_organizer()
+        results = organizer.search_files(keyword)
+
+        return jsonify(
+            {
+                "success": True,
+                "keyword": keyword,
+                "count": len(results),
+                "results": results,
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"搜索失败: {str(e)}"}), 500
+
+
+@app.route("/api/organize/stats", methods=["GET"])
+def organize_stats():
+    """获取组织统计信息"""
+    try:
+        organizer = get_file_organizer()
+        index = organizer.get_index()
+        stats = organizer.get_categories_stats()
+        folders = organizer.list_organized_folders()
+
+        return jsonify(
+            {
+                "success": True,
+                "total_files": index.get("total_files", 0),
+                "total_folders": len(folders),
+                "by_industry": stats,
+                "last_updated": index.get("last_updated"),
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"获取统计失败: {str(e)}"}), 500
+
+
+@app.route("/api/organize/cleanup", methods=["POST"])
+def organize_cleanup():
+    """整合清理 _organize 目录中的重复文件夹"""
+    try:
+        data = request.get_json(silent=True) or {}
+        dry_run = data.get("dry_run", True)
+        ai_rename = data.get("ai_rename", False)
+
+        organize_root = get_organize_root()
+
+        try:
+            from web.organize_cleanup import OrganizeCleanup
+        except ImportError:
+            from organize_cleanup import OrganizeCleanup
+
+        cleanup = OrganizeCleanup(organize_root=organize_root)
+        report = cleanup.run(dry_run=dry_run, ai_rename=ai_rename)
+
+        return jsonify(
+            {
+                "success": True,
+                "dry_run": dry_run,
+                "total_folders_scanned": report.get("total_folders_scanned", 0),
+                "similarity_groups": report.get("similarity_groups", 0),
+                "merge_plans": report.get("merge_plans", 0),
+                "merged_files": report.get("merged_files", 0),
+                "deduped_files": report.get("deduped_files", 0),
+                "removed_folders": report.get("removed_folders", 0),
+                "empty_cleaned": report.get("empty_cleaned", 0),
+                "ai_renames": report.get("ai_renames", 0),
+                "log": report.get("log", [])[-50:],  # 最近50条日志
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"整合清理失败: {str(e)}"}), 500
+
+
 # ═══════════════════════════════════════════════════
 # 文件编辑与搜索 API
+# ═══════════════════════════════════════════════════
+
+
+@app.route("/api/file-editor/read", methods=["POST"])
+def file_editor_read():
+    """读取文件内容"""
+    try:
+        data = request.json or {}
+        file_path = data.get("file_path")
+
+        if not file_path:
+            return jsonify({"error": "缺少文件路径"}), 400
+
+        editor = get_file_editor()
+        result = editor.read_file(file_path)
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/file-editor/write", methods=["POST"])
+def file_editor_write():
+    """写入文件内容"""
+    try:
+        data = request.json or {}
+        file_path = data.get("file_path")
+        content = data.get("content")
+
+        if not file_path or content is None:
+            return jsonify({"error": "缺少必要参数"}), 400
+
+        editor = get_file_editor()
+        result = editor.write_file(file_path, content)
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/file-editor/replace", methods=["POST"])
+def file_editor_replace():
+    """替换文件内容"""
+    try:
+        data = request.json or {}
+        file_path = data.get("file_path")
+        old_text = data.get("old_text")
+        new_text = data.get("new_text")
+        use_regex = data.get("use_regex", False)
+
+        if not all([file_path, old_text is not None, new_text is not None]):
+            return jsonify({"error": "缺少必要参数"}), 400
+
+        editor = get_file_editor()
+        result = editor.replace_text(file_path, old_text, new_text, use_regex=use_regex)
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/file-editor/smart-edit", methods=["POST"])
+def file_editor_smart_edit():
+    """智能编辑（理解自然语言指令）"""
+    try:
+        data = request.json or {}
+        file_path = data.get("file_path")
+        instruction = data.get("instruction")
+
+        if not file_path or not instruction:
+            return jsonify({"error": "缺少必要参数"}), 400
+
+        editor = get_file_editor()
+        result = editor.smart_edit(file_path, instruction)
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/file-search/index", methods=["POST"])
+def file_search_index():
+    """索引文件或目录"""
+    try:
+        data = request.json or {}
+        path = data.get("path")
+        is_directory = data.get("is_directory", False)
+
+        if not path:
+            return jsonify({"error": "缺少路径参数"}), 400
+
+        indexer = get_file_indexer()
+
+        if is_directory:
+            result = indexer.index_directory(path, recursive=True)
+        else:
+            result = indexer.index_file(path)
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/file-search/search", methods=["POST"])
+def file_search_search():
+    """搜索文件"""
+    try:
+        data = request.json or {}
+        query = data.get("query")
+        limit = data.get("limit", 20)
+        file_types = data.get("file_types")
+
+        if not query:
+            return jsonify({"error": "缺少搜索关键词"}), 400
+
+        indexer = get_file_indexer()
+        results = indexer.search(query, limit=limit, file_types=file_types)
+
+        return jsonify({"success": True, "results": results, "count": len(results)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/file-search/find-by-content", methods=["POST"])
+def file_search_find_by_content():
+    """根据内容片段查找文件"""
+    try:
+        data = request.json or {}
+        content_sample = data.get("content")
+        min_similarity = data.get("min_similarity", 0.3)
+
+        if not content_sample:
+            return jsonify({"error": "缺少内容样本"}), 400
+
+        indexer = get_file_indexer()
+        results = indexer.find_by_content(content_sample, min_similarity=min_similarity)
+
+        return jsonify({"success": True, "results": results, "count": len(results)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/file-search/list", methods=["GET"])
+def file_search_list():
+    """列出所有已索引文件"""
+    try:
+        limit = request.args.get("limit", 100, type=int)
+        offset = request.args.get("offset", 0, type=int)
+
+        indexer = get_file_indexer()
+        files = indexer.list_indexed_files(limit=limit, offset=offset)
+
+        return jsonify({"success": True, "files": files, "count": len(files)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════
 # 全盘文件扫描 API  (FileScanner)
+# ═══════════════════════════════════════════════════
+
+
+@app.route("/api/scan/start", methods=["POST"])
+def scan_start():
+    """启动全盘文件扫描（后台线程）"""
+    try:
+        from web.file_scanner import FileScanner
+
+        data = request.json or {}
+        drives = data.get("drives")  # None → 自动枚举所有分区
+        already = not FileScanner.start_scan(drives=drives)
+        return jsonify(
+            {
+                "success": True,
+                "already_running": already,
+                "drives": drives or FileScanner.get_drives(),
+                "message": (
+                    "扫描已在进行中" if already else "全盘扫描已启动（后台运行）"
+                ),
+            }
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/scan/status", methods=["GET"])
+def scan_status():
+    """返回扫描进度和统计"""
+    try:
+        from web.file_scanner import FileScanner
+
+        return jsonify(
+            {
+                "success": True,
+                **FileScanner.get_status(),
+                "indexed_count": FileScanner.stats()["total"],
+                "by_category": FileScanner.stats()["by_category"],
+            }
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/scan/search", methods=["POST"])
+def scan_search():
+    """全盘文件名模糊搜索"""
+    try:
+        from web.file_scanner import FileScanner
+
+        data = request.json or {}
+        query = (data.get("query") or "").strip()
+        limit = int(data.get("limit", 12))
+        ext_filter = data.get("ext_filter")  # ['.docx', ...] or None
+        category_filter = data.get("category")  # '文档' / '图片' / ... or None
+        if not query:
+            return jsonify({"success": False, "error": "缺少 query 参数"}), 400
+        FileScanner.ensure_loaded()
+        results = FileScanner.search(
+            query, limit=limit, ext_filter=ext_filter, category_filter=category_filter
+        )
+        return jsonify({"success": True, "results": results, "count": len(results)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/scan/open", methods=["POST"])
+def scan_open():
+    """用系统默认程序打开指定绝对路径文件"""
+    try:
+        from web.file_scanner import FileScanner
+
+        data = request.json or {}
+        path = (data.get("path") or "").strip()
+        if not path:
+            return jsonify({"success": False, "error": "缺少 path 参数"}), 400
+        result = FileScanner.open_file(path)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/scan/stats", methods=["GET"])
+def scan_stats():
+    """索引统计数据"""
+    try:
+        from web.file_scanner import FileScanner
+
+        return jsonify({"success": True, **FileScanner.stats()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════
 # 概念提取 API
+# ═══════════════════════════════════════════════════
+
+
+@app.route("/api/concepts/extract", methods=["POST"])
+def concepts_extract():
+    """从文件中提取关键概念"""
+    try:
+        data = request.json or {}
+        file_path = data.get("file_path")
+        content = data.get("content")  # 可选，如果已读取内容
+        top_n = data.get("top_n", 10)
+
+        if not file_path:
+            return jsonify({"error": "缺少文件路径"}), 400
+
+        extractor = get_concept_extractor()
+        result = extractor.analyze_file(file_path, content=content)
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/concepts/related-files", methods=["POST"])
+def concepts_related_files():
+    """查找与文件相关的其他文件"""
+    try:
+        data = request.json or {}
+        file_path = data.get("file_path")
+        limit = data.get("limit", 5)
+
+        if not file_path:
+            return jsonify({"error": "缺少文件路径"}), 400
+
+        extractor = get_concept_extractor()
+        related = extractor.find_related_files(file_path, limit=limit)
+
+        return jsonify(
+            {"success": True, "file_path": file_path, "related_files": related}
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/concepts/top", methods=["GET"])
+def concepts_top():
+    """获取全局热门概念"""
+    try:
+        limit = request.args.get("limit", 20, type=int)
+
+        extractor = get_concept_extractor()
+        concepts = extractor.get_top_concepts(limit=limit)
+
+        return jsonify({"success": True, "concepts": concepts})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/concepts/stats", methods=["GET"])
+def concepts_stats():
+    """获取概念提取统计"""
+    try:
+        extractor = get_concept_extractor()
+        stats = extractor.get_statistics()
+
+        return jsonify(stats)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════
 # 知识图谱 API
+# ═══════════════════════════════════════════════════
+
+
+@app.route("/api/knowledge-graph/build", methods=["POST"])
+def knowledge_graph_build():
+    """构建知识图谱"""
+    try:
+        data = request.json or {}
+        file_paths = data.get("file_paths", [])
+        force_rebuild = data.get("force_rebuild", False)
+
+        if not file_paths:
+            return jsonify({"error": "缺少文件路径列表"}), 400
+
+        kg = get_knowledge_graph()
+        kg.build_file_graph(file_paths, force_rebuild=force_rebuild)
+
+        stats = kg.get_statistics()
+
+        return jsonify(
+            {"success": True, "message": "知识图谱构建完成", "statistics": stats}
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/knowledge-graph/data", methods=["GET"])
+def knowledge_graph_data():
+    """获取知识图谱数据用于可视化"""
+    try:
+        max_nodes = request.args.get("max_nodes", 100, type=int)
+
+        kg = get_knowledge_graph()
+        graph_data = kg.get_graph_data(max_nodes=max_nodes)
+
+        return jsonify(graph_data)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/knowledge-graph/neighbors", methods=["POST"])
+def knowledge_graph_neighbors():
+    """获取文件的邻居节点"""
+    try:
+        data = request.json or {}
+        file_path = data.get("file_path")
+        depth = data.get("depth", 1)
+
+        if not file_path:
+            return jsonify({"error": "缺少文件路径"}), 400
+
+        kg = get_knowledge_graph()
+        neighbors = kg.get_file_neighbors(file_path, depth=depth)
+
+        return jsonify(neighbors)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/knowledge-graph/concept-cluster", methods=["POST"])
+def knowledge_graph_concept_cluster():
+    """获取概念相关的文件集群"""
+    try:
+        data = request.json or {}
+        concept = data.get("concept")
+        limit = data.get("limit", 20)
+
+        if not concept:
+            return jsonify({"error": "缺少概念参数"}), 400
+
+        kg = get_knowledge_graph()
+        cluster = kg.get_concept_cluster(concept, limit=limit)
+
+        return jsonify(cluster)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/knowledge-graph/stats", methods=["GET"])
+def knowledge_graph_stats():
+    """获取知识图谱统计"""
+    try:
+        kg = get_knowledge_graph()
+        stats = kg.get_statistics()
+
+        return jsonify(stats)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════
 # 行为监控 API
+# ═══════════════════════════════════════════════════
+
+
+@app.route("/api/behavior/log-event", methods=["POST"])
+def behavior_log_event():
+    """记录用户行为事件"""
+    try:
+        data = request.json or {}
+        event_type = data.get("event_type")
+        file_path = data.get("file_path")
+        session_id = data.get("session_id")
+        event_data = data.get("event_data")
+        duration_ms = data.get("duration_ms")
+        user_id = data.get("user_id", "default")
+        auto_trigger = data.get("auto_trigger", True)
+
+        if not event_type:
+            return jsonify({"error": "缺少事件类型"}), 400
+
+        monitor = get_behavior_monitor()
+        event_id = monitor.log_event(
+            event_type=event_type,
+            file_path=file_path,
+            session_id=session_id,
+            event_data=event_data,
+            duration_ms=duration_ms,
+        )
+
+        decision_payload = None
+        triggered = False
+        if auto_trigger:
+            trigger_system = get_trigger_system()
+            decision = trigger_system.evaluate_interaction_need(user_id)
+            if decision and decision.should_interact:
+                trigger_system.execute_interaction(decision, user_id)
+                triggered = True
+                decision_payload = {
+                    "interaction_type": decision.interaction_type.value,
+                    "priority": decision.priority,
+                    "reason": decision.reason,
+                    "content": decision.content,
+                    "scores": {
+                        "urgency": decision.urgency_score,
+                        "importance": decision.importance_score,
+                        "disturbance": decision.disturbance_cost,
+                        "final": decision.final_score,
+                    },
+                }
+
+        return jsonify(
+            {
+                "success": True,
+                "event_id": event_id,
+                "triggered": triggered,
+                "decision": decision_payload,
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/behavior/recent-events", methods=["GET"])
+def behavior_recent_events():
+    """获取最近的事件"""
+    try:
+        limit = request.args.get("limit", 50, type=int)
+        event_type = request.args.get("event_type")
+
+        monitor = get_behavior_monitor()
+        events = monitor.get_recent_events(limit=limit, event_type=event_type)
+
+        return jsonify({"success": True, "events": events})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/behavior/top-files", methods=["GET"])
+def behavior_top_files():
+    """获取最常用的文件"""
+    try:
+        limit = request.args.get("limit", 10, type=int)
+
+        monitor = get_behavior_monitor()
+        files = monitor.get_frequently_used_files(limit=limit)
+
+        return jsonify({"success": True, "files": files})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/behavior/work-patterns", methods=["GET"])
+def behavior_work_patterns():
+    """获取工作模式分析"""
+    try:
+        monitor = get_behavior_monitor()
+        patterns = monitor.get_work_patterns()
+
+        return jsonify(patterns)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/behavior/stats", methods=["GET"])
+def behavior_stats():
+    """获取行为统计"""
+    try:
+        monitor = get_behavior_monitor()
+        stats = monitor.get_statistics()
+
+        return jsonify(stats)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════
 # 智能建议 API
+# ═══════════════════════════════════════════════════
+
+
+@app.route("/api/suggestions/generate", methods=["POST"])
+def suggestions_generate():
+    """生成智能建议"""
+    try:
+        data = request.json or {}
+        force_regenerate = data.get("force_regenerate", False)
+
+        engine = get_suggestion_engine()
+        suggestions = engine.generate_suggestions(force_regenerate=force_regenerate)
+
+        return jsonify(
+            {"success": True, "suggestions": suggestions, "count": len(suggestions)}
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/suggestions/pending", methods=["GET"])
+def suggestions_pending():
+    """获取待处理的建议"""
+    try:
+        limit = request.args.get("limit", 10, type=int)
+
+        engine = get_suggestion_engine()
+        suggestions = engine.get_pending_suggestions(limit=limit)
+
+        return jsonify(
+            {"success": True, "suggestions": suggestions, "count": len(suggestions)}
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/suggestions/dismiss", methods=["POST"])
+def suggestions_dismiss():
+    """拒绝建议"""
+    try:
+        data = request.json or {}
+        suggestion_id = data.get("suggestion_id")
+        feedback = data.get("feedback")
+
+        if not suggestion_id:
+            return jsonify({"error": "缺少建议ID"}), 400
+
+        engine = get_suggestion_engine()
+        engine.dismiss_suggestion(suggestion_id, feedback=feedback)
+
+        return jsonify({"success": True, "message": "建议已拒绝"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/suggestions/apply", methods=["POST"])
+def suggestions_apply():
+    """应用建议"""
+    try:
+        data = request.json or {}
+        suggestion_id = data.get("suggestion_id")
+        feedback = data.get("feedback")
+
+        if not suggestion_id:
+            return jsonify({"error": "缺少建议ID"}), 400
+
+        engine = get_suggestion_engine()
+        engine.apply_suggestion(suggestion_id, feedback=feedback)
+
+        return jsonify({"success": True, "message": "建议已应用"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/suggestions/stats", methods=["GET"])
+def suggestions_stats():
+    """获取建议统计"""
+    try:
+        engine = get_suggestion_engine()
+        stats = engine.get_statistics()
+
+        return jsonify(stats)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════
 # 洞察报告 API
+# ═══════════════════════════════════════════════════
+
+
+@app.route("/api/insights/generate-weekly", methods=["POST"])
+def insights_generate_weekly():
+    """生成周报"""
+    try:
+        reporter = get_insight_reporter()
+        report = reporter.generate_weekly_report()
+
+        return jsonify({"success": True, "report": report})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/insights/generate-monthly", methods=["POST"])
+def insights_generate_monthly():
+    """生成月报"""
+    try:
+        reporter = get_insight_reporter()
+        report = reporter.generate_monthly_report()
+
+        return jsonify({"success": True, "report": report})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/insights/latest", methods=["GET"])
+def insights_latest():
+    """获取最新报告"""
+    try:
+        report_type = request.args.get("type", "weekly")
+
+        reporter = get_insight_reporter()
+        report = reporter.get_latest_report(report_type=report_type)
+
+        if report:
+            return jsonify({"success": True, "report": report})
+        else:
+            return jsonify({"success": False, "message": "暂无报告"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/insights/export-markdown", methods=["POST"])
+def insights_export_markdown():
+    """导出报告为Markdown"""
+    try:
+        data = request.json or {}
+        report = data.get("report")
+        output_path = data.get("output_path", "workspace/report.md")
+
+        if not report:
+            return jsonify({"error": "缺少报告数据"}), 400
+
+        reporter = get_insight_reporter()
+        saved_path = reporter.export_report_markdown(report, output_path)
+
+        return jsonify({"success": True, "file_path": saved_path})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ==================== 通知管理 API ====================
 
 
+@app.route("/api/notifications/unread", methods=["GET"])
+def get_unread_notifications():
+    """获取未读通知"""
+    try:
+        user_id = request.args.get("user_id", "default")
+        limit = int(request.args.get("limit", 50))
+
+        manager = get_notification_manager()
+        notifications = manager.get_unread_notifications(user_id, limit)
+
+        return jsonify(
+            {
+                "success": True,
+                "notifications": notifications,
+                "count": len(notifications),
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/notifications/mark-read", methods=["POST"])
+def mark_notification_read():
+    """标记通知已读"""
+    try:
+        data = request.json or {}
+        notification_id = data.get("notification_id")
+        user_id = data.get("user_id", "default")
+
+        if not notification_id:
+            return jsonify({"error": "缺少notification_id"}), 400
+
+        manager = get_notification_manager()
+        manager.mark_as_read(notification_id, user_id)
+
+        return jsonify({"success": True})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/notifications/dismiss", methods=["POST"])
+def dismiss_notification():
+    """忽略通知"""
+    try:
+        data = request.json or {}
+        notification_id = data.get("notification_id")
+        user_id = data.get("user_id", "default")
+
+        if not notification_id:
+            return jsonify({"error": "缺少notification_id"}), 400
+
+        manager = get_notification_manager()
+        manager.dismiss_notification(notification_id, user_id)
+
+        return jsonify({"success": True})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/notifications/stats", methods=["GET"])
+def get_notification_stats():
+    """获取通知统计"""
+    try:
+        user_id = request.args.get("user_id", "default")
+        days = int(request.args.get("days", 7))
+
+        manager = get_notification_manager()
+        stats = manager.get_notification_stats(user_id, days)
+
+        return jsonify({"success": True, "stats": stats})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/notifications/preferences", methods=["GET", "POST"])
+def notification_preferences():
+    """获取或设置通知偏好"""
+    try:
+        user_id = request.args.get("user_id", "default")
+        manager = get_notification_manager()
+
+        if request.method == "GET":
+            prefs = manager.get_user_preferences(user_id)
+            return jsonify({"success": True, "preferences": prefs})
+
+        else:  # POST
+            data = request.json or {}
+            manager.update_user_preferences(user_id, data)
+            return jsonify({"success": True})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ==================== 主动对话 API ====================
+
+
+@app.route("/api/dialogue/start-monitoring", methods=["POST"])
+def start_dialogue_monitoring():
+    """启动主动对话监控"""
+    try:
+        data = request.json or {}
+        check_interval = data.get("check_interval", 300)  # 默认5分钟
+
+        engine = get_proactive_dialogue()
+        engine.start_monitoring(check_interval)
+
+        return jsonify({"success": True, "message": "主动对话监控已启动"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dialogue/stop-monitoring", methods=["POST"])
+def stop_dialogue_monitoring():
+    """停止主动对话监控"""
+    try:
+        engine = get_proactive_dialogue()
+        engine.stop_monitoring()
+
+        return jsonify({"success": True, "message": "主动对话监控已停止"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dialogue/trigger", methods=["POST"])
+def trigger_dialogue():
+    """手动触发对话"""
+    try:
+        data = request.json or {}
+        user_id = data.get("user_id", "default")
+        scene_type = data.get("scene_type")
+        context = data.get("context", {})
+
+        if not scene_type:
+            return jsonify({"error": "缺少scene_type"}), 400
+
+        engine = get_proactive_dialogue()
+        engine.manual_trigger(user_id, scene_type, **context)
+
+        return jsonify({"success": True, "message": f"已触发{scene_type}对话"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dialogue/history", methods=["GET"])
+def get_dialogue_history():
+    """获取对话历史"""
+    try:
+        user_id = request.args.get("user_id", "default")
+        limit = int(request.args.get("limit", 50))
+
+        engine = get_proactive_dialogue()
+        history = engine.get_dialogue_history(user_id, limit)
+
+        return jsonify({"success": True, "history": history, "count": len(history)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ==================== 情境感知 API ====================
 
 
+@app.route("/api/context/detect", methods=["POST"])
+def detect_context():
+    """检测当前工作场景"""
+    try:
+        data = request.json or {}
+        user_id = data.get("user_id", "default")
+
+        system = get_context_awareness()
+        context = system.detect_context(user_id)
+
+        return jsonify({"success": True, "context": context})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/context/current", methods=["GET"])
+def get_current_context():
+    """获取当前场景"""
+    try:
+        system = get_context_awareness()
+        context = system.get_current_context()
+
+        return jsonify({"success": True, "context": context})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/context/history", methods=["GET"])
+def get_context_history():
+    """获取场景历史"""
+    try:
+        user_id = request.args.get("user_id", "default")
+        days = int(request.args.get("days", 7))
+
+        system = get_context_awareness()
+        history = system.get_context_history(user_id, days)
+
+        return jsonify({"success": True, "history": history, "count": len(history)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/context/statistics", methods=["GET"])
+def get_context_statistics():
+    """获取场景统计"""
+    try:
+        user_id = request.args.get("user_id", "default")
+        days = int(request.args.get("days", 30))
+
+        system = get_context_awareness()
+        stats = system.get_context_statistics(user_id, days)
+
+        return jsonify({"success": True, "statistics": stats})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/context/predict", methods=["GET"])
+def predict_next_context():
+    """预测下一个场景"""
+    try:
+        user_id = request.args.get("user_id", "default")
+
+        system = get_context_awareness()
+        prediction = system.predict_next_context(user_id)
+
+        return jsonify({"success": True, "prediction": prediction})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ==================== 自动执行 API ====================
 
 
+@app.route("/api/execution/authorize", methods=["POST"])
+def authorize_task_execution():
+    """授权任务执行"""
+    try:
+        data = request.json or {}
+        user_id = data.get("user_id", "default")
+        task_type = data.get("task_type")
+        auto_execute = data.get("auto_execute", False)
+        max_executions_per_day = data.get("max_executions_per_day", 10)
+        expires_days = data.get("expires_days", 30)
+
+        if not task_type:
+            return jsonify({"error": "缺少task_type"}), 400
+
+        engine = get_auto_execution()
+        engine.authorize_task(
+            user_id, task_type, auto_execute, max_executions_per_day, expires_days
+        )
+
+        return jsonify({"success": True, "message": f"已授权{task_type}任务"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/execution/revoke", methods=["POST"])
+def revoke_task_authorization():
+    """撤销任务授权"""
+    try:
+        data = request.json or {}
+        user_id = data.get("user_id", "default")
+        task_type = data.get("task_type")
+
+        if not task_type:
+            return jsonify({"error": "缺少task_type"}), 400
+
+        engine = get_auto_execution()
+        engine.revoke_authorization(user_id, task_type)
+
+        return jsonify({"success": True, "message": f"已撤销{task_type}任务授权"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/execution/execute", methods=["POST"])
+def execute_task():
+    """执行任务"""
+    try:
+        data = request.json or {}
+        user_id = data.get("user_id", "default")
+        task_type = data.get("task_type")
+        params = data.get("params", {})
+        force = data.get("force", False)
+
+        if not task_type:
+            return jsonify({"error": "缺少task_type"}), 400
+
+        engine = get_auto_execution()
+        result = engine.execute_task(user_id, task_type, params, force)
+
+        if result["success"]:
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/execution/queue", methods=["POST"])
+def queue_task():
+    """任务加入队列"""
+    try:
+        data = request.json or {}
+        user_id = data.get("user_id", "default")
+        task_type = data.get("task_type")
+        params = data.get("params", {})
+        priority = data.get("priority", 5)
+
+        if not task_type:
+            return jsonify({"error": "缺少task_type"}), 400
+
+        engine = get_auto_execution()
+        task_id = engine.queue_task(user_id, task_type, params, priority)
+
+        return jsonify({"success": True, "task_id": task_id})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/execution/history", methods=["GET"])
+def get_execution_history():
+    """获取执行历史"""
+    try:
+        user_id = request.args.get("user_id", "default")
+        limit = int(request.args.get("limit", 50))
+
+        engine = get_auto_execution()
+        history = engine.get_execution_history(user_id, limit)
+
+        return jsonify({"success": True, "history": history, "count": len(history)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/execution/statistics", methods=["GET"])
+def get_execution_statistics():
+    """获取执行统计"""
+    try:
+        user_id = request.args.get("user_id", "default")
+        days = int(request.args.get("days", 30))
+
+        engine = get_auto_execution()
+        stats = engine.get_statistics(user_id, days)
+
+        return jsonify({"success": True, "statistics": stats})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/execution/start-processor", methods=["POST"])
+def start_execution_processor():
+    """启动自动执行处理器"""
+    try:
+        data = request.json or {}
+        interval = data.get("interval", 60)  # 默认1分钟
+
+        engine = get_auto_execution()
+        engine.start_queue_processor(interval)
+
+        return jsonify({"success": True, "message": "自动执行处理器已启动"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/execution/stop-processor", methods=["POST"])
+def stop_execution_processor():
+    """停止自动执行处理器"""
+    try:
+        engine = get_auto_execution()
+        engine.stop_queue_processor()
+
+        return jsonify({"success": True, "message": "自动执行处理器已停止"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ==================== 主动交互触发系统 API ====================
+
+
+@app.route("/api/triggers/evaluate", methods=["POST"])
+def triggers_evaluate():
+    """评估是否需要主动交互"""
+    try:
+        data = request.json or {}
+        user_id = data.get("user_id", "default")
+        execute = data.get("execute", True)
+
+        system = get_trigger_system()
+        decision = system.evaluate_interaction_need(user_id)
+
+        if decision and decision.should_interact and execute:
+            system.execute_interaction(decision, user_id)
+
+        decision_payload = None
+        if decision:
+            decision_payload = {
+                "should_interact": decision.should_interact,
+                "interaction_type": decision.interaction_type.value,
+                "priority": decision.priority,
+                "reason": decision.reason,
+                "content": decision.content,
+                "scores": {
+                    "urgency": decision.urgency_score,
+                    "importance": decision.importance_score,
+                    "disturbance": decision.disturbance_cost,
+                    "final": decision.final_score,
+                },
+            }
+
+        return jsonify({"success": True, "decision": decision_payload})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/triggers/start", methods=["POST"])
+def triggers_start():
+    """启动主动交互监控"""
+    try:
+        data = request.json or {}
+        user_id = data.get("user_id", "default")
+        interval = data.get("interval", 300)
+
+        system = get_trigger_system()
+        system.start_monitoring(check_interval=interval, user_id=user_id)
+
+        return jsonify(
+            {"success": True, "message": "主动交互触发系统已启动", "interval": interval}
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/triggers/stop", methods=["POST"])
+def triggers_stop():
+    """停止主动交互监控"""
+    try:
+        system = get_trigger_system()
+        system.stop_monitoring()
+
+        return jsonify({"success": True, "message": "主动交互触发系统已停止"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/triggers/stats", methods=["GET"])
+def triggers_stats():
+    """获取触发统计"""
+    try:
+        days = int(request.args.get("days", 7))
+
+        system = get_trigger_system()
+        stats = system.get_trigger_statistics(days)
+
+        return jsonify({"success": True, "stats": stats})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/triggers/list", methods=["GET"])
+def triggers_list():
+    """获取触发器列表"""
+    try:
+        system = get_trigger_system()
+        triggers = system.list_triggers()
+
+        return jsonify({"success": True, "triggers": triggers})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/triggers/update", methods=["POST"])
+def triggers_update():
+    """更新触发器配置"""
+    try:
+        data = request.json or {}
+        trigger_id = data.get("trigger_id")
+
+        if not trigger_id:
+            return jsonify({"error": "缺少trigger_id"}), 400
+
+        enabled = data.get("enabled")
+        priority = data.get("priority")
+        cooldown_minutes = data.get("cooldown_minutes")
+        threshold_value = data.get("threshold_value")
+        parameters = data.get("parameters")
+
+        system = get_trigger_system()
+        ok = system.update_trigger_config(
+            trigger_id,
+            enabled=enabled,
+            priority=priority,
+            cooldown_minutes=cooldown_minutes,
+            threshold_value=threshold_value,
+        )
+
+        if not ok:
+            return jsonify({"error": "触发器不存在"}), 404
+
+        # 如果提供了参数，更新参数
+        if parameters is not None:
+            system.update_trigger_params(trigger_id, parameters)
+
+        return jsonify({"success": True, "message": "触发器配置已更新"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/triggers/params/<trigger_id>", methods=["GET"])
+def get_trigger_params(trigger_id):
+    """获取触发器参数"""
+    try:
+        system = get_trigger_system()
+        params = system.get_trigger_params(trigger_id)
+
+        return jsonify(
+            {"success": True, "trigger_id": trigger_id, "parameters": params}
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/triggers/params/<trigger_id>", methods=["POST"])
+def update_trigger_params_endpoint(trigger_id):
+    """更新触发器参数"""
+    try:
+        data = request.json or {}
+        parameters = data.get("parameters", {})
+
+        system = get_trigger_system()
+        ok = system.update_trigger_params(trigger_id, parameters)
+
+        if not ok:
+            return jsonify({"error": "触发器不存在"}), 404
+
+        return jsonify(
+            {
+                "success": True,
+                "message": "触发器参数已更新",
+                "parameters": system.get_trigger_params(trigger_id),
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/triggers/feedback", methods=["POST"])
+def triggers_feedback():
+    """提交触发反馈"""
+    try:
+        data = request.json or {}
+        trigger_id = data.get("trigger_id")
+        feedback = data.get("feedback")
+        response_time_seconds = data.get("response_time_seconds", 0)
+
+        if not trigger_id or not feedback:
+            return jsonify({"error": "缺少trigger_id或feedback"}), 400
+
+        system = get_trigger_system()
+        system.record_user_feedback(trigger_id, feedback, response_time_seconds)
+
+        return jsonify({"success": True, "message": "反馈已记录"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ═══ 注册增强记忆系统API（模块级别，确保始终执行） ═══
@@ -17110,13 +20638,441 @@ except ImportError:
         _app_logger.warning("⚠️  增强记忆系统API未找到，使用基础功能")
 
 
+# ═══ 自动归纳调度器 API ═══
+
+
+@app.route("/api/auto-catalog/status", methods=["GET"])
+def auto_catalog_status():
+    """获取自动归纳状态"""
+    try:
+        from auto_catalog_scheduler import get_auto_catalog_scheduler
+
+        scheduler = get_auto_catalog_scheduler()
+
+        return jsonify(
+            {
+                "success": True,
+                "enabled": scheduler.is_auto_catalog_enabled(),
+                "schedule_time": scheduler.get_catalog_schedule(),
+                "source_directories": scheduler.get_source_directories(),
+                "backup_directory": scheduler.get_backup_directory(),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auto-catalog/enable", methods=["POST"])
+def auto_catalog_enable():
+    """启用自动归纳"""
+    try:
+        from auto_catalog_scheduler import get_auto_catalog_scheduler
+
+        scheduler = get_auto_catalog_scheduler()
+
+        data = request.json or {}
+        schedule_time = data.get("schedule_time", "02:00")
+        source_dirs = data.get("source_directories")
+
+        scheduler.enable_auto_catalog(schedule_time, source_dirs)
+
+        return jsonify(
+            {
+                "success": True,
+                "message": f"自动归纳已启用，每日 {schedule_time} 执行",
+                "schedule_time": schedule_time,
+                "source_directories": scheduler.get_source_directories(),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auto-catalog/disable", methods=["POST"])
+def auto_catalog_disable():
+    """禁用自动归纳"""
+    try:
+        from auto_catalog_scheduler import get_auto_catalog_scheduler
+
+        scheduler = get_auto_catalog_scheduler()
+
+        scheduler.disable_auto_catalog()
+
+        return jsonify({"success": True, "message": "自动归纳已禁用"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auto-catalog/run-now", methods=["POST"])
+def auto_catalog_run_now():
+    """立即执行一次归纳（手动触发）"""
+    try:
+        from auto_catalog_scheduler import get_auto_catalog_scheduler
+
+        scheduler = get_auto_catalog_scheduler()
+
+        result = scheduler.manual_catalog_now()
+
+        return jsonify(
+            {
+                "success": result.get("success", False),
+                "total_files": result.get("total_files", 0),
+                "organized_count": result.get("organized_count", 0),
+                "backed_up_count": result.get("backed_up_count", 0),
+                "errors": result.get("errors", []),
+                "report_path": result.get("report_path", ""),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/auto-catalog/backup-manifest/<path:filename>", methods=["GET"])
+def get_backup_manifest(filename):
+    """下载备份清单文件"""
+    try:
+        from auto_catalog_scheduler import get_auto_catalog_scheduler
+
+        scheduler = get_auto_catalog_scheduler()
+
+        backup_dir = scheduler.get_backup_directory()
+        return send_from_directory(backup_dir, filename, as_attachment=False)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 404
+
+
 # ── Token 使用统计接口 ────────────────────────────────────────────────────────
+
+
+@app.route("/api/token-stats", methods=["GET"])
+def api_token_stats():
+    """返回 Token 用量统计（今日 / 本月 / 按模型 / 近 7 天）"""
+    try:
+        from token_tracker import get_stats
+
+        return jsonify(get_stats())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/token-stats/reset", methods=["POST"])
+def api_token_stats_reset():
+    """重置统计数据。Body: {"period": "today" | "month" | "all"}"""
+    try:
+        from token_tracker import reset_stats
+
+        period = (request.json or {}).get("period", "all")
+        return jsonify(reset_stats(period))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── LangGraph 工作流可视化 & 开发工具 API ─────────────────────────────────────
 
 
+@app.route("/workflow-dag")
+def workflow_dag_page():
+    """工作流 DAG 可视化页面"""
+    import os
+
+    html_path = os.path.join(os.path.dirname(__file__), "static", "workflow_dag.html")
+    try:
+        from flask import send_file
+
+        return send_file(html_path)
+    except Exception as e:
+        return f"<h3>Error: {e}</h3>", 500
+
+
+@app.route("/api/dev/graph-mermaid", methods=["GET"])
+def api_dev_graph_mermaid():
+    """
+    返回指定工作流 / Agent 的 Mermaid DAG 图标记。
+
+    参数:
+        workflow : 工作流名称  (research_and_document | multi_agent_ppt | react_agent)
+        type     : 类型        (workflow | agent)
+    """
+    wf = request.args.get("workflow", "react_agent")
+    wf_type = request.args.get("type", "agent")
+    try:
+        if wf_type == "agent" or wf == "react_agent":
+            from app.core.agent.factory import create_langgraph_agent
+
+            agent = create_langgraph_agent()
+            mermaid_code = agent.get_graph_mermaid()
+            # Count nodes/edges
+            node_count = mermaid_code.count("\n    ") if mermaid_code else 0
+            edge_count = (
+                mermaid_code.count("-->") + mermaid_code.count("-.->")
+                if mermaid_code
+                else 0
+            )
+        else:
+            from app.core.workflow.langgraph_workflow import WorkflowEngine
+
+            engine = WorkflowEngine()
+            mermaid_code = engine.get_graph_mermaid(wf)
+            node_count = mermaid_code.count("\n    ") if mermaid_code else 0
+            edge_count = (
+                mermaid_code.count("-->") + mermaid_code.count("-.->")
+                if mermaid_code
+                else 0
+            )
+
+        return jsonify(
+            {
+                "success": True,
+                "workflow": wf,
+                "type": wf_type,
+                "mermaid": mermaid_code,
+                "node_count": max(node_count, 0),
+                "edge_count": max(edge_count, 0),
+            }
+        )
+    except Exception as e:
+        import traceback
+
+        return (
+            jsonify(
+                {"success": False, "error": str(e), "traceback": traceback.format_exc()}
+            ),
+            500,
+        )
+
+
+@app.route("/api/dev/checkpoint-info", methods=["GET"])
+def api_dev_checkpoint_info():
+    """返回检查点数据库信息（类型 / 会话数 / 快照总数）。"""
+    try:
+        from app.core.agent.checkpoint_manager import CheckpointManager
+
+        return jsonify(CheckpointManager.get_db_info())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dev/checkpoints/<thread_id>", methods=["GET"])
+def api_dev_list_checkpoints(thread_id):
+    """列出某会话的检查点快照列表。"""
+    try:
+        from app.core.agent.checkpoint_manager import CheckpointManager
+
+        snapshots = CheckpointManager.list_checkpoints(thread_id)
+        return jsonify(
+            {"thread_id": thread_id, "snapshots": snapshots, "count": len(snapshots)}
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dev/checkpoints/<thread_id>", methods=["DELETE"])
+def api_dev_delete_checkpoints(thread_id):
+    """删除某会话的全部检查点（用于清除对话历史）。"""
+    try:
+        from app.core.agent.checkpoint_manager import CheckpointManager
+
+        ok = CheckpointManager.delete_thread(thread_id)
+        return jsonify({"success": ok, "thread_id": thread_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # RAG 向量检索 API
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@app.route("/api/rag/ingest", methods=["POST"])
+def api_rag_ingest():
+    """
+    索引文件或文本到向量库。
+
+    请求体 (JSON):
+        { "file_path": "/abs/path/to/doc.pdf" }
+        或
+        { "text": "要索引的文本内容...", "source": "my_doc" }
+
+    返回:
+        { "success": true, "chunks_added": 42, "stats": {...} }
+    """
+    try:
+        from app.core.services.rag_service import get_rag_service
+
+        data = request.get_json(force=True) or {}
+        rag = get_rag_service()
+
+        if "file_path" in data:
+            fp = data["file_path"]
+            if not os.path.isabs(fp):
+                fp = os.path.join(os.getcwd(), fp)
+            if not os.path.exists(fp):
+                return jsonify({"error": f"文件不存在: {fp}"}), 400
+            count = rag.index_file(fp)
+        elif "text" in data:
+            count = rag.index_text(data["text"], source=data.get("source", "api_input"))
+        else:
+            return jsonify({"error": "请提供 file_path 或 text 字段"}), 400
+
+        return jsonify({"success": True, "chunks_added": count, "stats": rag.stats()})
+    except Exception as e:
+        logger.exception("[RAG /ingest] error")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/rag/query", methods=["POST"])
+def api_rag_query():
+    """
+    检索向量库，返回相关文本片段。
+
+    请求体 (JSON):
+        {
+          "question": "Koto 支持哪些文件格式？",
+          "k": 5,
+          "answer": true        // 可选：true = 同时生成 LLM 答案
+        }
+
+    返回（仅检索）:
+        { "chunks": [...], "count": 3 }
+
+    返回（含答案）:
+        { "answer": "...", "sources": [...], "chunks": [...], "context_used": true }
+    """
+    try:
+        from app.core.services.rag_service import get_rag_service
+
+        data = request.get_json(force=True) or {}
+        question = data.get("question", "").strip()
+        if not question:
+            return jsonify({"error": "question 字段不能为空"}), 400
+
+        k = int(data.get("k", 5))
+        want_answer = data.get("answer", False)
+        rag = get_rag_service()
+
+        if want_answer:
+            result = rag.rag_answer(question, k=k)
+            return jsonify(result)
+        else:
+            chunks = rag.retrieve(question, k=k)
+            return jsonify({"chunks": chunks, "count": len(chunks)})
+    except Exception as e:
+        logger.exception("[RAG /query] error")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/rag/stats", methods=["GET"])
+def api_rag_stats():
+    """
+    返回 RAG 索引统计信息。
+
+    返回:
+        {
+          "initialized": true,
+          "doc_count": 312,
+          "index_dir": "config/rag_index",
+          "index_size_mb": 2.4,
+          "embedding_model": "GoogleGenerativeAIEmbeddings"
+        }
+    """
+    try:
+        from app.core.services.rag_service import get_rag_service
+
+        rag = get_rag_service()
+        return jsonify(rag.stats())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/rag/clear", methods=["DELETE"])
+def api_rag_clear():
+    """清空 RAG 向量库（删除所有索引数据）。"""
+    try:
+        import app.core.services.rag_service as _rag_mod
+        from app.core.services.rag_service import _rag_instance, get_rag_service
+
+        rag = get_rag_service()
+        ok = rag.clear()
+        # 重置单例，下次 get_rag_service() 将重建
+        _rag_mod._rag_instance = None
+        return jsonify({"success": ok, "message": "向量库已清空"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 用户评分接口 — 接收前端 appendRatingBar 的 5 星评分，存 RatingStore
+# 并在高评分（≥4 星）时向 ShadowTracer 写入优质样本，推动训练数据飞轮
+# ──────────────────────────────────────────────────────────────────────────────
+@app.route("/api/response/rate", methods=["POST"])
+def api_response_rate():
+    """
+    接收用户对 AI 回复的星级评分。
+
+    请求体:
+      msg_id       str   — MD5 消息指纹（由后端 done 事件下发）
+      stars        int   — 1~5 星
+      comment      str   — 可选文字反馈
+      session_name str   — 会话名
+      user_input   str   — 用户原始输入（前 500 字）
+      ai_response  str   — AI 回复文本（前 500 字）
+      task_type    str   — 任务类型，默认 CHAT
+    """
+    data = request.json or {}
+    msg_id = data.get("msg_id", "")
+    stars = int(data.get("stars", 0))
+    comment = (data.get("comment") or "").strip()
+    session_name = data.get("session_name", "default")
+    user_input = data.get("user_input", "")
+    ai_response = data.get("ai_response", "")
+    task_type = data.get("task_type", "CHAT")
+
+    if not (1 <= stars <= 5):
+        return jsonify({"success": False, "error": "stars 必须在 1~5 之间"}), 400
+
+    # ── 1. 存入 RatingStore ────────────────────────────────────────────────────
+    try:
+        from app.core.learning.rating_store import RatingStore
+
+        rs = RatingStore()
+        rs.save_user_rating(
+            msg_id=msg_id,
+            stars=stars,
+            comment=comment,
+            session_name=session_name,
+            user_input=user_input,
+            ai_response=ai_response,
+        )
+    except Exception as e:
+        _app_logger.warning(f"[ResponseRate] ⚠️ RatingStore 保存失败: {e}")
+
+    # ── 2. 高评分（≥4 星）→ ShadowTracer 记录优质样本，推进飞轮 ──────────────
+    trace_id = None
+    if stars >= 4 and user_input and ai_response:
+        try:
+            from app.core.learning.shadow_tracer import ShadowTracer
+
+            trace_id = ShadowTracer.record_approved(
+                session_id=session_name,
+                user_input=user_input,
+                ai_response=ai_response,
+                skill_id=None,
+                task_type=task_type,
+                model_used="",
+                metadata={"stars": stars, "comment": comment, "source": "user_rating"},
+            )
+            _app_logger.debug(
+                f"[ResponseRate] ⭐ {stars}星 → ShadowTracer 记录 trace_id={trace_id}"
+            )
+        except Exception as e:
+            _app_logger.warning(f"[ResponseRate] ⚠️ ShadowTracer 记录失败: {e}")
+
+    return jsonify({
+        "success": True,
+        "msg_id": msg_id,
+        "stars": stars,
+        "trace_id": trace_id,
+        "flywheel": trace_id is not None,
+    })
 
 

@@ -247,25 +247,38 @@ class TaskDecomposer:
     @classmethod
     def create_subtasks(cls, original_input: str, compound_info: dict) -> list:
         """
-        根据分解信息创建具体的子任务
+        根据分解信息创建具体的子任务。
+        自动为顺序步骤填充 output_key / depends_on / context_keys，
+        确保 PlanExecutor 能正确注入前步结果。
         """
         subtasks = []
+        prev_output_key = None
 
         for i, task_template in enumerate(compound_info["subtasks"]):
+            task_type = task_template["task_type"]
+            output_key = f"{task_type.lower()}_result_{i + 1}"
+
             subtask = {
                 "id": i + 1,
-                "task_type": task_template["task_type"],
+                "task_type": task_type,
                 "description": task_template["description"],
                 "original_input": original_input,
+                # 统一使用原始输入作为 prompt base；_build_enriched_input 会
+                # 通过 context_keys 将前步真实结果追加到 prompt 末尾
+                "input": original_input,
                 "index": i,
                 "status": "pending",
                 "result": None,
                 "error": None,
+                "output_key": output_key,
+                # 线性依赖：每步依赖前一步
+                "depends_on": [i] if i > 0 else [],
+                # 将前一步的输出注入当前步的 prompt
+                "context_keys": [prev_output_key] if prev_output_key else [],
             }
-            if task_template.get("input"):
-                subtask["input"] = task_template["input"]
             if task_template.get("expected_output"):
                 subtask["expected_output"] = task_template["expected_output"]
             subtasks.append(subtask)
+            prev_output_key = output_key
 
         return subtasks

@@ -71,12 +71,18 @@ if (-not $SkipBuild) {
     $buildLog = Join-Path $LOG_DIR "build_latest.log"
     if ($Incremental) {
         Write-Step "步骤 1/3  PyInstaller 增量构建（无 --clean，输出日志至 logs\build_latest.log）"
+        $ErrorActionPreference = "Continue"
         & $VENV_PIP $SPEC_FILE -y *> $buildLog
+        $buildExit = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
     } else {
         Write-Step "步骤 1/3  PyInstaller 完整构建（--clean，输出日志至 logs\build_latest.log）"
+        $ErrorActionPreference = "Continue"
         & $VENV_PIP $SPEC_FILE --clean -y *> $buildLog
+        $buildExit = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
     }
-    if ($LASTEXITCODE -ne 0) {
+    if ($buildExit -ne 0) {
         Write-Fail "PyInstaller 失败，查看详细日志：$buildLog"
         Write-Host "(最后 30 行)" -ForegroundColor Yellow
         Get-Content $buildLog -Tail 30
@@ -90,8 +96,11 @@ if (-not $SkipBuild) {
 # ─── 步骤 2：构建本地模型安装器 ─────────────────
 $installerBuildLog = Join-Path $LOG_DIR "local_model_installer_build_latest.log"
 Write-Step "步骤 2/4  构建本地模型安装器（输出日志至 logs\local_model_installer_build_latest.log）"
+$ErrorActionPreference = "Continue"
 & $VENV_PIP $LOCAL_INSTALLER_SPEC --clean -y *> $installerBuildLog
-if ($LASTEXITCODE -ne 0) {
+$installerBuildExit = $LASTEXITCODE
+$ErrorActionPreference = "Stop"
+if ($installerBuildExit -ne 0) {
     Write-Fail "LocalModelInstaller 构建失败，查看详细日志：$installerBuildLog"
     Write-Host "(最后 30 行)" -ForegroundColor Yellow
     Get-Content $installerBuildLog -Tail 30
@@ -108,8 +117,30 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "便携包已组装 → dist\Koto_Portable\"
 
-# ─── 步骤 4：压缩为 zip ───────────────────────
-Write-Step "步骤 4/4  压缩为 zip"
+# ─── 步骤 4：构建 Inno Setup 安装包 ───────────
+Write-Step "步骤 4/5  构建 Inno Setup 安装程序（Koto_v${Version}_Setup.exe）"
+$isccCandidates = @(
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+)
+$iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $iscc) {
+    Write-Host "  [跳过] 未找到 Inno Setup 6，安装后重新运行可生成 Setup.exe" -ForegroundColor Yellow
+    Write-Host "         安装命令：winget install --id JRSoftware.InnoSetup" -ForegroundColor Yellow
+} else {
+    $issFile = Join-Path $REPO_ROOT "koto_installer.iss"
+    & $iscc /DAppVersion=$Version $issFile
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Inno Setup 构建失败"
+        exit 1
+    }
+    $setupName = "Koto_v${Version}_Setup.exe"
+    $sizeMB = [math]::Round((Get-Item (Join-Path $DIST_DIR $setupName)).Length / 1MB, 1)
+    Write-OK "安装程序已生成 → dist\$setupName ($sizeMB MB)"
+}
+
+# ─── 步骤 5：压缩为 zip ───────────────────────
+Write-Step "步骤 5/5  压缩为 zip"
 $zipName = "Koto_v${Version}_Windows.zip"
 $zipPath = Join-Path $DIST_DIR $zipName
 $portableDir = Join-Path $DIST_DIR "Koto_Portable"
@@ -121,6 +152,10 @@ Write-OK "zip 已生成 → dist\$zipName"
 # ─── 完成 ─────────────────────────────────────
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
-Write-Host "  打包完成！发布文件：dist\$zipName" -ForegroundColor Green
-Write-Host "  用户使用方法：解压 → 填写 API Key → 双击 Start_Koto.bat" -ForegroundColor Green
+Write-Host "  打包完成！" -ForegroundColor Green
+if ($iscc) {
+    Write-Host "  安装程序：dist\Koto_v${Version}_Setup.exe" -ForegroundColor Green
+}
+Write-Host "  便携包：  dist\$zipName" -ForegroundColor Green
+Write-Host "  用户使用方法：安装程序双击安装 或 解压 zip → 双击 Start_Koto.bat" -ForegroundColor Green
 Write-Host "================================================================" -ForegroundColor Green

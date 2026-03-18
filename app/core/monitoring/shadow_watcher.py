@@ -29,6 +29,7 @@ import json
 import logging
 import re
 import threading
+import uuid
 from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -170,6 +171,18 @@ _PHRASE_PATTERNS = [
     "比较",
 ]
 
+# ── 任务类型关键词（用于 _track_hourly_task 时段×任务交叉分析）──────────────────
+_TASK_TYPE_KEYWORDS: Dict[str, List[str]] = {
+    "分析": ["分析", "评估", "比较", "对比", "解读", "解释", "review", "analyze", "compare"],
+    "创作": ["写", "创作", "生成", "起草", "撰写", "write", "create", "generate", "draft"],
+    "执行": ["运行", "执行", "打开", "启动", "关闭", "安装", "下载", "run", "execute", "open", "install"],
+    "问答": ["是什么", "怎么", "为什么", "如何", "能解释", "what is", "how to", "why", "explain"],
+    "修改": ["修改", "优化", "改进", "润色", "修复", "调整", "edit", "fix", "improve", "refine"],
+    "搜索": ["找", "搜", "查找", "查一下", "find", "search", "look for"],
+    "翻译": ["翻译", "译成", "translate", "翻成"],
+    "讨论": ["讲讲", "聊聊", "谈谈", "discuss", "opinion"],
+}
+
 # ── AI 拒绝/失败模式（用于检测 AI 无法完成的请求） ──────────────────────────────
 
 # ── 用户修正信号（用户指出 AI 理解有误或回答错误） ──────────────────────────────
@@ -221,14 +234,13 @@ def _default_obs() -> Dict[str, Any]:
         "open_tasks": [],  # [{id, text, mentioned_at, session, done, revisited_at?, completed_at?}]
         "failed_tasks": [],  # [{id, text, asked_at, session, retried, resolved}]
         "topic_history": [],  # [{topic, date}] capped 500 — for recency calculation
-        "recurring_phrases": {},  # phrase: count
+        "recurring_phrases": {},  # {phrase: count}  — 高频请求动作短语，触发 Skill 建议
         "last_seen": None,
         "streak": {"days": 0, "last_date": None},
         "work_pattern": {
             "avg_session_length": 0,
             "sessions_last_30d": 0,
         },
-        "recurring_phrases": {},  # {phrase: count}  — 高频请求动作短语，触发 Skill 建议
         "hourly_task_type": {},  # {"9": {"代码": 3, "分析": 1}} — 时段×任务交叉
         "corrections": 0,  # 用户修正 AI 次数（质量信号）
     }
@@ -250,6 +262,8 @@ class ShadowWatcher:
 
     def __init__(self):
         self._obs_lock = threading.Lock()
+        self._write_lock = threading.Lock()   # 序列化磁盘写入，防止并发写覆盖旧数据
+        self._dirty_count = 0                 # _dirty_save 累计计数
         self._obs: Dict[str, Any] = _default_obs()
         # 会话轮次计数（内存中，重启清零）
         self._session_exchanges: Dict[str, int] = {}
@@ -411,14 +425,14 @@ class ShadowWatcher:
             # 会话轮次计数（无需持锁）
             _session_ex = self._inc_session_exchanges(session_id)
 
-            self._save()
+            self._dirty_save()
             # 有新的未完成任务或失败请求时，立即（绕过定时 interval）唤醒 ProactiveAgent
             if _should_trigger:
                 self._trigger_proactive_tick()
             # 每次对话完成后都调用 per-exchange 主动训练
             self._trigger_after_exchange(_session_ex, _completed_task_text)
         except Exception as exc:
-            logger.debug("[ShadowWatcher] 处理异常: %s", exc)
+            logger.warning("[ShadowWatcher] 处理异常: %s", exc, exc_info=True)
 
     def _trigger_proactive_tick(self):
         """在后台线程中立即触发 ProactiveAgent（绕过定时 interval）。"""
@@ -429,7 +443,7 @@ class ShadowWatcher:
 
                 get_proactive_agent().tick_immediate()
             except Exception as e:
-                logger.debug("[ShadowWatcher] 立即触发 ProactiveAgent 失败: %s", e)
+                logger.warning("[ShadowWatcher] 立即触发 ProactiveAgent 失败: %s", e)
 
         threading.Thread(
             target=_run, daemon=True, name="sw_proactive_immediate"
@@ -455,7 +469,7 @@ class ShadowWatcher:
                 obs = self.get_observations()
                 get_proactive_agent().tick_after_exchange(_session_ex, _completed, obs)
             except Exception as e:
-                logger.debug("[ShadowWatcher] tick_after_exchange 失败: %s", e)
+                logger.warning("[ShadowWatcher] tick_after_exchange 失败: %s", e)
 
         threading.Thread(target=_run, daemon=True, name="sw_after_exchange").start()
 
@@ -513,11 +527,10 @@ class ShadowWatcher:
                     t["text"][:20] == task_text[:20] for t in tasks if not t.get("done")
                 ):
                     continue
-                import uuid as _uuid
 
                 tasks.append(
                     {
-                        "id": str(_uuid.uuid4())[:8],
+                        "id": str(uuid.uuid4())[:8],
                         "text": task_text[:120],
                         "mentioned_at": now.isoformat(timespec="seconds"),
                         "session": session_id,
@@ -620,11 +633,9 @@ class ShadowWatcher:
         # 上限
         if sum(1 for f in failed if not f.get("resolved")) >= 50:
             return
-        import uuid as _uuid
-
         failed.append(
             {
-                "id": str(_uuid.uuid4())[:8],
+                "id": str(uuid.uuid4())[:8],
                 "text": user_msg[:150],
                 "full_text": user_msg[:2000],  # 保留完整文本供重试
                 "asked_at": now.isoformat(timespec="seconds"),
@@ -644,12 +655,35 @@ class ShadowWatcher:
             except Exception as exc:
                 logger.warning("[ShadowWatcher] 加载失败: %s", exc)
 
+    def _dirty_save(self):
+        """累积变更计数；每 5 次写一次磁盘，降低高频对话下的 I/O 压力。"""
+        self._dirty_count += 1
+        if self._dirty_count >= 5:
+            self._dirty_count = 0
+            self._save()
+
     def _save(self):
+        """将观察数据持久化到磁盘。
+
+        使用双重锁避免并发写入竞争：_write_lock 序列化 json.dumps →
+        write_text 整个序列，确保后完成的操作不会被旧快照打母。
+        """
         try:
             _BASE.mkdir(parents=True, exist_ok=True)
-            with self._obs_lock:
-                payload = json.dumps(self._obs, ensure_ascii=False, indent=2)
-            _OBS_FILE.write_text(payload, encoding="utf-8")
+            with self._write_lock:          # 将 dump→write 作为原子序列，防止并发写覆盖
+                with self._obs_lock:
+                    # 裁剪已完成的 open_tasks（保留全部未完成 + 最近 20 条已完成）
+                    open_tasks = self._obs.get("open_tasks", [])
+                    undone = [t for t in open_tasks if not t.get("done")]
+                    done   = [t for t in open_tasks if t.get("done")]
+                    self._obs["open_tasks"] = undone + done[-20:]
+                    # 裁剪已解决的 failed_tasks（保留全部未解决 + 最近 10 条已解决）
+                    failed_tasks = self._obs.get("failed_tasks", [])
+                    unresolved = [f for f in failed_tasks if not f.get("resolved")]
+                    resolved   = [f for f in failed_tasks if f.get("resolved")]
+                    self._obs["failed_tasks"] = unresolved + resolved[-10:]
+                    payload = json.dumps(self._obs, ensure_ascii=False, indent=2)
+                _OBS_FILE.write_text(payload, encoding="utf-8")
         except Exception as exc:
             logger.warning("[ShadowWatcher] 保存失败: %s", exc)
 

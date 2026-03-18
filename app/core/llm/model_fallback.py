@@ -29,9 +29,9 @@
 
 from __future__ import annotations
 
-import logging
 import re
 import time
+import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -60,10 +60,10 @@ _MODEL_NOT_FOUND_PATTERNS = [
 
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
-    "gemini-3-flash-preview",  # 首选：最新 Gemini 3 Flash（generate_content）
-    "gemini-2.5-flash",  # 次选：快速路径
-    "gemini-3.1-pro-preview",  # 高质量
-    "gemini-3-pro-preview",  # Gemini 3 Pro（generate_content）
+    "gemini-3-flash-preview",      # 首选：最新 Gemini 3 Flash（generate_content）
+    "gemini-2.5-flash",            # 次选：快速路径
+    "gemini-3.1-pro-preview",      # 高质量
+    "gemini-3-pro-preview",        # Gemini 3 Pro（generate_content）
     "gemini-2.5-pro-preview",
     "gemini-2.0-flash",
     "gemini-1.5-flash",
@@ -74,21 +74,21 @@ _DEFAULT_FALLBACK_CHAIN: List[str] = [
 # 只有 deep-research-pro-preview-* 才是 Interactions API agent（使用 agent= 字段）。
 _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
     "CHAT": [
-        "gemini-3-flash-preview",  # 首选：最新 Gemini 3 Flash
-        "gemini-2.5-flash",  # 次选
+        "gemini-3-flash-preview",     # 首选：最新 Gemini 3 Flash
+        "gemini-2.5-flash",           # 次选
         "gemini-2.0-flash",
         "gemini-1.5-flash",
     ],
     "CODER": [
-        "gemini-3.1-pro-preview",  # 最强代码能力
-        "gemini-3-pro-preview",  # Gemini 3 Pro
+        "gemini-3.1-pro-preview",     # 最强代码能力
+        "gemini-3-pro-preview",       # Gemini 3 Pro
         "gemini-2.5-pro-preview",
         "gemini-2.5-flash",
         "gemini-2.0-flash",
     ],
     "RESEARCH": [
-        "gemini-3.1-pro-preview",  # 高质量 generate_content
-        "gemini-3-pro-preview",  # Gemini 3 Pro
+        "gemini-3.1-pro-preview",     # 高质量 generate_content
+        "gemini-3-pro-preview",       # Gemini 3 Pro
         "gemini-2.5-pro-preview",
         "deep-research-pro-preview-12-2025",  # Interactions API agent（专用深研，慢）
         "gemini-2.5-flash",
@@ -98,46 +98,46 @@ _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
         "gemini-2.0-flash-exp",
     ],
     "WEB_SEARCH": [
-        "gemini-2.5-flash",  # grounding 需要 generate_content
+        "gemini-2.5-flash",           # grounding 需要 generate_content
         "gemini-2.0-flash",
         "gemini-1.5-flash",
     ],
     "FILE_GEN": [
-        "gemini-3-flash-preview",  # 首选
-        "gemini-2.5-flash",  # 次选
+        "gemini-3-flash-preview",     # 首选
+        "gemini-2.5-flash",           # 次选
         "gemini-2.0-flash",
         "gemini-1.5-flash",
     ],
     "AGENT": [
-        "gemini-3-flash-preview",  # 首选
+        "gemini-3-flash-preview",     # 首选
         "gemini-2.5-flash",
         "gemini-2.0-flash",
     ],
     "DOC_ANNOTATE": [
-        "gemini-3-flash-preview",  # 首选
+        "gemini-3-flash-preview",     # 首选
         "gemini-2.5-flash",
         "gemini-2.0-flash",
     ],
     "FILE_SEARCH": [
-        "gemini-3-flash-preview",  # 首选
+        "gemini-3-flash-preview",     # 首选
         "gemini-2.5-flash",
         "gemini-2.0-flash",
     ],
     "VISION": [
-        "gemini-2.5-flash",  # 需要 generate_content 处理图像字节
+        "gemini-2.5-flash",           # 需要 generate_content 处理图像字节
         "gemini-2.0-flash",
         "gemini-1.5-pro",
     ],
     "MULTI_STEP": [
-        "gemini-3.1-pro-preview",  # 最强
-        "gemini-3-pro-preview",  # Gemini 3 Pro
+        "gemini-3.1-pro-preview",     # 最强
+        "gemini-3-pro-preview",       # Gemini 3 Pro
         "gemini-2.5-pro-preview",
         "gemini-2.5-flash",
         "gemini-2.0-flash",
     ],
     "COMPLEX": [
-        "gemini-3.1-pro-preview",  # 最强
-        "gemini-3-pro-preview",  # Gemini 3 Pro
+        "gemini-3.1-pro-preview",     # 最强
+        "gemini-3-pro-preview",       # Gemini 3 Pro
         "gemini-2.5-pro-preview",
         "gemini-2.5-flash",
     ],
@@ -169,18 +169,14 @@ class ModelFallbackExecutor:
     """
 
     _UNAVAILABLE_TTL: int = 300  # 5 分钟内不重试失败模型
-    _cascade_failures: Dict[str, int] = (
-        {}
-    )  # task_type → consecutive full-cascade failure count
-    _cascade_failure_times: Dict[str, float] = (
-        {}
-    )  # task_type → timestamp of last cascade failure
-    _CIRCUIT_BREAKER_BASE: float = 5.0  # initial backoff in seconds
-    _CIRCUIT_BREAKER_CAP: float = 120.0  # max backoff in seconds
+    _cascade_failures: Dict[str, int] = {}        # task_type → consecutive full-cascade failure count
+    _cascade_failure_times: Dict[str, float] = {}  # task_type → timestamp of last cascade failure
+    _CIRCUIT_BREAKER_BASE: float = 5.0             # initial backoff in seconds
+    _CIRCUIT_BREAKER_CAP: float = 120.0            # max backoff in seconds
 
     def __init__(self) -> None:
-        self._unavailable: Dict[str, float] = {}  # model_id → 过期 unix 时间戳
-        self._model_map: Dict[str, str] = {}  # 由 ModelManager 注入
+        self._unavailable: Dict[str, float] = {}   # model_id → 过期 unix 时间戳
+        self._model_map: Dict[str, str] = {}        # 由 ModelManager 注入
 
     # ── 公开 API ─────────────────────────────────────────────────────────────
 
@@ -194,7 +190,9 @@ class ModelFallbackExecutor:
             return
         seconds = ttl if ttl is not None else self._UNAVAILABLE_TTL
         self._unavailable[model_id] = time.time() + seconds
-        logger.warning(f"[ModelFallback] ⚠️  标记不可用 {seconds}s: {model_id}")
+        logger.warning(
+            f"[ModelFallback] ⚠️  标记不可用 {seconds}s: {model_id}"
+        )
 
     def is_available(self, model_id: str) -> bool:
         """检查模型当前是否可用（未在黑名单，或黑名单已过期）。"""

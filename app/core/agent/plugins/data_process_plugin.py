@@ -45,7 +45,7 @@ class DataProcessPlugin(AgentPlugin):
                 "name": "query_data",
                 "func": self.query_data,
                 "description": "Load a data file and run a pandas expression on it. "
-                "Returns the first 20 result rows.",
+                               "Returns the first 20 result rows.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -56,8 +56,8 @@ class DataProcessPlugin(AgentPlugin):
                         "expression": {
                             "type": "STRING",
                             "description": "A pandas DataFrame expression using only 'df', "
-                            "e.g. \"df[df['age'] > 30].describe()\".",
-                        },
+                                           "e.g. \"df[df['age'] > 30].describe()\"."
+                        }
                     },
                     "required": ["filepath", "expression"],
                 },
@@ -66,34 +66,34 @@ class DataProcessPlugin(AgentPlugin):
                 "name": "describe_data",
                 "func": self.describe_data,
                 "description": "Return a comprehensive statistical summary of a dataset: "
-                "numeric stats, missing value counts, and top categorical values.",
+                               "numeric stats, missing value counts, and top categorical values.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "filepath": {
                             "type": "STRING",
-                            "description": "Path to the data file.",
+                            "description": "Path to the data file."
                         }
                     },
-                    "required": ["filepath"],
-                },
+                    "required": ["filepath"]
+                }
             },
             {
                 "name": "suggest_questions",
                 "func": self.suggest_questions,
                 "description": "Inspect a dataset's schema and return suggested analysis questions "
-                "to guide further exploration (distributions, trends, groupings, "
-                "data quality).",
+                               "to guide further exploration (distributions, trends, groupings, "
+                               "data quality).",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "filepath": {
                             "type": "STRING",
-                            "description": "Path to the data file.",
+                            "description": "Path to the data file."
                         }
                     },
-                    "required": ["filepath"],
-                },
+                    "required": ["filepath"]
+                }
             },
             {
                 "name": "save_data",
@@ -119,8 +119,8 @@ class DataProcessPlugin(AgentPlugin):
                 "name": "analyze_trends",
                 "func": self.analyze_trends,
                 "description": "Perform a time-series trend analysis on a data file: "
-                "moving averages, growth rates, peak/trough detection, "
-                "and periodicity hints. Requires a date column and a numeric value column.",
+                               "moving averages, growth rates, peak/trough detection, "
+                               "and periodicity hints. Requires a date column and a numeric value column.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -181,26 +181,10 @@ class DataProcessPlugin(AgentPlugin):
 
     # Patterns that could enable file I/O or code execution via the eval sandbox
     _EXPR_BLOCKLIST = [
-        "read_csv",
-        "read_excel",
-        "read_json",
-        "read_parquet",
-        "read_table",
-        "to_csv",
-        "to_excel",
-        "to_json",
-        "to_parquet",
-        "os.",
-        "subprocess",
-        "open(",
-        "__import__",
-        "import ",
-        "exec(",
-        "eval(",
-        "system(",
-        "popen(",
-        "getattr",
-        "setattr",
+        "read_csv", "read_excel", "read_json", "read_parquet", "read_table",
+        "to_csv", "to_excel", "to_json", "to_parquet",
+        "os.", "subprocess", "open(", "__import__", "import ",
+        "exec(", "eval(", "system(", "popen(", "getattr", "setattr",
     ]
 
     def query_data(self, filepath: str, expression: str) -> str:
@@ -223,7 +207,6 @@ class DataProcessPlugin(AgentPlugin):
         """Return a comprehensive statistical summary of the dataset."""
         try:
             import pandas as pd
-
             df = self._load_df(filepath)
             lines = [
                 f"Shape: {df.shape[0]} rows × {df.shape[1]} columns",
@@ -266,22 +249,19 @@ class DataProcessPlugin(AgentPlugin):
             if num_cols:
                 questions.append("\n### 分布与统计")
                 for col in num_cols[:3]:
-                    questions.append(
-                        f"- '{col}' 的分布如何？是否存在异常值（需要 3σ 检测）？"
-                    )
+                    questions.append(f"- '{col}' 的分布如何？是否存在异常值（需要 3σ 检测）？")
                 if len(num_cols) >= 2:
                     questions.append(
                         f"- '{num_cols[0]}' 和 '{num_cols[1]}' 之间是否存在相关性？"
                     )
             date_kws = ["date", "time", "日期", "时间", "year", "month", "week"]
             date_cols = [
-                c for c in cols if any(kw in str(c).lower() for kw in date_kws)
+                c for c in cols
+                if any(kw in str(c).lower() for kw in date_kws)
             ]
             if date_cols:
                 questions.append("\n### 时间趋势")
-                questions.append(
-                    f"- 数据随时间（列: '{date_cols[0]}'）如何变化？是否有周期性规律？"
-                )
+                questions.append(f"- 数据随时间（列: '{date_cols[0]}'）如何变化？是否有周期性规律？")
                 if num_cols:
                     questions.append(f"- '{num_cols[0]}' 的月度/周度趋势是什么？")
             cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
@@ -341,9 +321,8 @@ class DataProcessPlugin(AgentPlugin):
     ) -> str:
         """Run a time-series trend analysis on user data."""
         try:
-            import math
-
             import pandas as pd
+            import math
 
             df = self._load_df(filepath)
 
@@ -351,7 +330,10 @@ class DataProcessPlugin(AgentPlugin):
             missing = [c for c in (date_col, value_col) if c not in df.columns]
             if missing:
                 available = ", ".join(df.columns)
-                return f"Error: 找不到列 {missing}。" f"数据集中可用的列：{available}"
+                return (
+                    f"Error: 找不到列 {missing}。"
+                    f"数据集中可用的列：{available}"
+                )
 
             # ── parse dates + sort ──────────────────────────────────────
             df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
@@ -394,11 +376,7 @@ class DataProcessPlugin(AgentPlugin):
             first_val = float(resampled.iloc[0])
             last_val = float(resampled.iloc[-1])
             overall_change = last_val - first_val
-            overall_pct = (
-                (overall_change / abs(first_val) * 100)
-                if first_val != 0
-                else float("nan")
-            )
+            overall_pct = (overall_change / abs(first_val) * 100) if first_val != 0 else float("nan")
 
             # ── moving average (3-period) ────────────────────────────────
             ma = resampled.rolling(window=min(3, len(resampled)), min_periods=1).mean()
@@ -422,16 +400,12 @@ class DataProcessPlugin(AgentPlugin):
             num = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
             den = sum((xi - mean_x) ** 2 for xi in x)
             slope = num / den if den != 0 else 0.0
-            trend_word = (
-                "上升📈" if slope > 0 else ("下降📉" if slope < 0 else "平稳➡️")
-            )
+            trend_word = "上升📈" if slope > 0 else ("下降📉" if slope < 0 else "平稳➡️")
 
             # ── volatility (coefficient of variation) ───────────────────
             std_val = float(resampled.std())
             cv = (std_val / abs(total_mean) * 100) if total_mean != 0 else 0.0
-            volatility_word = (
-                "高波动" if cv > 30 else ("中等波动" if cv > 10 else "低波动")
-            )
+            volatility_word = "高波动" if cv > 30 else ("中等波动" if cv > 10 else "低波动")
 
             # ── build output ─────────────────────────────────────────────
             freq_names = {"D": "日", "W": "周", "ME": "月", "QE": "季度"}
@@ -449,8 +423,7 @@ class DataProcessPlugin(AgentPlugin):
                 f"| 起始值 | {first_val:,.2f} |",
                 f"| 结束值 | {last_val:,.2f} |",
                 f"| 总变化 | {overall_change:+,.2f}"
-                + (f"（{overall_pct:+.1f}%）" if not math.isnan(overall_pct) else "")
-                + " |",
+                + (f"（{overall_pct:+.1f}%）" if not math.isnan(overall_pct) else "") + " |",
                 f"| 平均值 | {total_mean:,.2f} |",
                 f"| 最高值 | {total_max:,.2f}（{peak_idx.strftime('%Y-%m-%d')}） |",
                 f"| 最低值 | {total_min:,.2f}（{trough_idx.strftime('%Y-%m-%d')}） |",
@@ -480,9 +453,7 @@ class DataProcessPlugin(AgentPlugin):
                 lines.append("### ⚠️ 异常数据点（偏离均值 >2.5σ）")
                 for ts, z in anomalies.items():
                     val = float(resampled[ts])
-                    lines.append(
-                        f"- {ts.strftime('%Y-%m-%d')}：{val:,.2f}（{z:+.1f}σ）"
-                    )
+                    lines.append(f"- {ts.strftime('%Y-%m-%d')}：{val:,.2f}（{z:+.1f}σ）")
 
             return "\n".join(lines)
         except Exception as exc:

@@ -50,13 +50,10 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # 配合 UnifiedAgent 系统指令中的主动记忆规则，让 LLM 主动管理长期记忆。
     try:
         from app.core.agent.plugins.memory_tools_plugin import MemoryToolsPlugin
-
         registry.register_plugin(MemoryToolsPlugin())
         logger.debug("[_build_registry] MemoryToolsPlugin 已加载")
     except Exception as _e:
-        logger.warning(
-            f"[_build_registry] MemoryToolsPlugin 加载失败（记忆工具不可用）: {_e}"
-        )
+        logger.warning(f"[_build_registry] MemoryToolsPlugin 加载失败（记忆工具不可用）: {_e}")
 
     # ── 可选生产力插件（两种模式均尝试加载，失败则跳过） ─────────────
     for plugin_path, name in [
@@ -98,7 +95,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # ── 多模态视觉工具（图表/截图分析）──────────────────────────────────
     try:
         from app.core.agent.plugins.chart_vision_plugin import ChartVisionPlugin
-
         registry.register_plugin(ChartVisionPlugin())
     except Exception as _e:
         logger.debug(f"[_build_registry] ChartVisionPlugin 跳过: {_e}")
@@ -121,7 +117,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # ── 文档标注技能工具 ───────────────────────────────────────────────
     try:
         from app.core.agent.plugins.annotation_plugin import AnnotationPlugin
-
         registry.register_plugin(AnnotationPlugin())
     except Exception as _e:
         logger.debug(f"[_build_registry] AnnotationPlugin 跳过: {_e}")
@@ -129,7 +124,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # ── 文件格式转换工具 ───────────────────────────────────────────────
     try:
         from app.core.agent.plugins.file_converter_plugin import FileConverterPlugin
-
         registry.register_plugin(FileConverterPlugin())
     except Exception as _e:
         logger.debug(f"[_build_registry] FileConverterPlugin 跳过: {_e}")
@@ -139,7 +133,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # 自行决定何时激活哪个技能，取代 SkillAutoMatcher 的猜测式激活。
     try:
         from app.core.skills.skill_tool_adapter import SkillToolAdapter
-
         SkillToolAdapter.register_all(registry)
     except Exception as _e:
         logger.debug(f"[_build_registry] SkillToolAdapter 跳过: {_e}")
@@ -147,9 +140,7 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     return registry
 
 
-def create_agent(
-    api_key: Optional[str] = None, model_id: str = "gemini-3-flash-preview"
-) -> "UnifiedAgent":
+def create_agent(api_key: Optional[str] = None, model_id: str = "gemini-2.5-flash") -> "UnifiedAgent":
     """
     创建全量配置的 UnifiedAgent（ReAct while 循环实现）。
 
@@ -170,16 +161,13 @@ def create_agent(
     # 配置 OutputValidator 的 LLM 质量判断器（复用同一个 provider，避免重复建连接）
     try:
         from app.core.security.output_validator import OutputValidator
-
         OutputValidator.configure_llm_judge(
             client=llm_provider,
             model_id="gemini-2.5-flash",
             timeout=15.0,
         )
     except Exception as _oj_err:
-        logger.debug(
-            "[create_agent] OutputValidator LLM judge 配置失败（跳过）: %s", _oj_err
-        )
+        logger.debug("[create_agent] OutputValidator LLM judge 配置失败（跳过）: %s", _oj_err)
 
     return UnifiedAgent(
         llm_provider=llm_provider,
@@ -205,9 +193,12 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
     if not model:
         try:
             LocalModelRouter.init_model()
-            model = getattr(LocalModelRouter, "_model_name", None) or "qwen3:8b"
+            model = (
+                getattr(LocalModelRouter, "_model_name", None)
+                or LocalModelRouter.pick_best_chat_model()
+            )
         except Exception:
-            model = "qwen3:8b"
+            pass  # model 保持 None → OllamaLLMProvider 在调用时自动解析
 
     llm_kwargs = {}
     if base_url:
