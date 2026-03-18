@@ -975,7 +975,8 @@ class TestOpsRoutes:
 
     def test_health(self, full_client):
         resp = full_client.get("/api/ops/health")
-        assert resp.status_code in _OK
+        # 200 when healthy/degraded, 503 when unhealthy (expected in test env)
+        assert resp.status_code in (200, 503)
 
     def test_readiness(self, full_client):
         resp = full_client.get("/api/ops/readiness")

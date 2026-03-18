@@ -1467,7 +1467,12 @@ class DocumentFeedbackSystem:
                         logger.info(f"[DocumentFeedback] 🔄 503触发切换: {selected_model} → {_probed_switch}")
                         selected_model = _probed_switch
                         model_note = f"模型: {selected_model}（运行中自动从503过载模型切换）"
-                    _model_switched = True  # 无论成功与否只切换一次
+                        # Re-queue current chunk to be retried with new model
+                        queue.appendleft(chunk)
+                        processed -= 1
+                        _model_switched = True
+                        continue  # Skip fallback insertion, let chunk retry with new model
+                    _model_switched = True  # No better model found; accept fallback
             else:
                 if annotations:
                     ai_chunk_count += 1

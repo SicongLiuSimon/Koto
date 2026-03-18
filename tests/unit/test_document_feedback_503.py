@@ -126,37 +126,24 @@ class TestChunkAnnotationsRetryOn503:
                 max_retries=max_retries,
             )
 
-    def test_503_followed_by_success_returns_ai_annotations(self):
-        """503 on first call → wait → success on second call → AI result returned."""
+    def test_503_immediately_returns_fallback_without_retry(self):
+        """503 on first call → immediately returns local fallback (no retry of same model)."""
         df = _make_feedback()
-        # Use text that actually appears in the chunk so the hallucination filter
-        # doesn't strip the annotation.
-        chunk_text = "这是一段需要润色的简历内容，包含若干明显问题。"
-        ai_anno = ('[{"原文片段":"这是一段需要润色","修改建议":"改为简洁表达",' +
-                   '"修改后文本":"润色后","理由":"简洁"}]')
-        good = _make_good_response(ai_anno)
-        # Need 3 responses: 503 (round-1 retry-0), good (round-1 retry-1), good (round-2)
-        df.client.models.generate_content.side_effect = [_503_error(), good, good]
+        fake_fallback = [
+            {"原文片段": "x", "修改建议": "y", "修改后文本": "z", "理由": "r"}
+        ]
+        df._fallback_annotations_from_chunk = MagicMock(return_value=fake_fallback)
 
-        with patch("time.sleep"):
-            with patch("web.document_validator.DocumentValidator.validate_modifications",
-                       return_value={"risk_level": "LOW", "issues": []}):
-                result = df._analyze_chunk_for_annotations(
-                    chunk=chunk_text,
-                    doc_type="resume",
-                    user_requirement="帮我改简历",
-                    model_id="gemini-3-flash-preview",
-                    chunk_index=1,
-                    total_chunks=1,
-                    max_retries=2,
-                )
+        result = self._call(df, [_503_error()], max_retries=2)
 
-        # Must NOT be fallback annotations (fallback have _koto_fallback_error)
+        # Must be fallback (503 skips retries entirely)
         assert result is not None
-        assert isinstance(result, list)
-        has_fallback_marker = any(a.get("_koto_fallback_error") for a in result)
-        assert not has_fallback_marker, "Should have used AI result, not fallback"
-        assert len(result) > 0
+        has_503_flag = any(a.get("_koto_503") for a in result)
+        assert has_503_flag, "Immediate 503 fallback must carry _koto_503 flag"
+        # Only one API call should have been made (no retry)
+        assert df.client.models.generate_content.call_count == 1, (
+            "Inner method must NOT retry on 503; only 1 API call expected"
+        )
 
     def test_503_exhausted_returns_fallback_with_503_flag(self):
         """503 on every retry → eventual local fallback annotated with _koto_503."""
@@ -179,28 +166,21 @@ class TestChunkAnnotationsRetryOn503:
         has_503_flag = any(a.get("_koto_503") for a in result)
         assert has_503_flag, "Exhausted 503 fallback must carry _koto_503 flag"
 
-    def test_503_sleep_is_called_before_retry(self):
-        """Verify that time.sleep is called with a positive wait time before retrying."""
+    def test_503_no_sleep_before_fallback(self):
+        """503 is handled instantly — no sleep occurs before returning fallback."""
         df = _make_feedback()
-        good = _make_good_response()
+        fake_fallback = [
+            {"原文片段": "x", "修改建议": "y", "修改后文本": "z", "理由": "r"}
+        ]
+        df._fallback_annotations_from_chunk = MagicMock(return_value=fake_fallback)
         sleep_calls = []
 
-        real_sleep = __import__("time").sleep
-
         with patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)):
-            df.client.models.generate_content.side_effect = [_503_error(), good]
-            df._analyze_chunk_for_annotations(
-                chunk="简历内容",
-                doc_type="resume",
-                user_requirement="修改",
-                model_id="gemini-3-flash-preview",
-                chunk_index=1,
-                total_chunks=1,
-                max_retries=2,
-            )
+            self._call(df, [_503_error()], max_retries=2)
 
-        assert len(sleep_calls) >= 1, "Must sleep at least once before retrying 503"
-        assert all(s > 0 for s in sleep_calls), "Sleep duration must be positive"
+        assert len(sleep_calls) == 0, (
+            "503 immediate fallback must NOT call sleep; outer loop handles the model switch"
+        )
 
     def test_non_503_error_falls_back_immediately(self):
         """Non-503 API errors (auth, quota, etc.) should NOT trigger the 503 retry path."""
